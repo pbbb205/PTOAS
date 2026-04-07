@@ -188,6 +188,26 @@ def PTOWrapFunctionsInSections : Pass<"pto-wrap-functions-in-sections", "func::F
   ];
 }
 
+def MemrefToTileBuf : Pass<"pto-memref-to-tile-buf", "ModuleOp"> {
+  let summary = "Recover tile_buf types from memref + pto.bind_tile metadata";
+  let description = [{
+    After PTOViewToMemref + PlanMemory + InsertSync, the IR uses memref types
+    with pto.bind_tile ops carrying tile metadata (TileBufConfigAttr, valid
+    dims).  This pass reconstructs tile_buf types from those anchors so that
+    the subsequent Tile->Vector lowering (Expand TileOp) can operate on
+    tile_buf semantics.
+
+    The pass does NOT redo memory planning or synchronisation.
+  }];
+  let constructor = "mlir::pto::createMemrefToTileBufPass()";
+  let dependentDialects = [
+    "mlir::pto::PTODialect",
+    "mlir::memref::MemRefDialect",
+    "mlir::arith::ArithDialect",
+    "mlir::func::FuncDialect"
+  ];
+}
+
 def PTOLowerFrontendPipeOps : Pass<"pto-lower-frontend-pipe-ops", "func::FuncOp"> {
   let summary = "Lower frontend TPUSH/TPOP pipe ops to internal pipe ops";
   let description = [{
@@ -264,6 +284,65 @@ def PTOResolveReservedBuffers : Pass<"pto-resolve-reserved-buffers", "ModuleOp">
   let dependentDialects = [
     "mlir::pto::PTODialect",
     "mlir::func::FuncDialect",
+    "mlir::arith::ArithDialect"
+  ];
+}
+
+def ExpandTileOp : Pass<"pto-expand-tile-op", "ModuleOp"> {
+  let summary = "Expand tile ops into calls to TileLang DSL template functions";
+  let description = [{
+    Expands tile-level operations (pto.tadd, pto.tsub, etc.) by invoking the
+    TileLang Python DSL to instantiate template libraries. The generated
+    template functions use tile_buf parameters and contain vector-level
+    implementations (pto.vecscope, pto.vlds, pto.vadd, pto.vsts, etc.).
+
+    Each tile op is replaced by a func.call to the generated template function,
+    with tile_buf operands passed directly (no type bridging).
+
+    After this pass, the Inline pass inlines template bodies, and
+    FoldTileBufIntrinsics resolves tile_buf_addr / tile_valid_rows /
+    tile_valid_cols.
+  }];
+  let constructor = "mlir::pto::createExpandTileOpPass()";
+  let dependentDialects = [
+    "mlir::pto::PTODialect",
+    "mlir::memref::MemRefDialect",
+    "mlir::arith::ArithDialect",
+    "mlir::func::FuncDialect",
+    "mlir::scf::SCFDialect",
+    "mlir::vector::VectorDialect"
+  ];
+  let options = [
+    Option<"tilelangPath", "tilelang-path", "std::string",
+           /*default=*/"\"\"",
+           "Path to directory of .py tilelang DSL template files">,
+    Option<"tilelangPkgPath", "tilelang-pkg-path", "std::string",
+           /*default=*/"\"\"",
+           "PYTHONPATH for tilelang_dsl package (added to env)">,
+    Option<"pythonExe", "python-exe", "std::string",
+           /*default=*/"\"python3\"",
+           "Python executable for tilelang DSL invocation">
+  ];
+}
+
+def FoldTileBufIntrinsics : Pass<"pto-fold-tile-buf-intrinsics", "mlir::func::FuncOp"> {
+  let summary = "Fold tile_buf_addr / tile_valid_rows / tile_valid_cols";
+  let description = [{
+    After TileLang DSL template functions are inlined, the IR contains
+    pto.tile_buf_addr, pto.tile_valid_rows, and pto.tile_valid_cols ops
+    whose tile_buf operands are now bound to concrete values.
+
+    This pass resolves them:
+    - pto.tile_buf_addr → replaced by pto.simd.tile_to_memref (extracts
+      memref address from tile_buf)
+    - pto.tile_valid_rows → folded to arith.constant if v_row is static,
+      or replaced with the dynamic index value from tile_buf
+    - pto.tile_valid_cols → same as above for v_col
+  }];
+  let constructor = "mlir::pto::createFoldTileBufIntrinsicsPass()";
+  let dependentDialects = [
+    "mlir::pto::PTODialect",
+    "mlir::memref::MemRefDialect",
     "mlir::arith::ArithDialect"
   ];
 }

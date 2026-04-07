@@ -1391,6 +1391,42 @@ struct PTOViewToMemrefPass
         return;
       }
 
+      // Stage 0.40 Insert pto.bind_tile for function args that were tile_buf
+      // ------------------------------------------------------------------
+      // When MemrefToTileBuf runs later, it needs BindTileOp as the anchor to
+      // recover tile_buf types.  For function args, no such anchor exists after
+      // the Stage-0 type rewrite, so we create one here.
+      {
+        IRRewriter rewriter(ctx);
+        // Insert after existing block args, before any existing ops.
+        rewriter.setInsertionPointToStart(&entry);
+        for (unsigned i = 0; i < entry.getNumArguments(); ++i) {
+          Type origTy = fnTy.getInputs()[i];
+          auto tbTy = dyn_cast<mlir::pto::TileBufType>(origTy);
+          if (!tbTy)
+            continue;
+
+          auto configAttr = tbTy.getConfigAttr();
+          if (!configAttr) configAttr = pto::TileBufConfigAttr::getDefault(ctx);
+
+          Value vRow, vCol;
+          auto vs = tbTy.getValidShape();
+          if (vs.size() == 2) {
+            if (vs[0] != ShapedType::kDynamic)
+              vRow = rewriter.create<arith::ConstantIndexOp>(func.getLoc(), vs[0]);
+            if (vs[1] != ShapedType::kDynamic)
+              vCol = rewriter.create<arith::ConstantIndexOp>(func.getLoc(), vs[1]);
+          }
+
+          auto bindOp = rewriter.create<pto::BindTileOp>(
+              func.getLoc(), newInputs[i], entry.getArgument(i),
+              vRow ? vRow : Value(), vCol ? vCol : Value(), configAttr);
+          markForceDynamicValidShape(bindOp, tbTy.hasDynamicValid(), ctx);
+
+          entry.getArgument(i).replaceAllUsesExcept(bindOp.getResult(), bindOp);
+        }
+      }
+
       // ------------------------------------------------------------------
       // Stage 0.5: lower pto.alloc_tile -> memref.alloc + pto.bind_tile
       // ------------------------------------------------------------------

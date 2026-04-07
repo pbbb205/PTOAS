@@ -1,0 +1,90 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Unit test for InlineLibCall + FoldTileBufIntrinsics passes.
+//
+// Input simulates ExpandTileOp output: a caller with func.call to a template
+// function that has tile_buf params, tile_buf_addr / tile_valid_rows /
+// tile_valid_cols intrinsics, and the pto.tilelang.instance attribute.
+//
+// RUN: ptoas --pto-arch=a5 --pass-pipeline="builtin.module(pto-inline-libcall,func.func(pto-fold-tile-buf-intrinsics))" %s | FileCheck %s
+
+// After inline + fold:
+// - The call to @__pto_tilelang_tadd_f32_16_64 should be inlined
+// - tile_buf_addr should be folded to pto.simd.tile_to_memref
+// - tile_valid_rows/cols should be folded to arith.constant (static case)
+// CHECK: func.func @TADD
+// CHECK-NOT: call @__pto_tilelang_tadd
+// CHECK: pto.simd.tile_to_memref
+// CHECK: arith.constant 16 : index
+// CHECK: arith.constant 64 : index
+// CHECK: pto.vecscope
+// CHECK: pto.vlds
+// CHECK: pto.vadd
+// CHECK: pto.vsts
+
+module attributes {pto.target_arch = "a5"} {
+
+  // Caller function: has a tile op replaced by func.call (simulating ExpandTileOp output).
+  func.func @TADD(
+      %a: !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                        blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+      %b: !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                        blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+      %c: !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                        blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+      attributes { pto.tile_function = "pto.tadd" } {
+    call @__pto_tilelang_tadd_f32_16_64(%a, %b, %c)
+      : (!pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                        blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+         !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                        blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+         !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                        blayout=row_major, slayout=none_box, fractal=512, pad=0>) -> ()
+    return
+  }
+
+  // TileLang DSL-generated template function (simulated).
+  // Parameters are tile_buf; body uses tile_buf_addr / tile_valid_rows / tile_valid_cols.
+  func.func private @__pto_tilelang_tadd_f32_16_64(
+      %dst: !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                          blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+      %src0: !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                           blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+      %src1: !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                           blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+      attributes { pto.tilelang.instance } {
+
+    %mDst  = pto.tile_buf_addr %dst  : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0> -> memref<16x64xf32, strided<[64, 1]>, #pto.address_space<vec>>
+    %mSrc0 = pto.tile_buf_addr %src0 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0> -> memref<16x64xf32, strided<[64, 1]>, #pto.address_space<vec>>
+    %mSrc1 = pto.tile_buf_addr %src1 : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0> -> memref<16x64xf32, strided<[64, 1]>, #pto.address_space<vec>>
+
+    %v_rows = pto.tile_valid_rows %dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0> -> index
+    %v_cols = pto.tile_valid_cols %dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0> -> index
+    %v_cols_i32 = arith.index_cast %v_cols : index to i32
+
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c64 = arith.constant 64 : index
+
+    pto.vecscope {
+      scf.for %i = %c0 to %v_rows step %c1 {
+        %tmp = arith.index_cast %v_cols : index to i32
+        %inner = scf.for %j = %c0 to %v_cols step %c64 iter_args(%remain = %tmp) -> (i32) {
+          %mask, %next = pto.plt_b32 %remain : i32 -> !pto.mask<b32>, i32
+          %va = pto.vlds %mSrc0[%i, %j] : memref<16x64xf32, strided<[64, 1]>, #pto.address_space<vec>> -> !pto.vreg<64xf32>
+          %vb = pto.vlds %mSrc1[%i, %j] : memref<16x64xf32, strided<[64, 1]>, #pto.address_space<vec>> -> !pto.vreg<64xf32>
+          %vc = pto.vadd %va, %vb, %mask : !pto.vreg<64xf32>, !pto.vreg<64xf32>, !pto.mask<b32> -> !pto.vreg<64xf32>
+          pto.vsts %vc, %mDst[%i, %j], %mask : !pto.vreg<64xf32>, memref<16x64xf32, strided<[64, 1]>, #pto.address_space<vec>>, !pto.mask<b32>
+          scf.yield %next : i32
+        }
+      }
+    }
+    return
+  }
+}

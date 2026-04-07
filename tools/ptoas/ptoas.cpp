@@ -226,6 +226,22 @@ static llvm::cl::opt<int> graphSyncSolverEventIdMax(
         "Lower values exercise the PIPE_ALL coloring fallback sooner."),
     llvm::cl::init(kDefaultGraphSyncSolverEventIdMax));
 
+static llvm::cl::opt<bool> enableTileToVector(
+    "enable-tile-to-vector",
+    llvm::cl::desc(
+        "Enable Tile-to-Vector lowering path (memref->tile_buf recovery)"),
+    llvm::cl::init(false));
+
+static llvm::cl::opt<std::string> tilelangPath(
+    "tilelang-path",
+    llvm::cl::desc("Path to directory of .py tilelang DSL template files"),
+    llvm::cl::init(""));
+
+static llvm::cl::opt<std::string> tilelangPkgPath(
+    "tilelang-pkg-path",
+    llvm::cl::desc("PYTHONPATH for tilelang_dsl package"),
+    llvm::cl::init(""));
+
 static llvm::cl::opt<bool> disableInferLayout(
     "disable-infer-layout",
     llvm::cl::desc("Disable PTO layout inference pass (static-only)"),
@@ -1435,6 +1451,11 @@ int main(int argc, char **argv) {
 
   registry.insert<emitc::EmitCDialect>();
   registry.insert<mlir::LLVM::LLVMDialect>();
+  mlir::registerAllPasses();
+  ::registerPTOInlineLibCall();
+  ::registerFoldTileBufIntrinsics();
+  ::registerExpandTileOp();
+  mlir::registerPassManagerCLOptions();
 
   llvm::cl::SetVersionPrinter(printPTOASVersion);
 
@@ -1779,9 +1800,37 @@ int main(int argc, char **argv) {
   pm.addPass(emitc::createFormExpressionsPass());
   pm.addPass(mlir::createCSEPass());
 
+  if (enableTileToVector) {
+    // Tile→Vector path:
+    //   1. MemrefToTileBuf: recover tile_buf from memref
+    //   2. ExpandTileOp: instantiate TileLang DSL templates, replace tile ops
+    //      with func.call to template functions (tile_buf params)
+    //   3. InlineLibCall: inline template function bodies
+    //   4. FoldTileBufIntrinsics: fold tile_buf_addr / tile_valid_rows /
+    //      tile_valid_cols to concrete memref/constant values
+    pm.addPass(pto::createMemrefToTileBufPass());
+
+    pto::ExpandTileOpOptions expandOpts;
+    expandOpts.tilelangPath = tilelangPath;
+    expandOpts.tilelangPkgPath = tilelangPkgPath;
+    pm.addPass(pto::createExpandTileOpPass(expandOpts));
+
+    pm.addPass(pto::createPTOInlineLibCallPass());
+    pm.addNestedPass<mlir::func::FuncOp>(
+        pto::createFoldTileBufIntrinsicsPass());
+  }
+
   if (failed(pm.run(*module))) {
     llvm::errs() << "Error: Pass execution failed.\n";
     return 1;
+  }
+
+  // Tile→Vector path: print MLIR IR and exit (no C++ emission).
+  if (enableTileToVector) {
+    module->print(outputFile.os());
+    outputFile.os() << "\n";
+    outputFile.keep();
+    return 0;
   }
 
   dropEmptyEmitCExpressions(module.get());

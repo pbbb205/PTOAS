@@ -71,6 +71,7 @@ std::unique_ptr<Pass> createPTOValidateIntToPtrUsesPass();
 std::unique_ptr<Pass> createPTOMaterializeTileHandlesPass();
 std::unique_ptr<Pass> createInferPTOLayoutPass();
 std::unique_ptr<Pass> createPTOA5NormalizeTMovPass();
+LogicalResult validateIntToPtrUses(func::FuncOp func);
 
 std::unique_ptr<Pass> createPTOVPTOExpandBridgeOpsPass();
 std::unique_ptr<Pass> createPTOVPTOPtrBoundaryPass();
@@ -78,7 +79,10 @@ std::unique_ptr<Pass> createPTOValidateVPTOIRPass();
 std::unique_ptr<Pass> createPTOValidateVPTOEmissionIRPass();
 std::unique_ptr<Pass> createLowerPTOToVPTOPass();
 std::unique_ptr<Pass> createLowerPTOToVPTOPass(StringRef loweringStrategy);
-LogicalResult validateIntToPtrUses(func::FuncOp func);
+std::unique_ptr<Pass> createMemrefToTileBufPass();
+std::unique_ptr<Pass> createExpandTileOpPass();
+std::unique_ptr<Pass> createExpandTileOpPass(const ExpandTileOpOptions &options);
+std::unique_ptr<Pass> createFoldTileBufIntrinsicsPass();
 //===----------------------------------------------------------------------===//
 // Registration
 //===----------------------------------------------------------------------===//

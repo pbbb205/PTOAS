@@ -2653,6 +2653,64 @@ def SyncAllOp : PTO_Op<"syncall", [AttrSizedOperandSegments]> {
   let hasCustomAssemblyFormat = 1;
 }
 
+// ---------------------------------------------------------------------------
+// TileBuf intrinsics — used in TileLang DSL-generated template functions.
+// These ops extract memref address and valid shape from tile_buf parameters.
+// After inline, FoldTileBufIntrinsics resolves them to concrete values.
+// ---------------------------------------------------------------------------
+
+def TileBufAddrOp : PTO_Op<"tile_buf_addr", [Pure]> {
+  let summary = "Extract memref address from a tile_buf.";
+  let description = [{
+    Returns a memref view of the data region of a `tile_buf` value.
+    The result memref has the same element type, shape (from tile_buf's static
+    shape), and address space as the source tile_buf, with row-major strides.
+
+    This op is emitted by TileLang DSL templates and resolved by the
+    FoldTileBufIntrinsics pass after inlining.
+  }];
+
+  let arguments = (ins TileBufType:$src);
+  let results = (outs AnyMemRef:$dst);
+
+  let assemblyFormat = [{
+    $src attr-dict `:` qualified(type($src)) `->` type($dst)
+  }];
+}
+
+def TileValidRowsOp : PTO_Op<"tile_valid_rows", [Pure]> {
+  let summary = "Extract valid row count from a tile_buf.";
+  let description = [{
+    Returns the valid row count (v_row) of a `tile_buf` as an `index` value.
+    When the tile_buf has a static v_row, FoldTileBufIntrinsics folds this
+    into `arith.constant`. When v_row is dynamic (`?`), the fold resolves
+    it to the runtime index value carried by the tile_buf.
+  }];
+
+  let arguments = (ins TileBufType:$src);
+  let results = (outs Index:$result);
+
+  let assemblyFormat = [{
+    $src attr-dict `:` qualified(type($src)) `->` type($result)
+  }];
+}
+
+def TileValidColsOp : PTO_Op<"tile_valid_cols", [Pure]> {
+  let summary = "Extract valid column count from a tile_buf.";
+  let description = [{
+    Returns the valid column count (v_col) of a `tile_buf` as an `index` value.
+    When the tile_buf has a static v_col, FoldTileBufIntrinsics folds this
+    into `arith.constant`. When v_col is dynamic (`?`), the fold resolves
+    it to the runtime index value carried by the tile_buf.
+  }];
+
+  let arguments = (ins TileBufType:$src);
+  let results = (outs Index:$result);
+
+  let assemblyFormat = [{
+    $src attr-dict `:` qualified(type($src)) `->` type($result)
+  }];
+}
 
 //===----------------------------------------------------------------------===//
 // FFT Configuration Operation
