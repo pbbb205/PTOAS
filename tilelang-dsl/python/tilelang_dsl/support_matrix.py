@@ -41,7 +41,15 @@ SUPPORTED_VECSCOPE_PTO_CALLS = frozenset(
     {
         "make_mask",
         "vlds",
+        "vldas",
+        "vldus",
+        "vldx2",
+        "vsld",
         "vsts",
+        "psts",
+        "vsst",
+        "vstx2",
+        "vsta",
         "vabs",
         "vrelu",
         "vexp",
@@ -132,6 +140,10 @@ ADVANCED_VECSCOPE_PTO_CALLS = frozenset(
         "vdintlv",
         "vintlvv2",
         "vdintlvv2",
+        "pstu",
+        "vstu",
+        "vstus",
+        "vstur",
     }
 )
 

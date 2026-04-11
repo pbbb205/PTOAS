@@ -62,6 +62,12 @@ class MaskType:
 
 
 @dataclass(frozen=True)
+class AlignType:
+    def __repr__(self) -> str:
+        return "align"
+
+
+@dataclass(frozen=True)
 class WildcardType:
     name: str
 
@@ -159,6 +165,26 @@ class PositionMode(str, Enum):
 
 class OrderMode(str, Enum):
     ASC = "ORDER_ASC"
+
+
+class DeinterleaveDist(str, Enum):
+    B8 = "DINTLV_B8"
+    B16 = "DINTLV_B16"
+    B32 = "DINTLV_B32"
+    BD = "BDINTLV"
+
+
+class InterleaveDist(str, Enum):
+    B8 = "INTLV_B8"
+    B16 = "INTLV_B16"
+    B32 = "INTLV_B32"
+
+
+class StrideMode(str, Enum):
+    S3_B16 = "STRIDE_S3_B16"
+    S4_B64 = "STRIDE_S4_B64"
+    S8_B32 = "STRIDE_S8_B32"
+    S2_B64 = "STRIDE_S2_B64"
 
 
 def _coerce_int_config_value(value: Any, field_name: str) -> int:
@@ -265,6 +291,7 @@ AnyFloat = WildcardType("AnyFloat")
 AnyInt = WildcardType("AnyInt")
 AnyType = WildcardType("AnyType")
 AnyMask = WildcardType("AnyMask")
+align = AlignType()
 mask_b8 = MaskType("b8")
 mask_b16 = MaskType("b16")
 mask_b32 = MaskType("b32")
@@ -369,6 +396,7 @@ __all__ = [
     "PointerType",
     "VRegType",
     "MaskType",
+    "AlignType",
     "ptr",
     "vreg",
     "MemorySpace",
@@ -384,6 +412,9 @@ __all__ = [
     "PadMode",
     "PositionMode",
     "OrderMode",
+    "DeinterleaveDist",
+    "InterleaveDist",
+    "StrideMode",
     "TileConfig",
     "TileSpecialization",
     "i1",
@@ -398,6 +429,7 @@ __all__ = [
     "AnyInt",
     "AnyType",
     "AnyMask",
+    "align",
     "mask_b8",
     "mask_b16",
     "mask_b32",

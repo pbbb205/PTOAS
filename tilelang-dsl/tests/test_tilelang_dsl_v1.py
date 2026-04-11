@@ -29,6 +29,7 @@ from tilelang_dsl.frontend_ast import (
 )
 from tilelang_dsl.lowering import AuthoringModule, lower_semantic_kernel
 from tilelang_dsl.semantic import (
+    SemanticAlignType,
     SemanticAssignStmt,
     SemanticBinaryExpr,
     SemanticCallExpr,
@@ -67,8 +68,10 @@ class TileLangDSLPackageTests(unittest.TestCase):
         self.assertTrue(hasattr(pto, "PointerType"))
         self.assertTrue(hasattr(pto, "VRegType"))
         self.assertTrue(hasattr(pto, "MaskType"))
+        self.assertTrue(hasattr(pto, "AlignType"))
         self.assertTrue(hasattr(pto, "ptr"))
         self.assertTrue(hasattr(pto, "vreg"))
+        self.assertTrue(hasattr(pto, "align"))
         self.assertTrue(hasattr(pto, "mask_b8"))
         self.assertTrue(hasattr(pto, "mask_b16"))
         self.assertTrue(hasattr(pto, "mask_b32"))
@@ -83,8 +86,12 @@ class TileLangDSLPackageTests(unittest.TestCase):
         self.assertTrue(hasattr(pto, "PadMode"))
         self.assertTrue(hasattr(pto, "PositionMode"))
         self.assertTrue(hasattr(pto, "OrderMode"))
+        self.assertTrue(hasattr(pto, "DeinterleaveDist"))
+        self.assertTrue(hasattr(pto, "InterleaveDist"))
+        self.assertTrue(hasattr(pto, "StrideMode"))
         self.assertTrue(hasattr(pto, "PIPE"))
         self.assertTrue(hasattr(pto, "EVENT"))
+        self.assertEqual(repr(pto.align), "align")
         self.assertEqual(pto.PadMode.PadNull.value, "PadNull")
         self.assertEqual(pto.PadMode.PadFirstElem.value, "PadFirstElem")
         self.assertEqual(pto.PadMode.PadValue.value, "PadValue")
@@ -93,6 +100,9 @@ class TileLangDSLPackageTests(unittest.TestCase):
         self.assertEqual(pto.PadValue.ZERO.value, "zero")
         self.assertEqual(pto.PositionMode.LOWEST.value, "POS_LOWEST")
         self.assertEqual(pto.OrderMode.ASC.value, "ORDER_ASC")
+        self.assertEqual(pto.DeinterleaveDist.B32.value, "DINTLV_B32")
+        self.assertEqual(pto.InterleaveDist.B16.value, "INTLV_B16")
+        self.assertEqual(pto.StrideMode.S4_B64.value, "STRIDE_S4_B64")
 
 
 class TileLangDSLSupportMatrixTests(unittest.TestCase):
@@ -106,7 +116,15 @@ class TileLangDSLSupportMatrixTests(unittest.TestCase):
         self.assertIn("Tile", AUTHORING_TIER_SURFACE_GROUPS["Tile"])
         self.assertNotIn("dma_load/store", AUTHORING_TIER_SURFACE_GROUPS)
         self.assertIn("pto.vlds", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
+        self.assertIn("pto.vldas", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
+        self.assertIn("pto.vldus", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
+        self.assertIn("pto.vldx2", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
+        self.assertIn("pto.vsld", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
         self.assertIn("pto.vsts", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
+        self.assertIn("pto.psts", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
+        self.assertIn("pto.vsst", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
+        self.assertIn("pto.vstx2", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
+        self.assertIn("pto.vsta", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
         self.assertIn("pto.vadd", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
         self.assertIn("pto.vmuls", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
         self.assertIn("tile[start:]", BASIC_TILE_INDEXING_SURFACES)
@@ -115,7 +133,15 @@ class TileLangDSLSupportMatrixTests(unittest.TestCase):
         self.assertEqual(get_feature_tier("TensorView"), BASIC_TIER)
         self.assertEqual(get_feature_tier("Tile"), BASIC_TIER)
         self.assertEqual(get_feature_tier("pto.vlds"), BASIC_TIER)
+        self.assertEqual(get_feature_tier("pto.vldas"), BASIC_TIER)
+        self.assertEqual(get_feature_tier("pto.vldus"), BASIC_TIER)
+        self.assertEqual(get_feature_tier("pto.vldx2"), BASIC_TIER)
+        self.assertEqual(get_feature_tier("pto.vsld"), BASIC_TIER)
         self.assertEqual(get_feature_tier("pto.vsts"), BASIC_TIER)
+        self.assertEqual(get_feature_tier("pto.psts"), BASIC_TIER)
+        self.assertEqual(get_feature_tier("pto.vsst"), BASIC_TIER)
+        self.assertEqual(get_feature_tier("pto.vstx2"), BASIC_TIER)
+        self.assertEqual(get_feature_tier("pto.vsta"), BASIC_TIER)
         self.assertEqual(get_feature_tier("pto.vadd"), BASIC_TIER)
         self.assertEqual(get_feature_tier("pto.vmuls"), BASIC_TIER)
         self.assertEqual(get_feature_tier("pto.vaddrelu"), BASIC_TIER)
@@ -127,6 +153,10 @@ class TileLangDSLSupportMatrixTests(unittest.TestCase):
         self.assertEqual(get_feature_tier("pto.vci"), BASIC_TIER)
         self.assertEqual(get_feature_tier("pto.vpack"), BASIC_TIER)
         self.assertEqual(get_feature_tier("pto.vsort32"), BASIC_TIER)
+        self.assertEqual(get_feature_tier("pto.pstu"), ADVANCED_TIER)
+        self.assertEqual(get_feature_tier("pto.vstu"), ADVANCED_TIER)
+        self.assertEqual(get_feature_tier("pto.vstus"), ADVANCED_TIER)
+        self.assertEqual(get_feature_tier("pto.vstur"), ADVANCED_TIER)
         self.assertEqual(get_feature_tier("PadMode"), BASIC_TIER)
         self.assertEqual(get_feature_tier("VRegType"), BASIC_TIER)
         self.assertEqual(get_feature_tier("MaskType"), BASIC_TIER)
@@ -1632,6 +1662,78 @@ class TileLangDSLDescriptorTests(unittest.TestCase):
         self.assertRegex(text, r"%summed_\d+ = pto\.vadd %biased_\d+, %vec_\d+, %mask_\d+ : !pto\.vreg<64xf32>, !pto\.vreg<64xf32>, !pto\.mask<b32> -> !pto\.vreg<64xf32>")
         self.assertRegex(text, r"%activated_\d+ = pto\.vrelu %summed_\d+, %mask_\d+ : !pto\.vreg<64xf32>, !pto\.mask<b32> -> !pto\.vreg<64xf32>")
         self.assertRegex(text, r"pto\.vsts %activated_\d+, %dst_\d+\[%lane_\d+\], %mask_\d+ : !pto\.vreg<64xf32>, !pto\.ptr<f32, ub>, !pto\.mask<b32>")
+
+    def test_basic_vector_memory_family_surfaces_lower_from_tile_indexing(self) -> None:
+        @pto.vkernel(op="vector_memory_basic_unique", dtypes=[(pto.f32, pto.f32)])
+        def kernel(src: pto.Tile, dst: pto.Tile):
+            align = pto.vldas(src[0, 0:])
+            vec, next_align, base_out = pto.vldus(src[0, 0:], align)
+            low, high = pto.vldx2(src[0, 0:], pto.DeinterleaveDist.B32)
+            strided = pto.vsld(src[0, 0], pto.StrideMode.S4_B64)
+            mask = pto.make_mask(pto.f32, pto.PAT.ALL)
+            pto.psts(mask, dst[0, 0:])
+            pto.vsst(vec, dst[0, 0:], pto.StrideMode.S4_B64)
+            pto.vstx2(low, high, dst[0, 0:], pto.InterleaveDist.B32, mask)
+            pto.vsta(next_align, dst[0, 0:])
+            return None
+
+        specialized = kernel.specialize(
+            src=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB),
+            dst=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB),
+        )
+
+        semantic_kernel = analyze_frontend_kernel(build_frontend_kernel_node(specialized))
+        vecscope = semantic_kernel.body[0]
+        self.assertIsInstance(vecscope, SemanticVecscopeStmt)
+        self.assertIsInstance(vecscope.body[0], SemanticAssignStmt)
+        self.assertIsInstance(vecscope.body[0].targets[0].type, SemanticAlignType)
+        self.assertEqual(vecscope.body[1].targets[0].type.element_dtype, pto.f32)
+        self.assertEqual(vecscope.body[2].value.name, "vldx2")
+
+        text = specialized.mlir_text()
+        self.assertIn("pto.vldas", text)
+        self.assertIn("pto.vldus", text)
+        self.assertIn('pto.vldx2', text)
+        self.assertIn('"DINTLV_B32"', text)
+        self.assertIn("pto.vsld", text)
+        self.assertIn('"STRIDE_S4_B64"', text)
+        self.assertIn("pto.psts", text)
+        self.assertIn("pto.vsst", text)
+        self.assertIn("pto.vstx2", text)
+        self.assertIn('"INTLV_B32"', text)
+        self.assertIn("pto.vsta", text)
+
+    def test_advanced_stateful_vector_memory_surfaces_lower_with_pointer_state(self) -> None:
+        @pto.vkernel(op="vector_memory_stateful_unique", dtypes=[(pto.f32, pto.f32)], advanced=True)
+        def kernel(src: pto.Tile, dst: pto.Tile):
+            ub_src = src.as_ptr()
+            ub_dst = dst.as_ptr()
+            align0 = pto.vldas(ub_src)
+            vec = pto.vlds(ub_src, 0)
+            mask = pto.make_mask(pto.f32, pto.PAT.ALL)
+            align1, base1 = pto.pstu(align0, mask, ub_dst)
+            align2, offset2 = pto.vstu(align1, 0, vec, ub_dst, "MODE_ZEROING")
+            align3, base3 = pto.vstus(align2, pto.i32(16), vec, ub_dst, "MODE_ZEROING")
+            align4 = pto.vstur(align3, vec, ub_dst, "MODE_ZEROING")
+            return None
+
+        specialized = kernel.specialize(
+            src=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB),
+            dst=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB),
+        )
+
+        semantic_kernel = analyze_frontend_kernel(build_frontend_kernel_node(specialized))
+        self.assertIsInstance(semantic_kernel.body[0], SemanticAssignStmt)
+        self.assertEqual(semantic_kernel.body[0].value.name, "tile_as_ptr")
+
+        text = specialized.mlir_text()
+        self.assertIn("pto.pstu", text)
+        self.assertIn("pto.vstu", text)
+        self.assertIn("pto.vstus", text)
+        self.assertIn("pto.vstur", text)
+        self.assertIn('"MODE_ZEROING"', text)
+        self.assertRegex(text, r"= pto\.vstu %align1_\d+, %c0, %vec_\d+, %ub_dst_\d+, \"MODE_ZEROING\"")
+        self.assertRegex(text, r"= pto\.vstus %align2_\d+, %(?:c16_i32|tmp_\d+), %vec_\d+, %ub_dst_\d+, \"MODE_ZEROING\"")
 
     def test_tail_make_mask_lowers_to_typed_plt_and_updates_remaining(self) -> None:
         @pto.vkernel(op="eltwise", dtypes=[(pto.f32, pto.i32)], advanced=True)
