@@ -139,12 +139,28 @@ def build_project(run_mode, soc_version, testcase, ptoas_bin):
         raise
 
 
-def run_gen_data(golden_path, testcase):
+def _copy_testcase_scripts(testcase):
+    """Copy shared and per-testcase Python scripts into the build work directory."""
+    work_dir = get_testcase_work_dir(testcase)
+    os.makedirs(work_dir, exist_ok=True)
+    # Shared scripts (testcase/ level).
+    for name in ("st_common.py", "compare.py"):
+        src = os.path.join("testcase", name)
+        if os.path.isfile(src):
+            run_command(["cp", src, os.path.join(work_dir, name)])
+    # Per-testcase scripts.
+    testcase_src = f"testcase/{testcase}"
+    for name in ("cases.py", "gen_data.py"):
+        src = os.path.join(testcase_src, name)
+        if os.path.isfile(src):
+            run_command(["cp", src, os.path.join(work_dir, name)])
+
+
+def run_gen_data(testcase):
     original_dir = os.getcwd()
     try:
         work_dir = get_testcase_work_dir(testcase)
-        os.makedirs(work_dir, exist_ok=True)
-        run_command(["cp", golden_path, os.path.join(work_dir, "gen_data.py")])
+        _copy_testcase_scripts(testcase)
         os.chdir(work_dir)
         run_command([sys.executable, "gen_data.py"])
     except Exception as e:
@@ -169,12 +185,10 @@ def run_binary(testcase, case_filter=None):
         os.chdir(original_dir)
 
 
-def run_compare(compare_path, testcase, case_filter=None):
+def run_compare(testcase, case_filter=None):
     original_dir = os.getcwd()
     try:
         work_dir = get_testcase_work_dir(testcase)
-        os.makedirs(work_dir, exist_ok=True)
-        run_command(["cp", compare_path, os.path.join(work_dir, "compare.py")])
         os.chdir(work_dir)
         cmd = [sys.executable, "compare.py"]
         if case_filter:
@@ -240,13 +254,9 @@ def main():
             build_project(args.run_mode, default_soc_version, testcase, ptoas_bin)
 
         # gen golden → run binary → compare
-        golden_path = f"testcase/{testcase}/gen_data.py"
-        run_gen_data(golden_path, testcase)
-
+        run_gen_data(testcase)
         run_binary(testcase, args.case)
-
-        compare_path = f"testcase/{testcase}/compare.py"
-        run_compare(compare_path, testcase, args.case)
+        run_compare(testcase, args.case)
 
     except Exception as e:
         print(f"run failed: {str(e)}", file=sys.stderr)

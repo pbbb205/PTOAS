@@ -993,3 +993,341 @@ def template_xxx(src0: pto.Tile, src1: pto.Tile, dst: pto.Tile):
   - Bisheng 设备侧编译校验。
 - 融合场景测试（多个 Tile op 连续使用后的 VF Fusion）
 - 更新 `PTO_IR_manual.md` 和 TileLang DSL Guide
+
+#### 4.4.1 ST 精度验证
+
+IR 回归测试只能验证"模板展开后 IR 长什么样"，无法回答"最终在 simulator / NPU 上跑出来的数值是否正确"。
+`test/tilelang_st` 框架提供了端到端精度验证能力，详细设计参见 [`tilelang-st-framework.md`](tilelang-st-framework.md)。
+
+本节面向库开发者，说明在完成一个新 TileLang 库实现（如 `lib/TileOps/<op>_template.py`）后，如何接入 ST 框架验证精度。
+
+##### 完整执行链路概览
+
+ST 框架的统一入口是：
+
+```bash
+python3 test/tilelang_st/script/run_st.py -r sim -v a5 -t tadd
+```
+
+它不是只做“编译 `.pto`”，而是把编译、生成输入、运行二进制和精度比较串成一条完整流水线：
+
+```text
+run_st.py
+  ├─ set_env_variables()
+  │   └─ 配置 simulator / NPU 运行环境
+  ├─ build_project()
+  │   ├─ cmake -DRUN_MODE=... -DSOC_VERSION=... -DTEST_CASE=... -DPTOAS_BIN=...
+  │   ├─ ptoas: <op>.pto -> <op>_kernel.ll
+  │   │    flags:
+  │   │      --pto-arch=a5
+  │   │      --pto-backend=vpto
+  │   │      --enable-insert-sync
+  │   │      --enable-tile-op-expand
+  │   │      --vpto-emit-hivm-llvm
+  │   ├─ bisheng -x ir: <op>_kernel.ll -> <op>_kernel_device.o
+  │   ├─ repack_tilelang_kernel.sh:
+  │   │    <op>_kernel_device.o -> <op>_kernel_repack.o
+  │   ├─ bisheng -xcce: launch.cpp + <op>_kernel_repack.o -> lib<op>_kernel.so
+  │   └─ bisheng -xc++: main.cpp -> <op>
+  ├─ run_gen_data()
+  │   └─ 在 build/testcase/<testcase>/ 下生成每个 case 的 input/golden
+  ├─ run_binary()
+  │   └─ 在 build/testcase/<testcase>/ 下执行 ../../bin/<testcase> [case]
+  └─ run_compare()
+      └─ 在 build/testcase/<testcase>/ 下逐 case 比较 golden/output
+```
+
+其中编译子链可以单独理解为：
+
+```text
+<op>.pto
+  ──ptoas──> <op>_kernel.ll                    (LLVM IR)
+  ──bisheng -x ir──> <op>_kernel_device.o      (device-only 对象)
+  ──repack_tilelang_kernel.sh──> <op>_kernel_repack.o
+                                                (host-linkable fatobj)
+  ──bisheng -xcce launch.cpp + repack.o──> lib<op>_kernel.so
+                                                (共享库)
+  ──bisheng -xc++ main.cpp + .so──> <op>       (host 可执行文件)
+```
+
+其中 repack 步骤是 TileLang ST 与 pto-isa ST 的核心区别：`ptoas + bisheng -x ir` 产出的
+`*_kernel_device.o` 是 device-only 对象，不能直接作为 host 侧链接输入。repack 脚本从
+`launch.cpp` 中抽取 kernel 声明生成 stub，通过 `-fcce-include-aibinary` 嵌入 device binary，
+产出 host 可链接的 fatobj。
+
+运行阶段同样是 ST 框架的一部分，而不是“编译完以后开发者手工处理”的额外步骤：
+
+- `gen_data.py` 会基于 `cases.py` 中的 `CASES` 为每个 case 生成 `input*.bin` 和 `golden.bin`
+- host 可执行文件会按 `main.cpp` 中的 case table 逐个读取 `./<case_name>/input*.bin`，运行 kernel，并写回 `./<case_name>/output.bin`
+- `compare.py` 再基于同一份 `CASES` 定义逐 case 做 `numpy.allclose` 比较
+- 若传入 `-c <case_name>`，则运行和比较都只针对单个 case
+
+因此，TileLang ST 的验证对象不是“某一份中间 IR 是否长得对”，而是：
+
+1. TileLang 模板是否成功展开并编译到可执行产物；
+2. 生成的数据、运行时读取的 case 目录、以及 compare 使用的 golden/output 是否保持一致；
+3. 最终 simulator / NPU 上的数值结果是否正确。
+
+编译子链由 `testcase/CMakeLists.txt` 中的 `pto_tilelang_vec_st()` 宏自动接管，整条执行链路则由
+`run_st.py` 统一调度。
+
+##### 新增 testcase 所需文件（七件套）
+
+以新增 `pto.tsub` 为例，需在 `test/tilelang_st/npu/a5/src/st/testcase/tsub/` 下准备
+6 个文件，并修改 1 个注册文件：
+
+**1. `CMakeLists.txt`** — 通常只有一行：
+
+```cmake
+pto_tilelang_vec_st(tsub)
+```
+
+宏自动查找同目录下的 `tsub.pto`、`launch.cpp`、`main.cpp`，串联上述五步编译。
+
+**2. `cases.py`** — **case 定义的单一来源**，`gen_data.py` 和 `compare.py` 均从此导入：
+
+```python
+import numpy as np
+
+CASES = [
+    {
+        "name": "f32_16x64",
+        "dtype": np.float32,
+        "shape": (16, 64),
+        "valid_shape": (16, 64),
+        "eps": 1e-6,
+    },
+]
+```
+
+每个 case 必须包含 `name`/`dtype`/`shape`/`valid_shape`/`eps` 五个字段，`valid_shape` 为必填。
+
+**3. `tsub.pto`** — kernel 描述，一个文件中放多个 case 对应的函数。每个函数
+代表一种 dtype/shape 组合。以 tadd 为参考，kernel 结构为：
+
+```mlir
+module {
+  // Case: f32 16x64
+  func.func @TSUB_f32_16x64(%a_ptr: !pto.ptr<f32>, %b_ptr: !pto.ptr<f32>,
+                              %c_ptr: !pto.ptr<f32>) {
+    // 1. make_tensor_view: 从 !pto.ptr 构造 5D tensor_view (1×1×1×rows×cols)
+    // 2. partition_view: 提取 tile 区域
+    // 3. alloc_tile: 分配 UB 上的 tile_buf
+    // 4. tload: 从 GM 加载到 UB
+    // 5. pto.tsub: 执行计算
+    // 6. tstore: 从 UB 写回 GM
+    return
+  }
+  // Case: f32 32x32
+  func.func @TSUB_f32_32x32(...) { ... }
+}
+```
+
+函数命名约定：`<OP>_<dtype>_<rows>x<cols>`，例如 `TSUB_f32_16x64`、`TSUB_bf16_32x32`。
+
+注意：`.pto` 中 `make_tensor_view` 的 shape 维度是 5D（`1×1×1×rows×cols`），strides 需要
+与 shape 一致（最内维 stride=1，逐维累乘）。函数参数顺序决定了后续所有文件的参数顺序。
+
+**4. `launch.cpp`** — 为每个 kernel 声明 entry 和 launch wrapper：
+
+```cpp
+#include <stdint.h>
+
+#ifndef AICORE
+#define AICORE [aicore]
+#endif
+
+extern "C" __global__ AICORE void TSUB_f32_16x64(__gm__ float *a, __gm__ float *b, __gm__ float *c);
+
+void LaunchTSUB_f32_16x64(float *a, float *b, float *c, void *stream) {
+    TSUB_f32_16x64<<<1, nullptr, stream>>>((__gm__ float *)a, (__gm__ float *)b, (__gm__ float *)c);
+}
+```
+
+关键约束：
+- `extern "C" __global__ AICORE void ...` 这一声明形态不可改变，repack 脚本用 sed 从中抽取 stub
+- kernel 参数类型和顺序必须与 `.pto` 中函数签名一致
+- `<<<1, nullptr, stream>>>` 表示单核启动
+
+**5. `main.cpp`** — host driver，核心是 case table 和 `RunCase()` 函数：
+
+```cpp
+#include "acl/acl.h"
+#include "test_common.h"   // PtoTestCommon::ReadFile / WriteFile + ACL_CHECK
+
+using LaunchFn = void (*)(float *, float *, float *, void *);
+
+struct TestCase {
+    const char *name;      // 对应 cases.py 中的 name 和运行时子目录
+    LaunchFn    launch;
+    size_t      rows;       // allocated tile rows
+    size_t      cols;       // allocated tile cols
+    size_t      validRows;  // effective computation rows  (<= rows)
+    size_t      validCols;  // effective computation cols  (<= cols)
+    size_t      elemSize;
+};
+
+static const TestCase kCases[] = {
+    {"f32_16x64", LaunchTSUB_f32_16x64, 16, 64, 16, 64, sizeof(float)},
+    {"f32_32x32", LaunchTSUB_f32_32x32, 32, 32, 32, 32, sizeof(float)},
+};
+```
+
+注意：`ACL_CHECK` 宏由公共头 `test_common.h` 提供（需在 `acl/acl.h` 之后包含），无需在每个 testcase 中重复定义。
+
+`RunCase()` 的职责：
+1. 从 `./<case>/input*.bin` 读取输入到 host 内存
+2. `aclrtMemcpy` 拷贝到 device
+3. 调用 `tc.launch(...)` 启动 kernel
+4. `aclrtSynchronizeStream` 等待完成
+5. 拷贝结果回 host
+6. 写 `./<case>/output.bin`
+
+`main()` 支持可选 `argv[1]` 作为 case filter，实现单 case 执行。
+
+**6. `gen_data.py`** — 生成每个 case 的输入和 golden，从 `cases.py` 导入 `CASES`：
+
+```python
+from cases import CASES
+from st_common import validate_cases, setup_case_rng, save_case_data
+
+validate_cases(CASES)
+
+for case in CASES:
+    setup_case_rng(case)  # per-case seed，新增 case 不影响已有数据
+    dtype, shape = case["dtype"], case["shape"]
+    valid_shape = case["valid_shape"]
+
+    input1 = np.random.randint(1, 10, size=shape).astype(dtype)
+    input2 = np.random.randint(1, 10, size=shape).astype(dtype)
+    golden = np.zeros(shape, dtype=dtype)
+    vr, vc = valid_shape
+    golden[:vr, :vc] = (input1[:vr, :vc] - input2[:vr, :vc]).astype(dtype, copy=False)  # tsub: 减法
+
+    save_case_data(case["name"], {"input1": input1, "input2": input2, "golden": golden})
+```
+
+注意 golden 的计算逻辑必须与 op 语义一致（tadd 是加法，tsub 是减法），且只在 `valid_shape` 区域内计算。
+
+`compare.py` 为公共脚本（位于 `testcase/compare.py`），所有 testcase 共享，无需 per-testcase 编写。
+`run_st.py` 运行时将它与 per-testcase 的 `cases.py` 一起拷贝到 build 目录，自动读取 case 列表和阈值，
+只比较 `valid_shape` 区域。exit code 2 表示失败。
+
+精度阈值参考：
+
+| dtype | 建议 eps |
+|---|---|
+| `float32` | `1e-6` |
+| `float16` | `1e-3` |
+| `bfloat16` | `1e-2` |
+| `int8/int16/int32` | `0`（精确匹配） |
+
+**7. 注册** — 修改 `testcase/CMakeLists.txt`，将新 op 加入 `ALL_TESTCASES`：
+
+```cmake
+set(ALL_TESTCASES
+    tadd
+    tsub    # ← 新增
+)
+```
+
+##### 文件间一致性约束
+
+新增 testcase 时最容易出错的是以下几处必须严格一致：
+
+| 约束 | 涉及文件 | 示例 |
+|---|---|---|
+| kernel 函数名 | `.pto` ↔ `launch.cpp` | `@TSUB_f32_16x64` ↔ `TSUB_f32_16x64` |
+| Launch wrapper 名 | `launch.cpp` ↔ `main.cpp` | `LaunchTSUB_f32_16x64` |
+| case 名 | `cases.py` ↔ `main.cpp` kCases[] ↔ 运行时目录 | `f32_16x64` |
+| 参数顺序 | `.pto` → `launch.cpp` → `main.cpp` 的 launch 调用 | `(a, b) → c` |
+| shape / valid_shape | `cases.py` ↔ `.pto` tile shape ↔ `main.cpp` rows/cols/validRows/validCols | `16×64` / `(16, 64)` |
+
+Python 侧的 case 名、dtype、shape、valid_shape、eps 已通过 `cases.py` 收敛为单一来源。
+但 C++ 侧 `main.cpp` 的 `kCases[]` 和 `.pto` 仍需手动与 `cases.py` 保持一致。
+
+任何一处不一致都可能导致：编译成功但运行时 segfault，或运行成功但比较结果错误且难以定位。
+
+##### 运行方式
+
+统一入口为 `test/tilelang_st/script/run_st.py`。前置条件：
+- `ptoas` 已编译（默认路径 `build/tools/ptoas/ptoas`，也可通过 `-p` 指定或 `PTOAS_BIN` 环境变量）
+- `ASCEND_HOME_PATH` 已设置
+- 建议先执行 `source scripts/ptoas_env.sh`
+
+```bash
+# simulator 上跑 tsub 全部 case
+python3 test/tilelang_st/script/run_st.py -r sim -v a5 -t tsub
+
+# NPU 上跑 tsub 全部 case
+python3 test/tilelang_st/script/run_st.py -r npu -v a5 -t tsub
+
+# 只跑单个 case
+python3 test/tilelang_st/script/run_st.py -r sim -v a5 -t tsub -c f32_16x64
+
+# 复用已有 build，跳过重新编译（只重新生成数据、执行、比较）
+python3 test/tilelang_st/script/run_st.py -r sim -v a5 -t tsub -c f32_16x64 -w
+```
+
+`run_st.py` 执行顺序：`set_env_variables()` → `build_project()` → `run_gen_data()` →
+`run_binary()` → `run_compare()`。产物输出到
+`test/tilelang_st/npu/a5/src/st/build/testcase/<testcase>/` 下：
+
+```text
+build/testcase/tsub/
+├── st_common.py     # 从 testcase/ 公共目录拷贝
+├── compare.py       # 从 testcase/ 公共目录拷贝
+├── cases.py         # 从 testcase/tsub/ 拷贝
+├── gen_data.py      # 从 testcase/tsub/ 拷贝
+├── f32_16x64/
+│   ├── input1.bin
+│   ├── input2.bin
+│   ├── golden.bin
+│   └── output.bin
+└── f32_32x32/
+    └── ...
+```
+
+##### 建议的开发验证节奏
+
+1. **最小 case 先行**：先写一个最小 case（如 `f32_16x64`），在 simulator 上跑通：
+   ```bash
+   python3 test/tilelang_st/script/run_st.py -r sim -v a5 -t tsub -c f32_16x64
+   ```
+
+2. **快速迭代**：修改 `.pto` 或 host 代码后，用 `-w` 跳过 cmake/make 重编译。
+   注意：如果改了 `.pto` 本身，仍需重新编译（不加 `-w`），`-w` 只适合改 `gen_data.py` /
+   `compare.py` / `main.cpp` 中非编译相关逻辑的情况。
+
+3. **扩充 case**：单 case 稳定后，补充更多 shape / dtype 组合。建议覆盖：
+   - 不同 dtype（f32 / f16 / bf16）
+   - 不同 tile 形状（正方形、长条形）
+   - 边界情况（valid 行列不是整 tile 的场景）
+
+4. **全量验证**：跑全量 case 确认无回归。
+
+5. **NPU 验证**：切到 `-r npu` 在真实硬件上验证。simulator 和 NPU 的行为可能存在差异。
+
+##### 调试建议
+
+| 阶段 | 排查方向 |
+|---|---|
+| `ptoas` 编译失败 | 检查 `.pto` 语法、TileLang 模板是否匹配、是否缺少 `--enable-tile-op-expand` |
+| `bisheng -x ir` 失败 | 检查 `build/testcase/<op>/<op>_kernel.ll` 中的 LLVM IR |
+| repack 失败 | 检查 `launch.cpp` 中的 kernel 声明是否符合 `extern "C" __global__ AICORE void` 格式 |
+| 链接失败 | 检查共享库符号名一致性、ACL 运行时依赖 |
+| kernel 执行失败 | 确认 `build/testcase/<op>/<case>/input*.bin` 是否已生成 |
+| compare fail | 先检查 `output.bin` vs `golden.bin` 差异，再检查 `.pto` 语义和参数顺序 |
+
+##### 已有 testcase 下新增 case
+
+如果只是在已有 testcase（如 `tadd`）下新增一个 case（如 `f32_8x128`），只需同步修改 4 个文件：
+
+| 文件 | 修改内容 |
+|---|---|
+| `cases.py` | 在 `CASES` 中加入 `{"name": "f32_8x128", "dtype": np.float32, "shape": (8, 128), "valid_shape": (8, 128), "eps": 1e-6}` |
+| `tadd.pto` | 新增 `func.func @TADD_f32_8x128(...)` 函数体 |
+| `launch.cpp` | 新增 `extern "C"` kernel 声明和 `LaunchTADD_f32_8x128` wrapper |
+| `main.cpp` | 在 `kCases[]` 中加入 `{"f32_8x128", LaunchTADD_f32_8x128, 8, 128, 8, 128, sizeof(float)}` |
+
+`gen_data.py` 和 `compare.py` 无需修改，自动从 `cases.py` 读取。

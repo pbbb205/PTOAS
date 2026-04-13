@@ -93,7 +93,7 @@ function(pto_tilelang_vec_st NAME)
     add_executable(${NAME} main.cpp)
     target_compile_options(${NAME} PRIVATE ${CMAKE_CPP_COMPILE_OPTIONS})
     target_include_directories(${NAME} PRIVATE
-        ${PTO_ISA_ROOT}/tests/common
+        ${PTO_NPU_VALIDATION_COMMON_DIR}
     )
 
     target_link_directories(${NAME} PUBLIC

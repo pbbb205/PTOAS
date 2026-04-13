@@ -9,25 +9,25 @@
 
 # coding=utf-8
 
-import os
 import numpy as np
+from cases import CASES
+from st_common import validate_cases, setup_case_rng, save_case_data
 
-np.random.seed(19)
-
-CASES = [
-    {"name": "f32_16x64", "dtype": np.float32, "shape": (16, 64)},
-    {"name": "f32_32x32", "dtype": np.float32, "shape": (32, 32)},
-]
+validate_cases(CASES)
 
 for case in CASES:
-    case_dir = case["name"]
-    os.makedirs(case_dir, exist_ok=True)
+    setup_case_rng(case)
 
-    input1 = np.random.randint(1, 10, size=case["shape"]).astype(case["dtype"])
-    input2 = np.random.randint(1, 10, size=case["shape"]).astype(case["dtype"])
-    golden = (input1 + input2).astype(case["dtype"], copy=False)
+    dtype = case["dtype"]
+    shape = case["shape"]
+    valid_shape = case["valid_shape"]
 
-    input1.tofile(os.path.join(case_dir, "input1.bin"))
-    input2.tofile(os.path.join(case_dir, "input2.bin"))
-    golden.tofile(os.path.join(case_dir, "golden.bin"))
-    print(f"[INFO] gen_data: {case['name']} shape={case['shape']} dtype={case['dtype'].__name__}")
+    input1 = np.random.randint(1, 10, size=shape).astype(dtype)
+    input2 = np.random.randint(1, 10, size=shape).astype(dtype)
+
+    golden = np.zeros(shape, dtype=dtype)
+    vr, vc = valid_shape
+    golden[:vr, :vc] = (input1[:vr, :vc] + input2[:vr, :vc]).astype(dtype, copy=False)
+
+    save_case_data(case["name"], {"input1": input1, "input2": input2, "golden": golden})
+    print(f"[INFO] gen_data: {case['name']} shape={shape} valid_shape={valid_shape} dtype={dtype.__name__}")
