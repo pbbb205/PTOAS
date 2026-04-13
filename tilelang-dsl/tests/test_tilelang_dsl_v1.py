@@ -1148,7 +1148,10 @@ class TileLangDSLDescriptorTests(unittest.TestCase):
                 pto.vlds(tile, offset=0)
                 return None
 
-        self.assertIn("no public call surface currently accepts them", str(ctx.exception))
+        self.assertIn(
+            "`pto.vlds` does not support keyword arguments in TileLang DSL v1",
+            str(ctx.exception),
+        )
         self.assertIn(f"{__file__}:", str(ctx.exception))
 
     def test_frontend_rewrites_template_slot_to_selected_real_op(self) -> None:
