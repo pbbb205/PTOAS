@@ -60,18 +60,21 @@ SUPPORTED_TOPLEVEL_PTO_CALLS = frozenset(
 SUPPORTED_VECSCOPE_PTO_CALLS = frozenset(
     {
         "make_mask",
+        "init_align",
         "vlds",
         "vldas",
         "vldus",
-        "vldx2",
         "vldsx2",
-        "vsld",
+        "psts",
+        "pstu",
+        "vsst",
+        "vsta",
+        "vstas",
+        "vstar",
         "vsts",
         "vstsx2",
-        "psts",
-        "vsst",
-        "vstx2",
-        "vsta",
+        "vstus",
+        "vstur",
         "vabs",
         "vrelu",
         "vexp",
@@ -145,34 +148,15 @@ SUPPORTED_VECSCOPE_PTO_CALLS = frozenset(
 
 ADVANCED_VECSCOPE_PTO_CALLS = frozenset(
     {
-        "pset_b8",
-        "pset_b16",
-        "pset_b32",
-        "pge_b8",
-        "pge_b16",
-        "pge_b32",
-        "plt_b8",
-        "plt_b16",
-        "plt_b32",
-        "plds",
-        "pld",
-        "pldi",
-        "pst",
-        "psti",
         "vcmp",
         "vcmps",
         "vsel",
         "vselr",
         "vselrv2",
         "pnot",
-        "pand",
-        "por",
-        "pxor",
         "psel",
         "ppack",
         "punpack",
-        "pdintlv_b8",
-        "pintlv_b16",
         "vaddc",
         "vsubc",
         "vaddcs",
@@ -181,10 +165,6 @@ ADVANCED_VECSCOPE_PTO_CALLS = frozenset(
         "vdintlv",
         "vintlvv2",
         "vdintlvv2",
-        "pstu",
-        "vstu",
-        "vstus",
-        "vstur",
     }
 )
 
@@ -268,7 +248,6 @@ BASIC_TILE_INDEXING_SURFACES = frozenset(
     {
         "tile[start:]",
         "tile[row, col:]",
-        "tile[row_start:, col_index]",
     }
 )
 
@@ -345,6 +324,9 @@ UNSUPPORTED_LANGUAGE_CONSTRUCTS = frozenset(
         "pto.dma_copy",
         "pto.vreduce",
         "pto.tile",
+        "BLayout",
+        "SLayout",
+        "PadValue",
         "SyncOpType",
     }
 )
@@ -364,16 +346,10 @@ LANGUAGE_CONSTRUCT_TIERS = {
     "pto.mask_b32": BASIC_TIER,
     "BarrierType": BASIC_TIER,
     "PadMode": BASIC_TIER,
-    "BLayout": BASIC_TIER,
-    "SLayout": BASIC_TIER,
-    "PadValue": BASIC_TIER,
-    "PredicateDist": ADVANCED_TIER,
-    "PredicatePart": ADVANCED_TIER,
     "constexpr": BASIC_TIER,
     "pto.constexpr": BASIC_TIER,
     "tile[start:]": BASIC_TIER,
     "tile[row, col:]": BASIC_TIER,
-    "tile[row_start:, col_index]": BASIC_TIER,
     # Advanced tier constructs
     "ptr": ADVANCED_TIER,  # raw pointer constructor
     "strict_vecscope": ADVANCED_TIER,  # explicit vecscope management

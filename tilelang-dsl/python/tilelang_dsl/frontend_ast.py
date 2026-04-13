@@ -609,8 +609,6 @@ _BOOL_OP_NAMES = {
 }
 
 _DMA_CALL_KEYWORDS: dict[str, frozenset[str]] = {
-    "vdup": frozenset({"position"}),
-    "vci": frozenset({"order"}),
     "set_loop2_stride_outtoub": frozenset({"src_stride", "dst_stride"}),
     "set_loop1_stride_outtoub": frozenset({"src_stride", "dst_stride"}),
     "set_loop_size_outtoub": frozenset({"loop1", "loop2"}),
@@ -645,18 +643,6 @@ _DMA_CALL_KEYWORDS: dict[str, frozenset[str]] = {
             "burst_src_stride",
             "gm_stride",
             "ub_stride",
-        }
-    ),
-    "copy_ubuf_to_ubuf": frozenset(
-        {
-            "src",
-            "dst",
-            "src_offset",
-            "src_stride0",
-            "src_stride1",
-            "dst_offset",
-            "dst_stride0",
-            "dst_stride1",
         }
     ),
 }
@@ -730,7 +716,7 @@ def _build_call_keywords(
         raise context.error(
             node,
             f"`{call_name}` does not support keyword arguments in TileLang DSL v1; "
-            "keyword arguments are only supported on selected public call surfaces",
+            "no public call surface currently accepts them",
         )
 
     seen: set[str] = set()
@@ -805,14 +791,7 @@ def _build_expr(node: ast.AST, context: _FrontendBuildContext) -> FrontendExprNo
             "InterleaveDist",
             "PositionMode",
             "OrderMode",
-            "BLayout",
-            "SLayout",
-            "PadValue",
-            "DeinterleaveDist",
-            "InterleaveDist",
-            "PredicateDist",
-            "PredicatePart",
-            "StrideMode",
+            "PostUpdateMode",
         } and len(path) >= 2:
             return FrontendSymbolExpr(namespace=".".join(path[:-1]), name=path[-1])
         return FrontendAttributeExpr(base=_build_expr(node.value, context), attr=node.attr)

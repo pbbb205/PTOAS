@@ -21,11 +21,12 @@ license: MIT
 
 1. 读取最新 VPTO 规范 `vpto-latest.md`（如果最新版本来自网络，则先下载保存）。
 2. 读取当前 DSL 使用的规范 `vpto-current.md`。
-3. 对比两者差异并生成差异报告：
+3. 对比两者差异：
    - 若无差异：输出“无需更新”，结束。
-   - 若有差异：按变更类型分类并执行对应动作（执行动作前向用户询问确认）。
+   - 若有差异：生成差异报告。
+4. 根据差异报告，逐项与用户确认每个差异变更的处理方式（新增/修改/删除），按照分类进行处理
 
-4. 差异分类与处理规则：
+5. 差异分类与处理规则：
 
 ### A. 新增 op
 
@@ -51,11 +52,11 @@ license: MIT
 - 在 DSL 实现中将该 op 标记为不受支持，并在用户使用时显式报错。
 - 增加测试验证报错信息清晰可见。
 
-5. 统一补充测试：
+6. 统一补充测试：
    - 至少覆盖：新增/变更/删除的 golden path。
    - 包含失败路径（非法参数、已删除 op 调用）验证。
 
-6. 将vpto-spec-current.md改名为vpto-spec-*.md（如vpto-spec-2024-06.md），并将vpto-latest.md改名为vpto-spec-current.md，保持版本迭代记录。
+7. 将vpto-spec-current.md改名为vpto-spec-*.md（如vpto-spec-2024-06.md），并将vpto-latest.md改名为vpto-spec-current.md，保持版本迭代记录。
 
 ---
 

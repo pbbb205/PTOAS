@@ -61,16 +61,8 @@ The current package supports the core v0.3 load/store subset:
 
 The following documented load/store families are still unsupported:
 
-- `pto.vldas(...)`
-- `pto.vldus(...)`
 - `pto.vsld(...)`
-- `pto.psts(...)`
-- `pto.vsst(...)`
-- `pto.vsta(...)`
-- `pto.pstu(...)`
 - `pto.vstu(...)`
-- `pto.vstus(...)`
-- `pto.vstur(...)`
 
 ### Missing Direct Predicate Constructor/Compare APIs
 
@@ -188,8 +180,7 @@ Not currently supported from the guide's broader indexing model:
 - single-element syntax such as `tile[row, col]` and `tile[pos]`
 - explicit slice `stop`
 - stepped tile vector slices
-- the guide's wider indexed op family (`vldas`, `vldus`, `vsld`,
-  `psts`, `vsst`, `vsta`)
+- the remaining wider indexed op family gap (`vsld`)
 
 ### Control-Flow Result Merging
 

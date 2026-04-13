@@ -14,11 +14,21 @@ distribution families:
   - compatibility aliases: `InterleaveDist.B8`, `InterleaveDist.B16`,
     `InterleaveDist.B32`
 
+- **`PostUpdateMode`** for `pto.vstur`
+  - `PostUpdateMode.NO_POST_UPDATE`: preserve the current hardware AR state
+  - `PostUpdateMode.POST_UPDATE`: advance the hardware AR state after the store
+
 The canonical VPTO v0.3 spellings are the enum values:
 
 - `DeinterleaveDist.DINTLV.value == "DINTLV"`
 - `DeinterleaveDist.BDINTLV.value == "BDINTLV"`
 - `InterleaveDist.INTLV.value == "INTLV"`
+- `PostUpdateMode.NO_POST_UPDATE.value == "NO_POST_UPDATE"`
+- `PostUpdateMode.POST_UPDATE.value == "POST_UPDATE"`
+
+`pto.vstur` mode is intentionally Enum-only in the DSL. Unlike the legacy
+distribution-token compatibility retained for some older load/store families,
+raw strings such as `"POST_UPDATE"` are not accepted for `PostUpdateMode`.
 
 For migration convenience, the implementation still accepts legacy raw strings
 such as `"DINTLV_B32"` and `"INTLV_B32"`, but new DSL code should prefer the
@@ -966,9 +976,9 @@ align2, base2 = pto.vstus(align1, base1, vec1, ub_ptr, offset1)
 pto.vstas(align2, ub_ptr, flush_offset)
 ```
 
-#### `pto.vstur(align_in: pto.align, vec: VRegType, buf: ptr) -> pto.align`  [Advanced Tier]
+#### `pto.vstur(align_in: pto.align, vec: VRegType, buf: ptr, mode: PostUpdateMode = pto.PostUpdateMode.NO_POST_UPDATE) -> pto.align`  [Advanced Tier]
 
-**Description**: Register-update unaligned store form. Updates only the residual alignment state without base pointer update. Requires matching flush operation to emit trailing bytes.
+**Description**: Register-update unaligned store form. Updates only the residual alignment state without base pointer update. Requires matching flush operation to emit trailing bytes. The optional `mode` operand is a typed Enum and controls whether the hardware performs post-update on the implicit AR state.
 
 **Parameters**:
 | Parameter | Type | Description |
@@ -976,6 +986,7 @@ pto.vstas(align2, ub_ptr, flush_offset)
 | `align_in` | `pto.align` | Incoming store-alignment state |
 | `vec` | `VRegType` | Vector to store |
 | `buf` | `ptr` | Destination buffer in UB memory space |
+| `mode` | `PostUpdateMode` | Optional post-update mode. Defaults to `pto.PostUpdateMode.NO_POST_UPDATE`. |
 
 **Returns**:
 | Return Value | Type | Description |
@@ -992,6 +1003,9 @@ pto.vstas(align2, ub_ptr, flush_offset)
 align1 = pto.vstur(align0, vec0, ub_ptr)
 align2 = pto.vstur(align1, vec1, ub_ptr)
 pto.vstar(align2, ub_ptr)
+
+# Explicit post-update mode with typed Enum
+align3 = pto.vstur(align2, vec2, ub_ptr, pto.PostUpdateMode.POST_UPDATE)
 ```
 
 #### Align-State Store Closed Loop

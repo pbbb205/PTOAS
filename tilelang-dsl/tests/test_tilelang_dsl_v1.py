@@ -29,6 +29,7 @@ from tilelang_dsl.frontend_ast import (
 )
 from tilelang_dsl.lowering import AuthoringModule, lower_semantic_kernel
 from tilelang_dsl.semantic import (
+    SemanticAlignStoreStmt,
     SemanticAlignType,
     SemanticAssignStmt,
     SemanticBinaryExpr,
@@ -44,6 +45,7 @@ from tilelang_dsl.semantic import (
     SemanticMaskType,
     SemanticPipeBarrierStmt,
     SemanticPtrType,
+    SemanticPredicateStoreStmt,
     SemanticRlsBufStmt,
     SemanticScalarStoreStmt,
     SemanticScalarType,
@@ -85,9 +87,6 @@ class TileLangDSLPackageTests(unittest.TestCase):
         self.assertTrue(hasattr(pto, "mask_b8"))
         self.assertTrue(hasattr(pto, "mask_b16"))
         self.assertTrue(hasattr(pto, "mask_b32"))
-        self.assertTrue(hasattr(pto, "BLayout"))
-        self.assertTrue(hasattr(pto, "SLayout"))
-        self.assertTrue(hasattr(pto, "PadValue"))
         self.assertTrue(hasattr(pto, "constexpr"))
         self.assertTrue(hasattr(pto, "bytewidth"))
         self.assertTrue(hasattr(pto, "get_lanes"))
@@ -99,14 +98,9 @@ class TileLangDSLPackageTests(unittest.TestCase):
         self.assertTrue(hasattr(pto, "InterleaveDist"))
         self.assertTrue(hasattr(pto, "PositionMode"))
         self.assertTrue(hasattr(pto, "OrderMode"))
-        self.assertTrue(hasattr(pto, "DeinterleaveDist"))
-        self.assertTrue(hasattr(pto, "InterleaveDist"))
-        self.assertTrue(hasattr(pto, "PredicateDist"))
-        self.assertTrue(hasattr(pto, "PredicatePart"))
-        self.assertTrue(hasattr(pto, "StrideMode"))
+        self.assertTrue(hasattr(pto, "PostUpdateMode"))
         self.assertTrue(hasattr(pto, "PIPE"))
         self.assertTrue(hasattr(pto, "EVENT"))
-        self.assertEqual(repr(pto.align), "align")
         self.assertTrue(hasattr(pto, "si8"))
         self.assertTrue(hasattr(pto, "ui8"))
         self.assertTrue(hasattr(pto, "si16"))
@@ -119,22 +113,14 @@ class TileLangDSLPackageTests(unittest.TestCase):
         self.assertEqual(pto.PadMode.PadNull.value, "PadNull")
         self.assertEqual(pto.PadMode.PadFirstElem.value, "PadFirstElem")
         self.assertEqual(pto.PadMode.PadValue.value, "PadValue")
-        self.assertEqual(pto.BLayout.ROW_MAJOR.value, "row_major")
-        self.assertEqual(pto.SLayout.NONE_BOX.value, "none_box")
-        self.assertEqual(pto.PadValue.ZERO.value, "zero")
-        self.assertEqual(pto.PositionMode.LOWEST.value, "LOWEST")
         self.assertEqual(pto.DeinterleaveDist.DINTLV.value, "DINTLV")
         self.assertEqual(pto.DeinterleaveDist.BDINTLV.value, "BDINTLV")
         self.assertEqual(pto.InterleaveDist.INTLV.value, "INTLV")
+        self.assertEqual(pto.PositionMode.LOWEST.value, "LOWEST")
         self.assertEqual(pto.PositionMode.HIGHEST.value, "HIGHEST")
         self.assertEqual(pto.OrderMode.ASC.value, "ORDER_ASC")
-        self.assertEqual(pto.DeinterleaveDist.B32.value, "DINTLV_B32")
-        self.assertEqual(pto.InterleaveDist.B16.value, "INTLV_B16")
-        self.assertEqual(pto.PredicateDist.NORM.value, "NORM")
-        self.assertEqual(pto.PredicateDist.PK.value, "PK")
-        self.assertEqual(pto.PredicatePart.LOWER.value, "LOWER")
-        self.assertEqual(pto.PredicatePart.HIGHER.value, "HIGHER")
-        self.assertEqual(pto.StrideMode.S4_B64.value, "STRIDE_S4_B64")
+        self.assertEqual(pto.PostUpdateMode.POST_UPDATE.value, "POST_UPDATE")
+        self.assertEqual(pto.PostUpdateMode.NO_POST_UPDATE.value, "NO_POST_UPDATE")
         self.assertEqual(pto.Event.ID31.value, "EVENT_ID31")
         self.assertIs(pto.DeinterleaveDist.B32, pto.DeinterleaveDist.DINTLV)
         self.assertIs(pto.InterleaveDist.B32, pto.InterleaveDist.INTLV)
@@ -148,6 +134,7 @@ class TileLangDSLPackageTests(unittest.TestCase):
         self.assertEqual(pto.bytewidth(pto.ui64), 8)
         self.assertEqual(pto.get_lanes(pto.ui32), 64)
         self.assertEqual(pto.elements_per_vreg(pto.si8), 256)
+        self.assertEqual(repr(pto.align), "align")
 
 
 class TileLangDSLSupportMatrixTests(unittest.TestCase):
@@ -161,33 +148,16 @@ class TileLangDSLSupportMatrixTests(unittest.TestCase):
         self.assertIn("Tile", AUTHORING_TIER_SURFACE_GROUPS["Tile"])
         self.assertNotIn("dma_load/store", AUTHORING_TIER_SURFACE_GROUPS)
         self.assertIn("pto.vlds", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
-        self.assertIn("pto.vldas", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
-        self.assertIn("pto.vldus", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
-        self.assertIn("pto.vldx2", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
-        self.assertIn("pto.vsld", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
         self.assertIn("pto.vsts", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
-        self.assertIn("pto.psts", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
-        self.assertIn("pto.vsst", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
-        self.assertIn("pto.vstx2", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
-        self.assertIn("pto.vsta", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
         self.assertIn("pto.vadd", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
         self.assertIn("pto.vmuls", AUTHORING_TIER_SURFACE_GROUPS["base_vector_ops"])
         self.assertIn("tile[start:]", BASIC_TILE_INDEXING_SURFACES)
         self.assertIn("tile[row, col:]", BASIC_TILE_INDEXING_SURFACES)
-        self.assertIn("tile[row_start:, col_index]", BASIC_TILE_INDEXING_SURFACES)
 
         self.assertEqual(get_feature_tier("TensorView"), BASIC_TIER)
         self.assertEqual(get_feature_tier("Tile"), BASIC_TIER)
         self.assertEqual(get_feature_tier("pto.vlds"), BASIC_TIER)
-        self.assertEqual(get_feature_tier("pto.vldas"), BASIC_TIER)
-        self.assertEqual(get_feature_tier("pto.vldus"), BASIC_TIER)
-        self.assertEqual(get_feature_tier("pto.vldx2"), BASIC_TIER)
-        self.assertEqual(get_feature_tier("pto.vsld"), BASIC_TIER)
         self.assertEqual(get_feature_tier("pto.vsts"), BASIC_TIER)
-        self.assertEqual(get_feature_tier("pto.psts"), BASIC_TIER)
-        self.assertEqual(get_feature_tier("pto.vsst"), BASIC_TIER)
-        self.assertEqual(get_feature_tier("pto.vstx2"), BASIC_TIER)
-        self.assertEqual(get_feature_tier("pto.vsta"), BASIC_TIER)
         self.assertEqual(get_feature_tier("pto.vadd"), BASIC_TIER)
         self.assertEqual(get_feature_tier("pto.vmuls"), BASIC_TIER)
         self.assertEqual(get_feature_tier("pto.get_buf"), BASIC_TIER)
@@ -210,16 +180,6 @@ class TileLangDSLSupportMatrixTests(unittest.TestCase):
         self.assertEqual(get_feature_tier("pto.vci"), BASIC_TIER)
         self.assertEqual(get_feature_tier("pto.vpack"), BASIC_TIER)
         self.assertEqual(get_feature_tier("pto.vsort32"), BASIC_TIER)
-        self.assertEqual(get_feature_tier("pto.pset_b32"), ADVANCED_TIER)
-        self.assertEqual(get_feature_tier("pto.plds"), ADVANCED_TIER)
-        self.assertEqual(get_feature_tier("pto.pand"), ADVANCED_TIER)
-        self.assertEqual(get_feature_tier("pto.pintlv_b16"), ADVANCED_TIER)
-        self.assertEqual(get_feature_tier("pto.pstu"), ADVANCED_TIER)
-        self.assertEqual(get_feature_tier("pto.vstu"), ADVANCED_TIER)
-        self.assertEqual(get_feature_tier("pto.vstus"), ADVANCED_TIER)
-        self.assertEqual(get_feature_tier("pto.vstur"), ADVANCED_TIER)
-        self.assertEqual(get_feature_tier("PredicateDist"), ADVANCED_TIER)
-        self.assertEqual(get_feature_tier("PredicatePart"), ADVANCED_TIER)
         self.assertEqual(get_feature_tier("pto.vldsx2"), BASIC_TIER)
         self.assertEqual(get_feature_tier("pto.vstsx2"), BASIC_TIER)
         self.assertEqual(get_feature_tier("PadMode"), BASIC_TIER)
@@ -234,12 +194,8 @@ class TileLangDSLSupportMatrixTests(unittest.TestCase):
         self.assertEqual(get_feature_tier("pto.elements_per_vreg"), BASIC_TIER)
         self.assertEqual(get_feature_tier("pto.constexpr"), BASIC_TIER)
         self.assertEqual(get_feature_tier("constexpr"), BASIC_TIER)
-        self.assertEqual(get_feature_tier("BLayout"), BASIC_TIER)
-        self.assertEqual(get_feature_tier("SLayout"), BASIC_TIER)
-        self.assertEqual(get_feature_tier("PadValue"), BASIC_TIER)
         self.assertEqual(get_feature_tier("tile[start:]"), BASIC_TIER)
         self.assertEqual(get_feature_tier("tile[row, col:]"), BASIC_TIER)
-        self.assertEqual(get_feature_tier("tile[row_start:, col_index]"), BASIC_TIER)
 
     def test_non_stable_surface_groups_keep_advanced_boundaries(self) -> None:
         self.assertEqual(get_surface_group_tier("strict_vecscope"), ADVANCED_TIER)
@@ -1192,7 +1148,7 @@ class TileLangDSLDescriptorTests(unittest.TestCase):
                 pto.vlds(tile, offset=0)
                 return None
 
-        self.assertIn("keyword arguments are only supported on selected public call surfaces", str(ctx.exception))
+        self.assertIn("no public call surface currently accepts them", str(ctx.exception))
         self.assertIn(f"{__file__}:", str(ctx.exception))
 
     def test_frontend_rewrites_template_slot_to_selected_real_op(self) -> None:
@@ -1740,251 +1696,6 @@ class TileLangDSLDescriptorTests(unittest.TestCase):
         self.assertRegex(text, r"%activated_\d+ = pto\.vrelu %summed_\d+, %mask_\d+ : !pto\.vreg<64xf32>, !pto\.mask<b32> -> !pto\.vreg<64xf32>")
         self.assertRegex(text, r"pto\.vsts %activated_\d+, %dst_\d+\[%lane_\d+\], %mask_\d+ : !pto\.vreg<64xf32>, !pto\.ptr<f32, ub>, !pto\.mask<b32>")
 
-    def test_basic_vector_memory_family_surfaces_lower_from_tile_indexing(self) -> None:
-        @pto.vkernel(op="vector_memory_basic_unique", dtypes=[(pto.f32, pto.f32)])
-        def kernel(src: pto.Tile, dst: pto.Tile):
-            align = pto.vldas(src[0, 0:])
-            vec, next_align, base_out = pto.vldus(src[0, 0:], align)
-            low, high = pto.vldx2(src[0, 0:], pto.DeinterleaveDist.B32)
-            strided = pto.vsld(src[0, 0], pto.StrideMode.S4_B64)
-            mask = pto.make_mask(pto.f32, pto.PAT.ALL)
-            pto.psts(mask, dst[0, 0:])
-            pto.vsst(vec, dst[0, 0:], pto.StrideMode.S4_B64)
-            pto.vstx2(low, high, dst[0, 0:], pto.InterleaveDist.B32, mask)
-            pto.vsta(next_align, dst[0, 0:])
-            return None
-
-        specialized = kernel.specialize(
-            src=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB),
-            dst=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB),
-        )
-
-        semantic_kernel = analyze_frontend_kernel(build_frontend_kernel_node(specialized))
-        vecscope = semantic_kernel.body[0]
-        self.assertIsInstance(vecscope, SemanticVecscopeStmt)
-        self.assertIsInstance(vecscope.body[0], SemanticAssignStmt)
-        self.assertIsInstance(vecscope.body[0].targets[0].type, SemanticAlignType)
-        self.assertEqual(vecscope.body[1].targets[0].type.element_dtype, pto.f32)
-        self.assertEqual(vecscope.body[2].value.name, "vldx2")
-
-        text = specialized.mlir_text()
-        self.assertIn("pto.vldas", text)
-        self.assertIn("pto.vldus", text)
-        self.assertIn('pto.vldx2', text)
-        self.assertIn('"DINTLV_B32"', text)
-        self.assertIn("pto.vsld", text)
-        self.assertIn('"STRIDE_S4_B64"', text)
-        self.assertIn("pto.psts", text)
-        self.assertIn("pto.vsst", text)
-        self.assertIn("pto.vstx2", text)
-        self.assertIn('"INTLV_B32"', text)
-        self.assertIn("pto.vsta", text)
-
-    def test_col_major_tile_vector_indexing_lowers_with_column_major_layout(self) -> None:
-        @pto.vkernel(op="vector_memory_col_major_unique", dtypes=[(pto.f32, pto.f32)])
-        def kernel(src: pto.Tile, dst: pto.Tile):
-            align = pto.vldas(src[2:, 3])
-            streamed, next_align, base_out = pto.vldus(src[2:, 3], align)
-            mask = pto.make_mask(pto.f32, pto.PAT.ALL)
-            vec = pto.vlds(src[2:, 3])
-            pto.vsts(vec, dst[2:, 3], mask)
-            pto.vsta(next_align, dst[2:, 3])
-            return None
-
-        col_major = pto.TileConfig.from_mapping({"layout": "col_major"})
-        specialized = kernel.specialize(
-            src=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB, config=col_major),
-            dst=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB, config=col_major),
-        )
-
-        text = specialized.mlir_text()
-        self.assertIn("blayout=col_major", text)
-        self.assertRegex(text, r"pto\.vlds %tmp_\d+\[%c2, %c3\] : memref<8x64xf32, #pto\.address_space<vec>> -> !pto\.vreg<64xf32>")
-        self.assertRegex(text, r"%tmp_\d+ = arith\.muli %c3, %c8 : index")
-        self.assertIn("pto.addptr", text)
-        self.assertIn("pto.vldus", text)
-        self.assertIn("pto.vsta", text)
-
-    def test_row_major_tile_rejects_column_major_vector_indexing_syntax(self) -> None:
-        @pto.vkernel(op="row_major_rejects_col_major_index_unique", dtypes=[(pto.f32,)])
-        def kernel(src: pto.Tile):
-            pto.vlds(src[1:, 2])
-            return None
-
-        specialized = kernel.specialize(
-            src=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB),
-        )
-
-        with self.assertRaises(TypeError) as ctx:
-            analyze_frontend_kernel(build_frontend_kernel_node(specialized))
-        self.assertIn("Tile[row, col:]", str(ctx.exception))
-
-    def test_col_major_tile_rejects_row_major_vector_indexing_syntax(self) -> None:
-        @pto.vkernel(op="col_major_rejects_row_major_index_unique", dtypes=[(pto.f32,)])
-        def kernel(src: pto.Tile):
-            pto.vlds(src[1, 2:])
-            return None
-
-        specialized = kernel.specialize(
-            src=pto.TileSpecialization(
-                shape=(8, 64),
-                memory_space=pto.MemorySpace.UB,
-                config=pto.TileConfig.from_mapping({"layout": "col_major"}),
-            ),
-        )
-
-        with self.assertRaises(TypeError) as ctx:
-            analyze_frontend_kernel(build_frontend_kernel_node(specialized))
-        self.assertIn("Tile[row_start:, col_index]", str(ctx.exception))
-
-    def test_advanced_stateful_vector_memory_surfaces_lower_with_pointer_state(self) -> None:
-        @pto.vkernel(op="vector_memory_stateful_unique", dtypes=[(pto.f32, pto.f32)], advanced=True)
-        def kernel(src: pto.Tile, dst: pto.Tile):
-            ub_src = src.as_ptr()
-            ub_dst = dst.as_ptr()
-            align0 = pto.vldas(ub_src)
-            vec = pto.vlds(ub_src, 0)
-            mask = pto.make_mask(pto.f32, pto.PAT.ALL)
-            align1, base1 = pto.pstu(align0, mask, ub_dst)
-            align2, offset2 = pto.vstu(align1, 0, vec, ub_dst, "MODE_ZEROING")
-            align3, base3 = pto.vstus(align2, pto.i32(16), vec, ub_dst, "MODE_ZEROING")
-            align4 = pto.vstur(align3, vec, ub_dst, "MODE_ZEROING")
-            return None
-
-        specialized = kernel.specialize(
-            src=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB),
-            dst=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB),
-        )
-
-        semantic_kernel = analyze_frontend_kernel(build_frontend_kernel_node(specialized))
-        self.assertIsInstance(semantic_kernel.body[0], SemanticAssignStmt)
-        self.assertEqual(semantic_kernel.body[0].value.name, "tile_as_ptr")
-
-        text = specialized.mlir_text()
-        self.assertIn("pto.pstu", text)
-        self.assertIn("pto.vstu", text)
-        self.assertIn("pto.vstus", text)
-        self.assertIn("pto.vstur", text)
-        self.assertIn('"MODE_ZEROING"', text)
-        self.assertRegex(text, r"= pto\.vstu %align1_\d+, %c0, %vec_\d+, %ub_dst_\d+, \"MODE_ZEROING\"")
-        self.assertRegex(text, r"= pto\.vstus %align2_\d+, %(?:c16_i32|tmp_\d+), %vec_\d+, %ub_dst_\d+, \"MODE_ZEROING\"")
-
-    def test_advanced_direct_predicate_surfaces_lower_with_typed_families(self) -> None:
-        @pto.vkernel(op="predicate_surface_unique", dtypes=[(pto.f32, pto.i32)], advanced=True)
-        def kernel(tile: pto.Tile, remaining: pto.i32):
-            all8 = pto.pset_b8(pto.PAT.ALL)
-            all16 = pto.pset_b16(pto.PAT.ALL)
-            all32 = pto.pset_b32(pto.PAT.ALL)
-            tail8 = pto.pge_b8(pto.PAT.ALL)
-            tail16 = pto.pge_b16(pto.PAT.ALL)
-            tail32 = pto.pge_b32(pto.PAT.ALL)
-            mask8, rem8 = pto.plt_b8(remaining)
-            mask16, rem16 = pto.plt_b16(remaining)
-            mask32, rem32 = pto.plt_b32(remaining)
-            gate32 = all32
-            and_mask = pto.pand(all32, tail32, gate32)
-            or_mask = pto.por(and_mask, all32, gate32)
-            xor_mask = pto.pxor(or_mask, tail32, gate32)
-            low8, high8 = pto.pdintlv_b8(all8, tail8)
-            low16, high16 = pto.pintlv_b16(all16, tail16)
-            return None
-
-        specialized = kernel.specialize(
-            tile=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB),
-        )
-
-        text = specialized.mlir_text()
-        self.assertIn(' = pto.pset_b8 "PAT_ALL"', text)
-        self.assertIn(' = pto.pset_b16 "PAT_ALL"', text)
-        self.assertIn(' = pto.pset_b32 "PAT_ALL"', text)
-        self.assertIn(' = pto.pge_b8 "PAT_ALL"', text)
-        self.assertIn(' = pto.pge_b16 "PAT_ALL"', text)
-        self.assertIn(' = pto.pge_b32 "PAT_ALL"', text)
-        self.assertIn(" = pto.plt_b8 ", text)
-        self.assertIn(" = pto.plt_b16 ", text)
-        self.assertIn(" = pto.plt_b32 ", text)
-        self.assertIn(" = pto.pand ", text)
-        self.assertIn(" = pto.por ", text)
-        self.assertIn(" = pto.pxor ", text)
-        self.assertIn(" = pto.pdintlv_b8 ", text)
-        self.assertIn(" = pto.pintlv_b16 ", text)
-        self.assertEqual(text.count('pto.pset_b32 "PAT_ALL"'), 1)
-
-    def test_advanced_predicate_memory_surfaces_lower_with_dist_enums(self) -> None:
-        @pto.vkernel(op="predicate_memory_surface_unique", dtypes=[(pto.f32,)], advanced=True)
-        def kernel(tile: pto.Tile):
-            ub = tile.as_ptr()
-            align = pto.vldas(ub)
-            all_mask = pto.pset_b32(pto.PAT.ALL)
-            loaded0 = pto.plds(ub, 0)
-            loaded1 = pto.pld(ub, 0, pto.PredicateDist.NORM)
-            loaded2 = pto.pldi(ub, pto.i32(4), pto.PredicateDist.US)
-            pto.psts(all_mask, ub, 0)
-            pto.pst(loaded0, ub, 0)
-            pto.psti(loaded1, ub, pto.i32(8), pto.PredicateDist.PK)
-            next_align, next_base = pto.pstu(align, all_mask, ub)
-            return None
-
-        specialized = kernel.specialize(
-            tile=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB),
-        )
-
-        text = specialized.mlir_text()
-        self.assertIn('{dist = "NORM"}', text)
-        self.assertIn(" = pto.pld ", text)
-        self.assertIn(', "NORM" : !pto.ptr<f32, ub>, index -> !pto.mask<b32>', text)
-        self.assertIn(" = pto.pldi ", text)
-        self.assertIn(', "US" : !pto.ptr<f32, ub>, i32 -> !pto.mask<b32>', text)
-        self.assertIn("pto.psts ", text)
-        self.assertIn(': !pto.mask<b32>, !pto.ptr<f32, ub>', text)
-        self.assertIn("pto.pst ", text)
-        self.assertIn(', "NORM" : !pto.mask<b32>, !pto.ptr<f32, ub>, index', text)
-        self.assertIn("pto.psti ", text)
-        self.assertIn(', "PK" : !pto.mask<b32>, !pto.ptr<f32, ub>, i32', text)
-        self.assertIn("pto.pstu", text)
-
-    def test_pld_and_pldi_require_explicit_predicate_dist(self) -> None:
-        @pto.vkernel(op="predicate_memory_missing_dist", dtypes=[(pto.f32,)], advanced=True)
-        def kernel(tile: pto.Tile):
-            ub = tile.as_ptr()
-            loaded1 = pto.pld(ub, 0)
-            loaded2 = pto.pldi(ub, pto.i32(4))
-            pto.pst(loaded1, ub, 0)
-            pto.pst(loaded2, ub, 0)
-            return None
-
-        specialized = kernel.specialize(
-            tile=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB),
-        )
-
-        with self.assertRaises(TypeError) as ctx:
-            specialized.mlir_text()
-
-        message = str(ctx.exception)
-        self.assertTrue(
-            "pto.pld expects source, offset, and dist" in message
-            or "pto.pldi expects source, imm_offset, and dist" in message
-        )
-
-    def test_pand_por_pxor_require_explicit_gate_mask(self) -> None:
-        @pto.vkernel(op="predicate_logic_missing_gate", dtypes=[(pto.f32, pto.i32)], advanced=True)
-        def kernel(tile: pto.Tile, remaining: pto.i32):
-            all32 = pto.pset_b32(pto.PAT.ALL)
-            tail32 = pto.pge_b32(pto.PAT.ALL)
-            and_mask = pto.pand(all32, tail32)
-            or_mask = pto.por(and_mask, all32)
-            xor_mask = pto.pxor(or_mask, tail32)
-            return None
-
-        specialized = kernel.specialize(
-            tile=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB),
-        )
-
-        with self.assertRaises(TypeError) as ctx:
-            specialized.mlir_text()
-
-        self.assertIn("expects exactly 3 positional arguments", str(ctx.exception))
-
     def test_tail_make_mask_lowers_to_typed_plt_and_updates_remaining(self) -> None:
         @pto.vkernel(op="eltwise", dtypes=[(pto.f32, pto.i32)], advanced=True)
         def kernel(tile: pto.Tile, remaining: pto.i32):
@@ -2460,7 +2171,7 @@ class TileLangDSLDescriptorTests(unittest.TestCase):
             dup_from_vec = pto.vdup(vec0, all_mask, pto.PositionMode.HIGHEST)
             dup_from_scalar = pto.vdup(seed, all_mask)
             idx0 = pto.vci(seed)
-            idx1 = pto.vci(seed, order=pto.OrderMode.ASC)
+            idx1 = pto.vci(seed, pto.OrderMode.ASC)
 
             out = pto.vadd(broadcast, dup_from_vec, all_mask)
             out = pto.vadd(out, dup_from_scalar, all_mask)
@@ -3355,61 +3066,6 @@ class TileLangDSLDescriptorTests(unittest.TestCase):
             r"pto\.copy_ubuf_to_gm %ub_ptr_\d+, %gm_ptr_\d+, %tmp_\d+, %tmp_\d+, %tmp_\d+, %tmp_\d+, %tmp_\d+, %tmp_\d+",
         )
 
-    def test_copy_ubuf_to_ubuf_guide_surface_lowers_in_advanced_mode(self) -> None:
-        @pto.vkernel(
-            op="ub_to_ub_dma_guide_unique",
-            dtypes=[(pto.f32, pto.f32, pto.i64, pto.i64)],
-            advanced=True,
-        )
-        def kernel(src: pto.Tile, dst: pto.Tile, src_offset: pto.i64, dst_offset: pto.i64):
-            src_ptr = src.as_ptr()
-            dst_ptr = dst.as_ptr()
-
-            pto.copy_ubuf_to_ubuf(src_ptr, dst_ptr, src_offset, 32, 128, dst_offset, 160, 192)
-            pto.copy_ubuf_to_ubuf(
-                src=src_ptr,
-                dst=dst_ptr,
-                src_offset=src_offset,
-                src_stride0=16,
-                src_stride1=64,
-                dst_offset=dst_offset,
-                dst_stride0=96,
-                dst_stride1=128,
-            )
-            return None
-
-        specialized = kernel.specialize(
-            src=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB),
-            dst=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB),
-        )
-
-        semantic_kernel = analyze_frontend_kernel(build_frontend_kernel_node(specialized))
-        low_level_copies = [stmt for stmt in semantic_kernel.body if isinstance(stmt, SemanticLowLevelCopyStmt)]
-        self.assertEqual(len(low_level_copies), 2)
-        self.assertTrue(all(isinstance(stmt.source, SemanticCallExpr) for stmt in low_level_copies))
-        self.assertTrue(all(isinstance(stmt.destination, SemanticCallExpr) for stmt in low_level_copies))
-        self.assertTrue(all(stmt.source.name == "addptr" for stmt in low_level_copies))
-        self.assertTrue(all(stmt.destination.name == "addptr" for stmt in low_level_copies))
-
-        text = specialized.mlir_text()
-        self.assertRegex(
-            text,
-            r"%src_ptr_\d+ = pto\.tile_buf_addr %arg0 : !pto\.tile_buf<loc=vec, dtype=f32, rows=8, cols=64, v_row=8, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0> -> !pto\.ptr<f32, ub>",
-        )
-        self.assertRegex(
-            text,
-            r"%dst_ptr_\d+ = pto\.tile_buf_addr %arg1 : !pto\.tile_buf<loc=vec, dtype=f32, rows=8, cols=64, v_row=8, v_col=64, blayout=row_major, slayout=none_box, fractal=512, pad=0> -> !pto\.ptr<f32, ub>",
-        )
-        self.assertRegex(
-            text,
-            r"%tmp_\d+ = pto\.addptr %src_ptr_\d+, %arg2 : !pto\.ptr<f32, ub> -> !pto\.ptr<f32, ub>",
-        )
-        self.assertRegex(
-            text,
-            r"%tmp_\d+ = pto\.addptr %dst_ptr_\d+, %arg3 : !pto\.ptr<f32, ub> -> !pto\.ptr<f32, ub>",
-        )
-        self.assertEqual(text.count("pto.copy_ubuf_to_ubuf "), 2)
-
     def test_castptr_rejects_tensorview_or_tile_inputs_in_advanced_mode(self) -> None:
         @pto.vkernel(op="castptr_tensorview_reject_unique", dtypes=[(pto.f32,)], advanced=True)
         def tensorview_kernel(inp: pto.TensorView):
@@ -3585,8 +3241,8 @@ class TileLangDSLDescriptorTests(unittest.TestCase):
             cmp_scalar_mask = pto.vcmps(lhs, scalar, all_mask, "gt")
             negated = pto.pnot(cmp_mask, all_mask)
             picked = pto.psel(cmp_mask, negated, cmp_scalar_mask)
-            packed = pto.ppack(picked, pto.PredicatePart.LOWER)
-            unpacked = pto.punpack(packed, pto.PredicatePart.HIGHER)
+            packed = pto.ppack(picked, "PART_EVEN")
+            unpacked = pto.punpack(packed, "PART_ODD")
             sum_vec, carry_mask = pto.vaddc(lhs, rhs, all_mask)
             diff_vec, borrow_mask = pto.vsubc(lhs, rhs, all_mask)
             sum_with_carry, carry_mask2 = pto.vaddcs(sum_vec, diff_vec, carry_mask, all_mask)
@@ -3620,9 +3276,9 @@ class TileLangDSLDescriptorTests(unittest.TestCase):
         self.assertIn(" = pto.pnot ", text)
         self.assertIn(" = pto.psel ", text)
         self.assertIn(' = pto.ppack ', text)
-        self.assertIn('"LOWER"', text)
+        self.assertIn('"PART_EVEN"', text)
         self.assertIn(' = pto.punpack ', text)
-        self.assertIn('"HIGHER"', text)
+        self.assertIn('"PART_ODD"', text)
         self.assertRegex(
             text,
             r"%sum_vec_\d+, %carry_mask_\d+ = pto\.vaddc %lhs_\d+, %rhs_\d+, %all_mask_\d+ : !pto\.vreg<64xi32>, !pto\.vreg<64xi32>, !pto\.mask<b32> -> !pto\.vreg<64xi32>, !pto\.mask<b32>",
@@ -3653,29 +3309,6 @@ class TileLangDSLDescriptorTests(unittest.TestCase):
         self.assertIn(" = pto.vselr ", text)
         self.assertIn(" = pto.vselrv2 ", text)
         self.assertIn("pto.vsts ", text)
-
-    def test_ppack_and_punpack_require_predicate_part_enum(self) -> None:
-        @pto.vkernel(op="predicate_part_typecheck", dtypes=[(pto.i32, pto.i32, pto.i32)], advanced=True)
-        def kernel(dst: pto.Tile, src0: pto.Tile, src1: pto.Tile):
-            all_mask = pto.make_mask(pto.i32, pto.PAT.ALL)
-            lhs = pto.vlds(src0[0, 0:])
-            rhs = pto.vlds(src1[0, 0:])
-            cmp_mask = pto.vcmp(lhs, rhs, all_mask, "lt")
-            packed = pto.ppack(cmp_mask, "LOWER")
-            unpacked = pto.punpack(packed, "HIGHER")
-            pto.vsts(pto.vsel(lhs, rhs, unpacked), dst[0, 0:], all_mask)
-            return None
-
-        specialized = kernel.specialize(
-            dst=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB),
-            src0=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB),
-            src1=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB),
-        )
-
-        with self.assertRaises(TypeError) as ctx:
-            specialized.mlir_text()
-
-        self.assertIn("PredicatePart.LOWER or PredicatePart.HIGHER", str(ctx.exception))
 
     def test_elementwise_kernel_positive_regression_covers_vecscope_tail_mask_and_dynamic_loop_bound(self) -> None:
         @pto.vkernel(op="eltwise", dtypes=[(pto.f32, pto.f32, pto.i32)], advanced=True)
@@ -3783,15 +3416,6 @@ class TileLangDSLDescriptorTests(unittest.TestCase):
         )
         self.assertIn("scf.for %lane_", text)
         self.assertIn("pto.barrier #pto.pipe<PIPE_ALL>", text)
-
-    def test_sync_ops_accept_event_class_alias_and_full_event_range(self) -> None:
-        Event = pto.Event
-        Pipe = pto.Pipe
-
-        @pto.vkernel(op="eltwise", dtypes=[(pto.f32, pto.f32)], advanced=True)
-        def kernel(inp: pto.TensorView, tile: pto.Tile):
-            pto.set_flag(Pipe.MTE2, Pipe.V, Event.ID31)
-            pto.wait_flag(Pipe.MTE2, Pipe.V, Event.ID31)
 
     def test_extended_sync_buffer_ops_lower_to_authoring_surface(self) -> None:
         Pipe = pto.Pipe
@@ -3927,6 +3551,82 @@ class TileLangDSLDescriptorTests(unittest.TestCase):
         text = specialized.mlir_text()
         self.assertIn('"DINTLV"', text)
         self.assertIn('"INTLV"', text)
+
+    def test_align_load_and_stateful_store_ops_lower_to_current_vpto_surface(self) -> None:
+        @pto.vkernel(
+            op="align_load_and_stateful_store_ops",
+            dtypes=[(pto.f32, pto.f32)],
+            advanced=True,
+        )
+        def kernel(
+            src: pto.ptr(pto.f32, pto.MemorySpace.UB),
+            dst: pto.ptr(pto.f32, pto.MemorySpace.UB),
+        ):
+            load_align = pto.vldas(src)
+            vec, load_align = pto.vldus(src, load_align)
+            store_align = pto.init_align()
+            store_align = pto.vstus(store_align, 0, vec, dst)
+            store_align = pto.vstur(store_align, vec, dst)
+            pto.vstas(store_align, dst, 0)
+            post_align = pto.vstur(pto.init_align(), vec, dst, pto.PostUpdateMode.POST_UPDATE)
+            pto.vstar(post_align, dst)
+            return None
+
+        specialized = kernel.specialize()
+        semantic_kernel = analyze_frontend_kernel(build_frontend_kernel_node(specialized))
+        vecscope = next(stmt for stmt in semantic_kernel.body if isinstance(stmt, SemanticVecscopeStmt))
+        align_store_stmts = [stmt for stmt in vecscope.body if isinstance(stmt, SemanticAlignStoreStmt)]
+
+        self.assertTrue(any(isinstance(stmt, SemanticAssignStmt) and isinstance(stmt.value.type, SemanticAlignType) for stmt in vecscope.body))
+        self.assertEqual(len(align_store_stmts), 2)
+        self.assertEqual([stmt.op_name for stmt in align_store_stmts], ["vstas", "vstar"])
+
+        text = specialized.mlir_text()
+        self.assertIn("pto.vldas", text)
+        self.assertIn("pto.vldus", text)
+        self.assertIn("pto.init_align", text)
+        self.assertIn("pto.vstus", text)
+        self.assertIn("pto.vstur", text)
+        self.assertIn("pto.vstas", text)
+        self.assertIn("pto.vstar", text)
+        self.assertIn('"POST_UPDATE"', text)
+        self.assertIn('"NO_POST_UPDATE"', text)
+        self.assertIn("!pto.align", text)
+
+    def test_predicate_store_and_compatibility_store_sugar_lower_to_supported_ops(self) -> None:
+        @pto.vkernel(
+            op="predicate_store_and_store_sugar",
+            dtypes=[(pto.f32, pto.ui32)],
+            advanced=True,
+        )
+        def kernel(
+            dst: pto.ptr(pto.f32, pto.MemorySpace.UB),
+            mask_dst: pto.ptr(pto.ui32, pto.MemorySpace.UB),
+        ):
+            mask = pto.make_mask(pto.f32, pto.PAT.ALL)
+            pto.psts(mask, mask_dst, 0)
+            align = pto.init_align()
+            align, mask_base = pto.pstu(align, mask, mask_dst)
+            pto.vsta(align, mask_base, 0)
+            pto.vsst(1.0, dst, 0, mask)
+            return None
+
+        specialized = kernel.specialize()
+        semantic_kernel = analyze_frontend_kernel(build_frontend_kernel_node(specialized))
+        vecscope = next(stmt for stmt in semantic_kernel.body if isinstance(stmt, SemanticVecscopeStmt))
+
+        self.assertTrue(any(isinstance(stmt, SemanticPredicateStoreStmt) for stmt in vecscope.body))
+        self.assertTrue(any(isinstance(stmt, SemanticAlignStoreStmt) and stmt.op_name == "vstas" for stmt in vecscope.body))
+
+        text = specialized.mlir_text()
+        self.assertIn("pto.psts", text)
+        self.assertIn('"NORM"', text)
+        self.assertIn("pto.pstu", text)
+        self.assertIn("pto.vbr", text)
+        self.assertIn("pto.vsts", text)
+        self.assertIn("pto.vstas", text)
+        self.assertNotIn("pto.vsst", text)
+        self.assertNotIn("pto.vsta ", text)
 
     def test_strict_vecscope_rejects_implicit_capture_during_semantic_analysis(self) -> None:
         @pto.vkernel(op="eltwise", dtypes=[(pto.f32, pto.f16, pto.i32)], advanced=True)
@@ -4324,6 +4024,20 @@ class TileLangDSLDiagnosticsTests(unittest.TestCase):
         self.assertIn("arbitrary external call `helper`", str(ctx.exception))
         self.assertIn(f"{__file__}:", str(ctx.exception))
 
+    def test_vstur_rejects_raw_string_mode_and_requires_enum(self) -> None:
+        with self.assertRaises(TypeError) as ctx:
+
+            @pto.vkernel(op="vstur_raw_string_mode_unique", dtypes=[(pto.f32,)], advanced=True)
+            def kernel(dst: pto.ptr(pto.f32, pto.MemorySpace.UB)):
+                align = pto.init_align()
+                vec = pto.vbr(1.0)
+                pto.vstur(align, vec, dst, "POST_UPDATE")
+                return None
+
+            kernel.specialize().mlir_text()
+
+        self.assertIn("pto.vstur mode must be a PostUpdateMode enum", str(ctx.exception))
+
     def test_unsupported_pto_surface_reports_source_location(self) -> None:
         with self.assertRaises(pto.TileLangFrontendError) as ctx:
 
@@ -4334,19 +4048,6 @@ class TileLangDSLDiagnosticsTests(unittest.TestCase):
 
         self.assertIn("unsupported op surface `pto.not_a_real_surface`", str(ctx.exception))
         self.assertIn(f"{__file__}:", str(ctx.exception))
-
-    def test_removed_tile_derived_query_surface_is_rejected(self) -> None:
-        @pto.vkernel(op="removed_tile_query_surface_unique", dtypes=[(pto.f32,)], advanced=True)
-        def kernel(dst: pto.Tile):
-            layout = dst.layout_descriptor
-            return None
-
-        with self.assertRaises(TypeError) as ctx:
-            kernel.specialize(
-                dst=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB),
-            ).mlir_text()
-
-        self.assertIn("unsupported attribute access 'layout_descriptor'", str(ctx.exception))
 
     def test_strict_vecscope_requires_advanced_mode(self) -> None:
         with self.assertRaises(pto.TileLangFrontendError) as ctx:

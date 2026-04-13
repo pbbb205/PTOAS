@@ -14,6 +14,8 @@ import re
 from dataclasses import dataclass
 
 from .semantic import (
+    SemanticAlignStoreStmt,
+    SemanticAlignType,
     SemanticAssignStmt,
     SemanticAttributeAccess,
     SemanticBinaryExpr,
@@ -22,7 +24,6 @@ from .semantic import (
     SemanticDmaConfigStmt,
     SemanticDmaLoadStmt,
     SemanticDmaStoreStmt,
-    SemanticAlignType,
     SemanticExpr,
     SemanticExprStmt,
     SemanticForStmt,
@@ -37,6 +38,7 @@ from .semantic import (
     SemanticMaskType,
     SemanticMetaType,
     SemanticPipeBarrierStmt,
+    SemanticPredicateStoreStmt,
     SemanticPtrType,
     SemanticReturnStmt,
     SemanticRlsBufStmt,
@@ -68,15 +70,12 @@ from .semantic import (
 )
 from .types import (
     MaskPattern,
-    MemorySpace,
     ScalarType,
-    TileConfig,
     bytewidth,
     get_lanes,
     integer_bitwidth,
     integer_signedness,
     is_integer_dtype,
-    tile_strides,
 )
 
 
@@ -292,6 +291,21 @@ class _AuthoringRenderer:
                 self._collect_used_tile_buffers_from_expr(index, used)
             self._collect_used_tile_buffers_from_expr(stmt.mask, used)
             return
+        if isinstance(stmt, SemanticPredicateStoreStmt):
+            self._collect_used_tile_buffers_from_expr(stmt.value, used)
+            self._record_tile_buffer_use(stmt.destination, used)
+            for index in stmt.indices:
+                self._collect_used_tile_buffers_from_expr(index, used)
+            self._collect_used_tile_buffers_from_expr(stmt.dist, used)
+            return
+        if isinstance(stmt, SemanticAlignStoreStmt):
+            self._collect_used_tile_buffers_from_expr(stmt.value, used)
+            self._record_tile_buffer_use(stmt.destination, used)
+            for index in stmt.indices:
+                self._collect_used_tile_buffers_from_expr(index, used)
+            if stmt.offset is not None:
+                self._collect_used_tile_buffers_from_expr(stmt.offset, used)
+            return
         if isinstance(stmt, SemanticVecscopeStmt):
             for nested in stmt.body:
                 self._collect_used_tile_buffers_from_stmt(nested, used)
@@ -326,21 +340,8 @@ class _AuthoringRenderer:
         used: set[str],
     ) -> None:
         if isinstance(expr, SemanticCallExpr):
-            if expr.namespace == "pto" and expr.args:
-                if expr.name in {
-                    "vlds",
-                    "vldas",
-                    "vldus",
-                    "vldx2",
-                    "vsld",
-                    "psts",
-                    "vsst",
-                    "vstx2",
-                    "vsta",
-                }:
-                    self._record_tile_buffer_use(expr.args[0], used)
-                if expr.name in {"psts", "vsst", "vstx2", "vsta"} and len(expr.args) >= 2:
-                    self._record_tile_buffer_use(expr.args[1], used)
+            if expr.namespace == "pto" and expr.name in {"vlds", "vldas", "vldus"} and expr.args:
+                self._record_tile_buffer_use(expr.args[0], used)
             for arg in expr.args:
                 self._collect_used_tile_buffers_from_expr(arg, used)
             return
@@ -363,15 +364,7 @@ class _AuthoringRenderer:
                     self._collect_used_tile_buffers_from_expr(slice_expr.step, used)
             return
         if isinstance(expr, SemanticAttributeAccess):
-            if expr.attr not in {
-                "shape",
-                "valid_shape",
-                "strides",
-                "element_type",
-                "rank",
-                "memory_space",
-                "config",
-            }:
+            if expr.attr not in {"shape", "valid_shape", "strides", "element_type"}:
                 self._collect_used_tile_buffers_from_expr(expr.base, used)
             return
         if isinstance(expr, SemanticSubscriptAccess):
@@ -419,6 +412,10 @@ class _AuthoringRenderer:
             return self._render_vector_store(stmt, env, indent=indent)
         if isinstance(stmt, SemanticVectorPairStoreStmt):
             return self._render_vector_pair_store(stmt, env, indent=indent)
+        if isinstance(stmt, SemanticPredicateStoreStmt):
+            return self._render_predicate_store(stmt, env, indent=indent)
+        if isinstance(stmt, SemanticAlignStoreStmt):
+            return self._render_align_store(stmt, env, indent=indent)
         if isinstance(stmt, SemanticScalarStoreStmt):
             return self._render_scalar_store(stmt, env, indent=indent)
         if isinstance(stmt, SemanticSetFlagStmt):
@@ -649,27 +646,24 @@ class _AuthoringRenderer:
             raise NotImplementedError(
                 f"multi-result assignment for `pto.{stmt.value.name}` is not supported in TileLang DSL v1"
             )
-        if not isinstance(stmt.value.type, SemanticTupleType):
-            raise NotImplementedError("multi-result lowering expects a tuple-typed call value")
-        if len(stmt.targets) != len(stmt.value.type.elements):
-            raise NotImplementedError("multi-result lowering expects tuple assignment arity to match the call result count")
+        if len(stmt.targets) != 2:
+            raise NotImplementedError("multi-result lowering expects exactly two assignment targets")
+        if not isinstance(stmt.value.type, SemanticTupleType) or len(stmt.value.type.elements) != 2:
+            raise NotImplementedError("multi-result lowering expects a two-result tuple type")
 
-        if stmt.value.name == "make_mask" or stmt.value.name in {"plt_b8", "plt_b16", "plt_b32"}:
+        if stmt.value.name == "make_mask":
+            dtype_expr, remaining_expr = stmt.value.args
+            if not self._is_dtype_meta_expr(dtype_expr):
+                raise NotImplementedError("make_mask dtype lowering expects a dtype symbol")
+
             lines: list[str] = []
-            if stmt.value.name == "make_mask":
-                dtype_expr, remaining_expr = stmt.value.args
-                if not self._is_dtype_meta_expr(dtype_expr):
-                    raise NotImplementedError("make_mask dtype lowering expects a dtype symbol")
-                opname = f"pto.plt_{self._mask_suffix(stmt.value.type.elements[0])}"
-            else:
-                remaining_expr = stmt.value.args[0]
-                opname = f"pto.{stmt.value.name}"
             remaining = self._lower_remaining_to_i32(remaining_expr, env, indent=indent, into=lines)
             mask_target, remaining_target = stmt.targets
             mask_type, remaining_type = stmt.value.type.elements
+            suffix = self._mask_suffix(mask_type)
             lines.append(
                 self._indent(indent)
-                + f"{mask_target.ssa_name}, {remaining_target.ssa_name} = {opname} {remaining.name} : "
+                + f"{mask_target.ssa_name}, {remaining_target.ssa_name} = pto.plt_{suffix} {remaining.name} : "
                 + f"i32 -> {self._render_type(mask_type)}, {self._render_type(remaining_type)}"
             )
             env[mask_target.name] = _RenderedValue(name=mask_target.ssa_name, type=mask_type)
@@ -714,7 +708,7 @@ class _AuthoringRenderer:
             env[carry_target.name] = _RenderedValue(name=carry_target.ssa_name, type=carry_type)
             return lines
 
-        if stmt.value.name in {"vintlv", "vdintlv", "pdintlv_b8", "pintlv_b16"}:
+        if stmt.value.name in {"vintlv", "vdintlv"}:
             lines = []
             lhs = self._lower_expr(stmt.value.args[0], env, indent=indent, into=lines)
             rhs = self._lower_expr(stmt.value.args[1], env, indent=indent, into=lines)
@@ -747,110 +741,6 @@ class _AuthoringRenderer:
             env[low_target.name] = _RenderedValue(name=low_target.ssa_name, type=low_type)
             env[high_target.name] = _RenderedValue(name=high_target.ssa_name, type=high_type)
             return lines
-
-        if stmt.value.name == "vldx2":
-            lines = []
-            source_name, source_type, offset_name, offset_type = self._lower_memory_buffer_with_offset(
-                stmt.value.args[:-1],
-                env,
-                indent=indent,
-                into=lines,
-            )
-            dist = self._render_string_literal(stmt.value.args[-1])
-            rendered_targets = ", ".join(target.ssa_name for target in stmt.targets)
-            rendered_result_types = ", ".join(
-                self._render_type(result_type) for result_type in stmt.value.type.elements
-            )
-            lines.append(
-                self._indent(indent)
-                + f"{rendered_targets} = pto.vldx2 {source_name}[{offset_name}], {dist} : "
-                + f"{source_type}, {offset_type} -> {rendered_result_types}"
-            )
-            for target, result_type in zip(stmt.targets, stmt.value.type.elements):
-                env[target.name] = _RenderedValue(name=target.ssa_name, type=result_type)
-            return lines
-
-        if stmt.value.name == "vldus":
-            lines = []
-            source_name, source_type = self._lower_memory_buffer_without_offset(
-                stmt.value.args[:-1],
-                env,
-                indent=indent,
-                into=lines,
-            )
-            align = self._lower_expr(stmt.value.args[-1], env, indent=indent, into=lines)
-            rendered_targets = ", ".join(target.ssa_name for target in stmt.targets)
-            rendered_result_types = ", ".join(
-                self._render_type(result_type) for result_type in stmt.value.type.elements
-            )
-            lines.append(
-                self._indent(indent)
-                + f"{rendered_targets} = pto.vldus {source_name}, {align.name} : "
-                + f"{source_type}, {self._render_type(align.type)} -> {rendered_result_types}"
-            )
-            for target, result_type in zip(stmt.targets, stmt.value.type.elements):
-                env[target.name] = _RenderedValue(name=target.ssa_name, type=result_type)
-            return lines
-
-        if stmt.value.name == "pstu":
-            lines = []
-            align = self._lower_expr(stmt.value.args[0], env, indent=indent, into=lines)
-            value = self._lower_expr(stmt.value.args[1], env, indent=indent, into=lines)
-            base = self._lower_expr(stmt.value.args[2], env, indent=indent, into=lines)
-            rendered_targets = ", ".join(target.ssa_name for target in stmt.targets)
-            rendered_result_types = ", ".join(
-                self._render_type(result_type) for result_type in stmt.value.type.elements
-            )
-            lines.append(
-                self._indent(indent)
-                + f"{rendered_targets} = pto.pstu {align.name}, {value.name}, {base.name} : "
-                + f"{self._render_type(align.type)}, {self._render_type(value.type)}, {self._render_type(base.type)} "
-                + f"-> {rendered_result_types}"
-            )
-            for target, result_type in zip(stmt.targets, stmt.value.type.elements):
-                env[target.name] = _RenderedValue(name=target.ssa_name, type=result_type)
-            return lines
-
-        if stmt.value.name == "vstu":
-            lines = []
-            align = self._lower_expr(stmt.value.args[0], env, indent=indent, into=lines)
-            offset = self._lower_expr(stmt.value.args[1], env, indent=indent, into=lines)
-            value = self._lower_expr(stmt.value.args[2], env, indent=indent, into=lines)
-            base = self._lower_expr(stmt.value.args[3], env, indent=indent, into=lines)
-            mode = self._render_string_literal(stmt.value.args[4])
-            rendered_targets = ", ".join(target.ssa_name for target in stmt.targets)
-            rendered_result_types = ", ".join(
-                self._render_type(result_type) for result_type in stmt.value.type.elements
-            )
-            lines.append(
-                self._indent(indent)
-                + f"{rendered_targets} = pto.vstu {align.name}, {offset.name}, {value.name}, {base.name}, {mode} : "
-                + f"{self._render_type(align.type)}, {self._render_type(offset.type)}, {self._render_type(value.type)}, {self._render_type(base.type)} "
-                + f"-> {rendered_result_types}"
-            )
-            for target, result_type in zip(stmt.targets, stmt.value.type.elements):
-                env[target.name] = _RenderedValue(name=target.ssa_name, type=result_type)
-            return lines
-
-        if stmt.value.name == "vstus":
-            lines = []
-            align = self._lower_expr(stmt.value.args[0], env, indent=indent, into=lines)
-            offset = self._lower_expr(stmt.value.args[1], env, indent=indent, into=lines)
-            value = self._lower_expr(stmt.value.args[2], env, indent=indent, into=lines)
-            base = self._lower_expr(stmt.value.args[3], env, indent=indent, into=lines)
-            mode = self._render_string_literal(stmt.value.args[4])
-            rendered_targets = ", ".join(target.ssa_name for target in stmt.targets)
-            rendered_result_types = ", ".join(
-                self._render_type(result_type) for result_type in stmt.value.type.elements
-            )
-            lines.append(
-                self._indent(indent)
-                + f"{rendered_targets} = pto.vstus {align.name}, {offset.name}, {value.name}, {base.name}, {mode} : "
-                + f"{self._render_type(align.type)}, {self._render_type(offset.type)}, {self._render_type(value.type)}, {self._render_type(base.type)} "
-                + f"-> {rendered_result_types}"
-            )
-            for target, result_type in zip(stmt.targets, stmt.value.type.elements):
-                env[target.name] = _RenderedValue(name=target.ssa_name, type=result_type)
 
         if stmt.value.name == "vldsx2":
             lines = []
@@ -886,6 +776,60 @@ class _AuthoringRenderer:
             )
             env[low_target.name] = _RenderedValue(name=low_target.ssa_name, type=low_type)
             env[high_target.name] = _RenderedValue(name=high_target.ssa_name, type=high_type)
+            return lines
+
+        if stmt.value.name == "vldus":
+            lines = []
+            source = self._lower_expr(stmt.value.args[0], env, indent=indent, into=lines)
+            index_args = stmt.value.args[1:-1]
+            if isinstance(source.type, SemanticTileType):
+                source = self._materialize_tile_memref(source, indent=indent, into=lines)
+            if (
+                isinstance(stmt.value.args[0].type, SemanticTileType)
+                and stmt.value.args[0].type.rank == 2
+                and len(index_args) == 2
+            ):
+                source = self._materialize_rank2_tile_subview(
+                    source,
+                    stmt.value.args[0].type,
+                    index_args,
+                    env,
+                    indent=indent,
+                    into=lines,
+                )
+            if self._is_memref_like_type(source.type):
+                ptr_name, ptr_type = self._materialize_copy_buffer_ptr(source, indent=indent, into=lines)
+                source = _RenderedValue(name=ptr_name, type=_RenderedTextualType(ptr_type))
+            align = self._lower_expr(stmt.value.args[-1], env, indent=indent, into=lines)
+            result_target, align_target = stmt.targets
+            result_type, align_type = stmt.value.type.elements
+            lines.append(
+                self._indent(indent)
+                + f"{result_target.ssa_name}, {align_target.ssa_name} = pto.vldus "
+                + f"{source.name}, {align.name} : "
+                + f"{self._render_type(source.type)}, {self._render_type(align.type)} -> "
+                + f"{self._render_type(result_type)}, {self._render_type(align_type)}"
+            )
+            env[result_target.name] = _RenderedValue(name=result_target.ssa_name, type=result_type)
+            env[align_target.name] = _RenderedValue(name=align_target.ssa_name, type=align_type)
+            return lines
+
+        if stmt.value.name == "pstu":
+            lines = []
+            align_in = self._lower_expr(stmt.value.args[0], env, indent=indent, into=lines)
+            value = self._lower_expr(stmt.value.args[1], env, indent=indent, into=lines)
+            base = self._lower_expr(stmt.value.args[2], env, indent=indent, into=lines)
+            align_target, base_target = stmt.targets
+            align_type, base_type = stmt.value.type.elements
+            lines.append(
+                self._indent(indent)
+                + f"{align_target.ssa_name}, {base_target.ssa_name} = pto.pstu "
+                + f"{align_in.name}, {value.name}, {base.name} : "
+                + f"{self._render_type(align_in.type)}, {self._render_type(value.type)}, {self._render_type(base.type)} "
+                + f"-> {self._render_type(align_type)}, {self._render_type(base_type)}"
+            )
+            env[align_target.name] = _RenderedValue(name=align_target.ssa_name, type=align_type)
+            env[base_target.name] = _RenderedValue(name=base_target.ssa_name, type=base_type)
             return lines
 
         raise NotImplementedError(
@@ -1067,6 +1011,85 @@ class _AuthoringRenderer:
         )
         return lines
 
+    def _render_predicate_store(
+        self,
+        stmt: SemanticPredicateStoreStmt,
+        env: dict[str, _RenderedValue],
+        *,
+        indent: int,
+    ) -> list[str]:
+        lines: list[str] = []
+        value = self._lower_expr(stmt.value, env, indent=indent, into=lines)
+        destination = self._lower_expr(stmt.destination, env, indent=indent, into=lines)
+        if isinstance(destination.type, SemanticTileType):
+            destination = self._materialize_tile_memref(destination, indent=indent, into=lines)
+        if (
+            isinstance(stmt.destination.type, SemanticTileType)
+            and stmt.destination.type.rank == 2
+            and len(stmt.indices) == 2
+        ):
+            destination = self._materialize_rank2_tile_subview(
+                destination,
+                stmt.destination.type,
+                stmt.indices,
+                env,
+                indent=indent,
+                into=lines,
+            )
+            rendered_offset = self._materialize_constant(0, SemanticIndexType())
+        else:
+            rendered_offset = self._lower_expr(stmt.indices[0], env, indent=indent, into=lines)
+        dist = self._render_string_literal(stmt.dist)
+        lines.append(
+            self._indent(indent)
+            + f"pto.psts {value.name}, {destination.name}[{rendered_offset.name}], {dist} : "
+            + f"{self._render_type(value.type)}, {self._render_type(destination.type)}, {self._render_type(rendered_offset.type)}"
+        )
+        return lines
+
+    def _render_align_store(
+        self,
+        stmt: SemanticAlignStoreStmt,
+        env: dict[str, _RenderedValue],
+        *,
+        indent: int,
+    ) -> list[str]:
+        lines: list[str] = []
+        value = self._lower_expr(stmt.value, env, indent=indent, into=lines)
+        destination = self._lower_expr(stmt.destination, env, indent=indent, into=lines)
+        if isinstance(destination.type, SemanticTileType):
+            destination = self._materialize_tile_memref(destination, indent=indent, into=lines)
+        if (
+            isinstance(stmt.destination.type, SemanticTileType)
+            and stmt.destination.type.rank == 2
+            and len(stmt.indices) == 2
+        ):
+            destination = self._materialize_rank2_tile_subview(
+                destination,
+                stmt.destination.type,
+                stmt.indices,
+                env,
+                indent=indent,
+                into=lines,
+            )
+        if stmt.op_name == "vstar":
+            lines.append(
+                self._indent(indent)
+                + f"pto.vstar {value.name}, {destination.name} : "
+                + f"{self._render_type(value.type)}, {self._render_type(destination.type)}"
+            )
+            return lines
+        if stmt.offset is None:
+            raise NotImplementedError("vstas lowering expects an explicit offset operand")
+        offset = self._lower_expr(stmt.offset, env, indent=indent, into=lines)
+        offset = self._coerce_rendered_value(offset, _I32_TYPE, indent=indent, into=lines)
+        lines.append(
+            self._indent(indent)
+            + f"pto.vstas {value.name}, {destination.name}, {offset.name} : "
+            + f"{self._render_type(value.type)}, {self._render_type(destination.type)}, {self._render_type(offset.type)}"
+        )
+        return lines
+
     def _render_scalar_store(
         self,
         stmt: SemanticScalarStoreStmt,
@@ -1141,160 +1164,6 @@ class _AuthoringRenderer:
             + f"{self._render_type(base.type)} to {self._render_type(subview_type)}"
         )
         return _RenderedValue(name=subview_name, type=subview_type)
-
-    def _lower_memory_buffer_without_offset(
-        self,
-        args: tuple[SemanticExpr, ...],
-        env: dict[str, _RenderedValue],
-        *,
-        indent: int,
-        into: list[str],
-    ) -> tuple[str, str]:
-        if not args:
-            raise NotImplementedError("memory buffer lowering expects at least one operand")
-        source = self._lower_expr(args[0], env, indent=indent, into=into)
-        if isinstance(source.type, SemanticTileType):
-            source = self._materialize_tile_access_ptr(
-                source,
-                args[1:],
-                env,
-                indent=indent,
-                into=into,
-            )
-            return source.name, self._render_type(source.type)
-        if len(args) != 1:
-            raise NotImplementedError("pointer memory buffer lowering does not accept tile-style indices")
-        return source.name, self._render_type(source.type)
-
-    def _lower_memory_buffer_with_offset(
-        self,
-        args: tuple[SemanticExpr, ...],
-        env: dict[str, _RenderedValue],
-        *,
-        indent: int,
-        into: list[str],
-    ) -> tuple[str, str, str, str]:
-        if not args:
-            raise NotImplementedError("memory buffer lowering expects at least one operand")
-        source = self._lower_expr(args[0], env, indent=indent, into=into)
-        if isinstance(source.type, SemanticTileType):
-            if not args[1:]:
-                raise NotImplementedError("tile memory buffer lowering requires element indices")
-            offset = self._materialize_tile_linear_offset(
-                source,
-                args[1:],
-                env,
-                indent=indent,
-                into=into,
-            )
-            source = self._materialize_tile_memref(source, indent=indent, into=into)
-            return (
-                source.name,
-                self._render_type(source.type),
-                offset.name,
-                self._render_type(offset.type),
-            )
-        if len(args) != 2:
-            raise NotImplementedError("pointer memory buffer lowering expects exactly one explicit offset operand")
-        offset = self._lower_expr(args[1], env, indent=indent, into=into)
-        return (
-            source.name,
-            self._render_type(source.type),
-            offset.name,
-            self._render_type(offset.type),
-        )
-
-    def _materialize_tile_access_ptr(
-        self,
-        tile_value: _RenderedValue,
-        indices: tuple[SemanticExpr, ...],
-        env: dict[str, _RenderedValue],
-        *,
-        indent: int,
-        into: list[str],
-    ) -> _RenderedValue:
-        base_ptr_name, base_ptr_type = self._materialize_copy_buffer_ptr(
-            tile_value,
-            indent=indent,
-            into=into,
-        )
-        if not indices:
-            return _RenderedValue(name=base_ptr_name, type=tile_value.type if isinstance(tile_value.type, SemanticPtrType) else SemanticPtrType(tile_value.type.element_dtype, tile_value.type.memory_space or "ub"))
-        offset = self._materialize_tile_linear_offset(
-            tile_value,
-            indices,
-            env,
-            indent=indent,
-            into=into,
-        )
-        typed_ptr_type = SemanticPtrType(
-            element_dtype=tile_value.type.element_dtype,
-            memory_space=tile_value.type.memory_space or "ub",
-        )
-        offset_ptr_name = self._new_temp()
-        into.append(
-            self._indent(indent)
-            + f"{offset_ptr_name} = pto.addptr {base_ptr_name}, {offset.name} : "
-            + f"{base_ptr_type} -> {self._render_type(typed_ptr_type)}"
-        )
-        return _RenderedValue(name=offset_ptr_name, type=typed_ptr_type)
-
-    def _materialize_tile_linear_offset(
-        self,
-        tile_value: _RenderedValue,
-        indices: tuple[SemanticExpr, ...],
-        env: dict[str, _RenderedValue],
-        *,
-        indent: int,
-        into: list[str],
-    ) -> _RenderedValue:
-        tile_type = tile_value.type
-        if not isinstance(tile_type, SemanticTileType):
-            raise NotImplementedError("tile linear offset lowering expects a Tile value")
-        if tile_type.rank == 1:
-            if len(indices) != 1:
-                raise NotImplementedError("rank-1 Tile access expects one index")
-            return self._lower_expr(indices[0], env, indent=indent, into=into)
-        if tile_type.rank != 2 or tile_type.shape is None:
-            raise NotImplementedError("Tile linear offset lowering expects a statically specialized rank-2 Tile")
-        if len(indices) != 2:
-            raise NotImplementedError("rank-2 Tile access expects two indices")
-
-        row = self._lower_expr(indices[0], env, indent=indent, into=into)
-        col = self._lower_expr(indices[1], env, indent=indent, into=into)
-        strides = tile_strides(tile_type.shape, tile_type.config or TileConfig())
-        stride0 = _RenderedValue(
-            name=self._materialize_constant(strides[0], SemanticIndexType()),
-            type=SemanticIndexType(),
-        )
-        stride1 = _RenderedValue(
-            name=self._materialize_constant(strides[1], SemanticIndexType()),
-            type=SemanticIndexType(),
-        )
-        row_term = self._emit_binary_value(
-            "mul",
-            row,
-            stride0,
-            SemanticIndexType(),
-            indent=indent,
-            into=into,
-        )
-        col_term = self._emit_binary_value(
-            "mul",
-            col,
-            stride1,
-            SemanticIndexType(),
-            indent=indent,
-            into=into,
-        )
-        return self._emit_binary_value(
-            "add",
-            row_term,
-            col_term,
-            SemanticIndexType(),
-            indent=indent,
-            into=into,
-        )
 
     def _tensor_slice_extents(self, expr: SemanticTensorSliceExpr) -> tuple[int, int]:
         if expr.type.rank != 2 or len(expr.type.extents) != 2:
@@ -1390,79 +1259,6 @@ class _AuthoringRenderer:
             return expr.value
         if isinstance(expr, SemanticBindingRef):
             return expr.binding.value
-        if isinstance(expr, SemanticAttributeAccess):
-            base_value = self._static_expr_value(expr.base)
-            if isinstance(base_value, TileConfig):
-                if expr.attr == "b_layout":
-                    return base_value.b_layout
-                if expr.attr == "s_layout":
-                    return base_value.s_layout
-                if expr.attr == "s_fractal_size":
-                    return base_value.s_fractal_size
-                if expr.attr == "pad_value":
-                    return base_value.pad_value
-            if base_value is not None and hasattr(base_value, expr.attr):
-                return getattr(base_value, expr.attr)
-            if isinstance(expr.base.type, SemanticTileType):
-                tile_type = expr.base.type
-                if expr.attr == "shape":
-                    return tile_type.shape
-                if expr.attr == "valid_shape":
-                    return None
-                if expr.attr == "rank":
-                    return tile_type.rank
-                if expr.attr == "memory_space":
-                    return None if tile_type.memory_space is None else MemorySpace(tile_type.memory_space)
-                if expr.attr == "config":
-                    return TileConfig() if tile_type.config is None else tile_type.config
-            if isinstance(expr.base.type, (SemanticTensorViewType, SemanticPartitionTensorViewType)) and expr.attr == "rank":
-                return expr.base.type.rank
-            return None
-        if isinstance(expr, SemanticTupleExpr):
-            values = []
-            for element in expr.elements:
-                value = self._static_expr_value(element)
-                if value is None:
-                    return None
-                values.append(value)
-            return tuple(values)
-        if isinstance(expr, SemanticSubscriptAccess):
-            base_value = self._static_expr_value(expr.base)
-            index_value = self._static_expr_value(expr.index)
-            if isinstance(base_value, (tuple, list)) and isinstance(index_value, int):
-                if 0 <= index_value < len(base_value):
-                    return base_value[index_value]
-            return None
-        if isinstance(expr, SemanticBinaryExpr):
-            lhs = self._static_expr_value(expr.lhs)
-            rhs = self._static_expr_value(expr.rhs)
-            if lhs is None or rhs is None:
-                return None
-            if expr.op == "add" and isinstance(lhs, int) and isinstance(rhs, int):
-                return lhs + rhs
-            if expr.op == "sub" and isinstance(lhs, int) and isinstance(rhs, int):
-                return lhs - rhs
-            if expr.op == "mul" and isinstance(lhs, int) and isinstance(rhs, int):
-                return lhs * rhs
-            if expr.op == "floordiv" and isinstance(lhs, int) and isinstance(rhs, int) and rhs != 0:
-                return lhs // rhs
-            if expr.op == "eq":
-                return lhs == rhs
-            if expr.op == "ne":
-                return lhs != rhs
-            if expr.op == "gt":
-                return lhs > rhs
-            if expr.op == "lt":
-                return lhs < rhs
-            if expr.op == "ge":
-                return lhs >= rhs
-            if expr.op == "le":
-                return lhs <= rhs
-            if expr.op == "and":
-                return bool(lhs) and bool(rhs)
-            if expr.op == "or":
-                return bool(lhs) or bool(rhs)
-            return None
         return None
 
     def _infer_dma_load_transfer(
@@ -2517,19 +2313,6 @@ class _AuthoringRenderer:
                 name=self._materialize_constant(expr.value, expr.type),
                 type=expr.type,
             )
-        static_value = self._static_expr_value(expr)
-        if static_value is not None and isinstance(expr.type, (SemanticIndexType, SemanticScalarType)):
-            if desired_name is not None and into is not None:
-                into.append(
-                    self._indent(indent)
-                    + f"{desired_name} = arith.constant {self._format_constant(static_value, expr.type)} : "
-                    f"{self._render_type(expr.type)}"
-                )
-                return _RenderedValue(name=desired_name, type=expr.type)
-            return _RenderedValue(
-                name=self._materialize_constant(static_value, expr.type),
-                type=expr.type,
-            )
         if isinstance(expr, SemanticSubscriptAccess):
             return self._lower_subscript_access(
                 expr,
@@ -2617,129 +2400,28 @@ class _AuthoringRenderer:
         if expr.namespace != "pto":
             raise NotImplementedError(f"unsupported call namespace {expr.namespace!r}")
         if isinstance(expr.type, SemanticTupleType):
-            raise NotImplementedError(
-                f"multi-result call `pto.{expr.name}` must be assigned directly in TileLang DSL v1"
-            )
+            raise NotImplementedError("multi-result call values must be assigned directly in TileLang DSL v1")
         if into is None:
             into = []
         result_name = desired_name or self._new_temp()
-
-        if isinstance(expr.type, SemanticMetaType) and expr.type.kind == "void":
-            if expr.name == "psts":
-                value = self._lower_expr(expr.args[0], env, indent=indent, into=into)
-                destination_name, destination_type, offset_name, _ = self._lower_memory_buffer_with_offset(
-                    expr.args[1:],
-                    env,
-                    indent=indent,
-                    into=into,
-                )
-                into.append(
-                    self._indent(indent)
-                    + f"pto.psts {value.name}, {destination_name}[{offset_name}] : "
-                    + f"{self._render_type(value.type)}, {destination_type}"
-                )
-                return _RenderedValue(name="__void_call__", type=expr.type)
-
-            if expr.name == "pst":
-                value = self._lower_expr(expr.args[0], env, indent=indent, into=into)
-                destination_name, destination_type, offset_name, offset_type = self._lower_memory_buffer_with_offset(
-                    expr.args[1:-1],
-                    env,
-                    indent=indent,
-                    into=into,
-                )
-                dist = self._render_string_literal(expr.args[-1])
-                into.append(
-                    self._indent(indent)
-                    + f"pto.pst {value.name}, {destination_name}[{offset_name}], {dist} : "
-                    + f"{self._render_type(value.type)}, {destination_type}, {offset_type}"
-                )
-                return _RenderedValue(name="__void_call__", type=expr.type)
-
-            if expr.name == "psti":
-                value = self._lower_expr(expr.args[0], env, indent=indent, into=into)
-                destination = self._lower_expr(expr.args[1], env, indent=indent, into=into)
-                offset = self._lower_expr(expr.args[2], env, indent=indent, into=into)
-                dist = self._render_string_literal(expr.args[-1])
-                into.append(
-                    self._indent(indent)
-                    + f"pto.psti {value.name}, {destination.name}, {offset.name}, {dist} : "
-                    + f"{self._render_type(value.type)}, {self._render_type(destination.type)}, {self._render_type(offset.type)}"
-                )
-                return _RenderedValue(name="__void_call__", type=expr.type)
-
-            if expr.name == "vsst":
-                value = self._lower_expr(expr.args[0], env, indent=indent, into=into)
-                destination_name, destination_type, offset_name, offset_type = self._lower_memory_buffer_with_offset(
-                    expr.args[1:-1],
-                    env,
-                    indent=indent,
-                    into=into,
-                )
-                stride = self._render_string_literal(expr.args[-1])
-                into.append(
-                    self._indent(indent)
-                    + f"pto.vsst {value.name}, {destination_name}[{offset_name}], {stride} : "
-                    + f"{self._render_type(value.type)}, {destination_type}"
-                )
-                return _RenderedValue(name="__void_call__", type=expr.type)
-
-            if expr.name == "vstx2":
-                low = self._lower_expr(expr.args[0], env, indent=indent, into=into)
-                high = self._lower_expr(expr.args[1], env, indent=indent, into=into)
-                destination_name, destination_type, offset_name, offset_type = self._lower_memory_buffer_with_offset(
-                    expr.args[2:-2],
-                    env,
-                    indent=indent,
-                    into=into,
-                )
-                dist = self._render_string_literal(expr.args[-2])
-                mask = self._lower_expr(expr.args[-1], env, indent=indent, into=into)
-                into.append(
-                    self._indent(indent)
-                    + f"pto.vstx2 {low.name}, {high.name}, {destination_name}[{offset_name}], {dist}, {mask.name} : "
-                    + f"{self._render_type(low.type)}, {self._render_type(high.type)}, {destination_type}, {offset_type}, {self._render_type(mask.type)}"
-                )
-                return _RenderedValue(name="__void_call__", type=expr.type)
-
-            if expr.name == "vsta":
-                value = self._lower_expr(expr.args[0], env, indent=indent, into=into)
-                destination_name, destination_type, offset_name, offset_type = self._lower_memory_buffer_with_offset(
-                    expr.args[1:],
-                    env,
-                    indent=indent,
-                    into=into,
-                )
-                into.append(
-                    self._indent(indent)
-                    + f"pto.vsta {value.name}, {destination_name}[{offset_name}] : "
-                    + f"{self._render_type(value.type)}, {destination_type}, {offset_type}"
-                )
-                return _RenderedValue(name="__void_call__", type=expr.type)
-
-            raise NotImplementedError(f"void pto call `pto.{expr.name}` is not supported in TileLang DSL v1")
 
         if expr.name == "make_mask":
             dtype_expr, pattern_expr = expr.args
             if not self._is_dtype_meta_expr(dtype_expr):
                 raise NotImplementedError("make_mask dtype lowering expects a dtype symbol")
-            pattern_value = self._extract_mask_pattern_value(pattern_expr)
-            if pattern_value is None:
+            if not isinstance(pattern_expr, SemanticSymbolExpr) or not isinstance(pattern_expr.value, MaskPattern):
                 raise NotImplementedError("make_mask pattern lowering expects a MaskPattern symbol")
             suffix = expr.type.granularity
             into.append(
                 self._indent(indent)
-                + f'{result_name} = pto.pset_{suffix} "{pattern_value}" : {self._render_type(expr.type)}'
+                + f'{result_name} = pto.pset_{suffix} "{pattern_expr.value.value}" : {self._render_type(expr.type)}'
             )
             return _RenderedValue(name=result_name, type=expr.type)
 
-        if expr.name in {"pset_b8", "pset_b16", "pset_b32", "pge_b8", "pge_b16", "pge_b32"}:
-            pattern_value = self._extract_mask_pattern_value(expr.args[0])
-            if pattern_value is None:
-                raise NotImplementedError(f"{expr.name} lowering expects a MaskPattern symbol")
+        if expr.name == "init_align":
             into.append(
                 self._indent(indent)
-                + f'{result_name} = pto.{expr.name} "{pattern_value}" : {self._render_type(expr.type)}'
+                + f"{result_name} = pto.init_align : {self._render_type(expr.type)}"
             )
             return _RenderedValue(name=result_name, type=expr.type)
 
@@ -2771,84 +2453,32 @@ class _AuthoringRenderer:
             return _RenderedValue(name=result_name, type=expr.type)
 
         if expr.name == "vldas":
-            source_name, source_type = self._lower_memory_buffer_without_offset(
-                expr.args,
-                env,
-                indent=indent,
-                into=into,
-            )
-            into.append(
-                self._indent(indent)
-                + f"{result_name} = pto.vldas {source_name} : {source_type} -> {self._render_type(expr.type)}"
-            )
-            return _RenderedValue(name=result_name, type=expr.type)
-
-        if expr.name == "plds":
-            source_name, source_type, offset_name, _ = self._lower_memory_buffer_with_offset(
-                expr.args[:-1],
-                env,
-                indent=indent,
-                into=into,
-            )
-            dist = self._render_string_literal(expr.args[-1])
-            into.append(
-                self._indent(indent)
-                + f'{result_name} = pto.plds {source_name}[{offset_name}] {{dist = {dist}}} : '
-                + f"{source_type} -> {self._render_type(expr.type)}"
-            )
-            return _RenderedValue(name=result_name, type=expr.type)
-
-        if expr.name == "pld":
-            source_name, source_type, offset_name, offset_type = self._lower_memory_buffer_with_offset(
-                expr.args[:-1],
-                env,
-                indent=indent,
-                into=into,
-            )
-            dist = self._render_string_literal(expr.args[-1])
-            into.append(
-                self._indent(indent)
-                + f"{result_name} = pto.pld {source_name}[{offset_name}], {dist} : "
-                + f"{source_type}, {offset_type} -> {self._render_type(expr.type)}"
-            )
-            return _RenderedValue(name=result_name, type=expr.type)
-
-        if expr.name == "pldi":
             source = self._lower_expr(expr.args[0], env, indent=indent, into=into)
-            offset = self._lower_expr(expr.args[1], env, indent=indent, into=into)
-            dist = self._render_string_literal(expr.args[2])
+            index_args = expr.args[1:]
+            if isinstance(source.type, SemanticTileType):
+                source = self._materialize_tile_memref(source, indent=indent, into=into)
+            if (
+                isinstance(expr.args[0].type, SemanticTileType)
+                and expr.args[0].type.rank == 2
+                and len(index_args) == 2
+            ):
+                source = self._materialize_rank2_tile_subview(
+                    source,
+                    expr.args[0].type,
+                    index_args,
+                    env,
+                    indent=indent,
+                    into=into,
+                )
+            if self._is_memref_like_type(source.type):
+                ptr_name, ptr_type = self._materialize_copy_buffer_ptr(source, indent=indent, into=into)
+                source = _RenderedValue(name=ptr_name, type=_RenderedTextualType(ptr_type))
             into.append(
                 self._indent(indent)
-                + f"{result_name} = pto.pldi {source.name}, {offset.name}, {dist} : "
-                + f"{self._render_type(source.type)}, {self._render_type(offset.type)} -> {self._render_type(expr.type)}"
+                + f"{result_name} = pto.vldas {source.name} : "
+                + f"{self._render_type(source.type)} -> {self._render_type(expr.type)}"
             )
             return _RenderedValue(name=result_name, type=expr.type)
-
-        if expr.name == "vsld":
-            source_name, source_type, offset_name, offset_type = self._lower_memory_buffer_with_offset(
-                expr.args[:-1],
-                env,
-                indent=indent,
-                into=into,
-            )
-            stride = self._render_string_literal(expr.args[-1])
-            into.append(
-                self._indent(indent)
-                + f"{result_name} = pto.vsld {source_name}[{offset_name}], {stride} : "
-                + f"{source_type} -> {self._render_type(expr.type)}"
-            )
-            return _RenderedValue(name=result_name, type=expr.type)
-
-        if expr.name == "vstur":
-            align = self._lower_expr(expr.args[0], env, indent=indent, into=into)
-            value = self._lower_expr(expr.args[1], env, indent=indent, into=into)
-            base = self._lower_expr(expr.args[2], env, indent=indent, into=into)
-            mode = self._render_string_literal(expr.args[3])
-            into.append(
-                self._indent(indent)
-                + f"{result_name} = pto.vstur {align.name}, {value.name}, {base.name}, {mode} : "
-                + f"{self._render_type(align.type)}, {self._render_type(value.type)}, {self._render_type(base.type)} -> {self._render_type(expr.type)}"
-            )
 
         if expr.name == "load_scalar":
             source = self._lower_expr(expr.args[0], env, indent=indent, into=into)
@@ -2857,6 +2487,33 @@ class _AuthoringRenderer:
                 self._indent(indent)
                 + f"{result_name} = pto.load_scalar {source.name}[{offset.name}] : "
                 + f"{self._render_type(source.type)} -> {self._render_type(expr.type)}"
+            )
+            return _RenderedValue(name=result_name, type=expr.type)
+
+        if expr.name == "vstus":
+            align_in = self._lower_expr(expr.args[0], env, indent=indent, into=into)
+            offset = self._lower_expr(expr.args[1], env, indent=indent, into=into)
+            offset = self._coerce_rendered_value(offset, _I32_TYPE, indent=indent, into=into)
+            value = self._lower_expr(expr.args[2], env, indent=indent, into=into)
+            base = self._lower_expr(expr.args[3], env, indent=indent, into=into)
+            into.append(
+                self._indent(indent)
+                + f"{result_name} = pto.vstus {align_in.name}, {offset.name}, {value.name}, {base.name} : "
+                + f"{self._render_type(align_in.type)}, {self._render_type(offset.type)}, {self._render_type(value.type)}, {self._render_type(base.type)} "
+                + f"-> {self._render_type(expr.type)}"
+            )
+            return _RenderedValue(name=result_name, type=expr.type)
+
+        if expr.name == "vstur":
+            align_in = self._lower_expr(expr.args[0], env, indent=indent, into=into)
+            value = self._lower_expr(expr.args[1], env, indent=indent, into=into)
+            base = self._lower_expr(expr.args[2], env, indent=indent, into=into)
+            mode = self._render_string_literal(expr.args[3])
+            into.append(
+                self._indent(indent)
+                + f"{result_name} = pto.vstur {align_in.name}, {value.name}, {base.name}, {mode} : "
+                + f"{self._render_type(align_in.type)}, {self._render_type(value.type)}, {self._render_type(base.type)} "
+                + f"-> {self._render_type(expr.type)}"
             )
             return _RenderedValue(name=result_name, type=expr.type)
 
@@ -2986,18 +2643,6 @@ class _AuthoringRenderer:
             into.append(
                 self._indent(indent)
                 + f"{result_name} = pto.psel {src0.name}, {src1.name}, {mask.name} : "
-                + f"{self._render_type(src0.type)}, {self._render_type(src1.type)}, {self._render_type(mask.type)} "
-                + f"-> {self._render_type(expr.type)}"
-            )
-            return _RenderedValue(name=result_name, type=expr.type)
-
-        if expr.name in {"pand", "por", "pxor"}:
-            src0 = self._lower_expr(expr.args[0], env, indent=indent, into=into)
-            src1 = self._lower_expr(expr.args[1], env, indent=indent, into=into)
-            mask = self._lower_expr(expr.args[2], env, indent=indent, into=into)
-            into.append(
-                self._indent(indent)
-                + f"{result_name} = pto.{expr.name} {src0.name}, {src1.name}, {mask.name} : "
                 + f"{self._render_type(src0.type)}, {self._render_type(src1.type)}, {self._render_type(mask.type)} "
                 + f"-> {self._render_type(expr.type)}"
             )
@@ -3525,34 +3170,6 @@ class _AuthoringRenderer:
             raise NotImplementedError("tail make_mask lowering expects a mask result type")
         return ty.granularity
 
-    def _extract_mask_pattern_value(self, expr: SemanticExpr) -> str | None:
-        if isinstance(expr, SemanticSymbolExpr) and isinstance(expr.value, MaskPattern):
-            return expr.value.value
-        if (
-            isinstance(expr, SemanticBindingRef)
-            and isinstance(expr.type, SemanticMetaType)
-            and expr.type.kind == "mask_pattern"
-            and isinstance(expr.binding.value, MaskPattern)
-        ):
-            return expr.binding.value.value
-        return None
-
-    def _emit_full_mask_for_type(
-        self,
-        ty: SemanticType,
-        *,
-        indent: int,
-        into: list[str],
-    ) -> _RenderedValue:
-        if not isinstance(ty, SemanticMaskType):
-            raise NotImplementedError("full-mask synthesis expects a mask type")
-        result_name = self._new_temp()
-        into.append(
-            self._indent(indent)
-            + f'{result_name} = pto.pset_{ty.granularity} "PAT_ALL" : {self._render_type(ty)}'
-        )
-        return _RenderedValue(name=result_name, type=ty)
-
     def _is_dtype_meta_expr(self, expr: SemanticExpr) -> bool:
         if isinstance(expr, SemanticSymbolExpr):
             return isinstance(expr.value, ScalarType) and expr.type.kind == "dtype"
@@ -3698,10 +3315,6 @@ class _AuthoringRenderer:
         expr: SemanticSubscriptAccess,
         env: dict[str, _RenderedValue],
     ) -> int | _RenderedValue:
-        base_static = self._static_expr_value(expr.base)
-        index_static = self._static_expr_value(expr.index)
-        if isinstance(base_static, (tuple, list)) and isinstance(index_static, int):
-            return base_static[index_static]
         if not isinstance(expr.base, SemanticAttributeAccess):
             raise NotImplementedError("only shape/stride indexing is supported in TileLang DSL v1 lowering")
         if expr.base.attr not in {"shape", "valid_shape", "strides"}:
@@ -3809,8 +3422,6 @@ class _AuthoringRenderer:
             return ty.dtype.name
         if isinstance(ty, SemanticPtrType):
             return f"!pto.ptr<{ty.element_dtype.name}, {ty.memory_space}>"
-        if isinstance(ty, SemanticAlignType):
-            return "!pto.align"
         if isinstance(ty, SemanticTensorViewType):
             return self._render_tensor_view_type(
                 element_dtype=ty.element_dtype.name,
@@ -3823,6 +3434,8 @@ class _AuthoringRenderer:
             )
         if isinstance(ty, SemanticTileType):
             return self._render_tile_buf_type(ty)
+        if isinstance(ty, SemanticAlignType):
+            return "!pto.align"
         if isinstance(ty, SemanticMaskType):
             return f"!pto.mask<{ty.granularity}>"
         if isinstance(ty, SemanticVRegType):
@@ -3889,12 +3502,11 @@ class _AuthoringRenderer:
         valid_shape = ty.valid_shape or ty.shape
         v_row = valid_shape[0]
         v_col = 1 if ty.rank == 1 else valid_shape[1]
-        config = ty.config or TileConfig()
         return (
             f"!pto.tile_buf<loc={self._render_tile_buf_loc(ty.memory_space or 'ub')}, "
             f"dtype={ty.element_dtype.name}, rows={rows}, cols={cols}, "
             f"v_row={self._render_tile_buf_dim(v_row)}, v_col={self._render_tile_buf_dim(v_col)}, "
-            f"blayout={config.b_layout.value}, slayout=none_box, fractal=512, pad=0>"
+            "blayout=row_major, slayout=none_box, fractal=512, pad=0>"
         )
 
     def _render_tile_buf_loc(self, memory_space: str) -> str:
