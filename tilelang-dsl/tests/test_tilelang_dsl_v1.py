@@ -36,14 +36,20 @@ from tilelang_dsl.semantic import (
     SemanticDmaConfigStmt,
     SemanticExprStmt,
     SemanticForStmt,
+    SemanticGetBufStmt,
     SemanticIfStmt,
     SemanticIndexType,
+    SemanticMemBarStmt,
     SemanticLowLevelCopyStmt,
     SemanticMaskType,
     SemanticPipeBarrierStmt,
     SemanticPtrType,
+    SemanticRlsBufStmt,
     SemanticScalarType,
+    SemanticSetCrossCoreStmt,
     SemanticSetFlagStmt,
+    SemanticSetIntraBlockStmt,
+    SemanticSetIntraCoreStmt,
     SemanticStrictVecscopeStmt,
     SemanticSymbolExpr,
     SemanticTensorViewType,
@@ -51,7 +57,9 @@ from tilelang_dsl.semantic import (
     SemanticVecscopeStmt,
     SemanticVectorStoreStmt,
     SemanticVRegType,
+    SemanticWaitFlagDevStmt,
     SemanticWaitFlagStmt,
+    SemanticWaitIntraCoreStmt,
     analyze_frontend_kernel,
 )
 
@@ -84,6 +92,7 @@ class TileLangDSLPackageTests(unittest.TestCase):
         self.assertTrue(hasattr(pto, "elements_per_vreg"))
         self.assertTrue(hasattr(pto, "PAT"))
         self.assertTrue(hasattr(pto, "PadMode"))
+        self.assertTrue(hasattr(pto, "BarrierType"))
         self.assertTrue(hasattr(pto, "PositionMode"))
         self.assertTrue(hasattr(pto, "OrderMode"))
         self.assertTrue(hasattr(pto, "DeinterleaveDist"))
@@ -94,6 +103,7 @@ class TileLangDSLPackageTests(unittest.TestCase):
         self.assertTrue(hasattr(pto, "PIPE"))
         self.assertTrue(hasattr(pto, "EVENT"))
         self.assertEqual(repr(pto.align), "align")
+        self.assertEqual(pto.BarrierType.VST_VLD.value, "VST_VLD")
         self.assertEqual(pto.PadMode.PadNull.value, "PadNull")
         self.assertEqual(pto.PadMode.PadFirstElem.value, "PadFirstElem")
         self.assertEqual(pto.PadMode.PadValue.value, "PadValue")
@@ -109,6 +119,7 @@ class TileLangDSLPackageTests(unittest.TestCase):
         self.assertEqual(pto.PredicatePart.LOWER.value, "LOWER")
         self.assertEqual(pto.PredicatePart.HIGHER.value, "HIGHER")
         self.assertEqual(pto.StrideMode.S4_B64.value, "STRIDE_S4_B64")
+        self.assertEqual(pto.Event.ID31.value, "EVENT_ID31")
 
 
 class TileLangDSLSupportMatrixTests(unittest.TestCase):
@@ -151,6 +162,15 @@ class TileLangDSLSupportMatrixTests(unittest.TestCase):
         self.assertEqual(get_feature_tier("pto.vsta"), BASIC_TIER)
         self.assertEqual(get_feature_tier("pto.vadd"), BASIC_TIER)
         self.assertEqual(get_feature_tier("pto.vmuls"), BASIC_TIER)
+        self.assertEqual(get_feature_tier("pto.get_buf"), BASIC_TIER)
+        self.assertEqual(get_feature_tier("pto.rls_buf"), BASIC_TIER)
+        self.assertEqual(get_feature_tier("pto.mem_bar"), BASIC_TIER)
+        self.assertEqual(get_feature_tier("pto.set_cross_core"), BASIC_TIER)
+        self.assertEqual(get_feature_tier("pto.set_intra_block"), BASIC_TIER)
+        self.assertEqual(get_feature_tier("pto.set_intra_core"), BASIC_TIER)
+        self.assertEqual(get_feature_tier("pto.wait_flag_dev"), BASIC_TIER)
+        self.assertEqual(get_feature_tier("pto.wait_intra_core"), BASIC_TIER)
+        self.assertEqual(get_feature_tier("BarrierType"), BASIC_TIER)
         self.assertEqual(get_feature_tier("pto.vaddrelu"), BASIC_TIER)
         self.assertEqual(get_feature_tier("pto.vaxpy"), BASIC_TIER)
         self.assertEqual(get_feature_tier("pto.vmull"), BASIC_TIER)
@@ -3698,23 +3718,66 @@ class TileLangDSLDescriptorTests(unittest.TestCase):
         def kernel(inp: pto.TensorView, tile: pto.Tile):
             pto.set_flag(Pipe.MTE2, Pipe.V, Event.ID31)
             pto.wait_flag(Pipe.MTE2, Pipe.V, Event.ID31)
+
+    def test_extended_sync_buffer_ops_lower_to_authoring_surface(self) -> None:
+        Pipe = pto.Pipe
+        Event = pto.Event
+        BarrierType = pto.BarrierType
+
+        @pto.vkernel(
+            op="extended_sync_surface",
+            dtypes=[(pto.f32, pto.i64, pto.i64, pto.i64, pto.i64, pto.i32)],
+            advanced=True,
+        )
+        def kernel(
+            tile: pto.Tile,
+            buf_id: pto.i64,
+            mode: pto.i64,
+            core_id: pto.i64,
+            block_id: pto.i64,
+            config: pto.i32,
+        ):
+            pto.get_buf(Pipe.MTE2, buf_id, mode)
+            pto.rls_buf(Pipe.V, buf_id)
+            pto.mem_bar(BarrierType.VST_VLD)
+            pto.set_cross_core(core_id, Event.ID7)
+            pto.set_intra_block(block_id, Event.ID16)
+            pto.set_intra_core(config)
+            pto.wait_flag_dev(core_id, Event.ID8)
+            pto.wait_intra_core(block_id, Event.ID31)
+            with pto.strict_vecscope(tile, tile, 0, 128, 64) as (src, dst, lb, ub, step):
+                for lane in range(lb, ub, step):
+                    mask = pto.make_mask(pto.f32, pto.PAT.ALL)
+                    vec = pto.vlds(src, lane)
+                    pto.vsts(vec, dst, lane, mask)
             return None
 
         specialized = kernel.specialize(
             tile=pto.TileSpecialization(
-                shape=(16, 16),
+                shape=(8, 16),
                 memory_space=pto.MemorySpace.UB,
             )
         )
 
         semantic_kernel = analyze_frontend_kernel(build_frontend_kernel_node(specialized))
-        self.assertIsInstance(semantic_kernel.body[0], SemanticSetFlagStmt)
-        self.assertIsInstance(semantic_kernel.body[1], SemanticWaitFlagStmt)
-        self.assertEqual(pto.Event.ID31.value, "EVENT_ID31")
+        self.assertIsInstance(semantic_kernel.body[0], SemanticGetBufStmt)
+        self.assertIsInstance(semantic_kernel.body[1], SemanticRlsBufStmt)
+        self.assertIsInstance(semantic_kernel.body[2], SemanticMemBarStmt)
+        self.assertIsInstance(semantic_kernel.body[3], SemanticSetCrossCoreStmt)
+        self.assertIsInstance(semantic_kernel.body[4], SemanticSetIntraBlockStmt)
+        self.assertIsInstance(semantic_kernel.body[5], SemanticSetIntraCoreStmt)
+        self.assertIsInstance(semantic_kernel.body[6], SemanticWaitFlagDevStmt)
+        self.assertIsInstance(semantic_kernel.body[7], SemanticWaitIntraCoreStmt)
 
         text = specialized.mlir_text()
-        self.assertIn('pto.set_flag["PIPE_MTE2", "PIPE_V", "EVENT_ID31"]', text)
-        self.assertIn('pto.wait_flag["PIPE_MTE2", "PIPE_V", "EVENT_ID31"]', text)
+        self.assertIn('pto.get_buf "PIPE_MTE2", %arg1, %arg2 : i64, i64', text)
+        self.assertIn('pto.rls_buf "PIPE_V", %arg1, %c0_i64 : i64, i64', text)
+        self.assertIn('pto.mem_bar "VST_VLD"', text)
+        self.assertIn("pto.set_cross_core %arg3, %c7_i64 : i64, i64", text)
+        self.assertIn("pto.set_intra_block %arg4, %c16_i64 : i64, i64", text)
+        self.assertIn("pto.set_intra_core %arg5 : i32", text)
+        self.assertIn("pto.wait_flag_dev %arg3, %c8_i64 : i64, i64", text)
+        self.assertIn("pto.wait_intra_core %arg4, %c31_i64 : i64, i64", text)
 
     def test_strict_vecscope_rejects_implicit_capture_during_semantic_analysis(self) -> None:
         @pto.vkernel(op="eltwise", dtypes=[(pto.f32, pto.f16, pto.i32)], advanced=True)

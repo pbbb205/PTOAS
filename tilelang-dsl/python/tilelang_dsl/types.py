@@ -142,6 +142,10 @@ class Event(str, Enum):
     ID29 = "EVENT_ID29"
     ID30 = "EVENT_ID30"
     ID31 = "EVENT_ID31"
+class BarrierType(str, Enum):
+    VV_ALL = "VV_ALL"
+    VST_VLD = "VST_VLD"
+    VLD_VST = "VLD_VST"
 
 
 class MaskPattern(str, Enum):
@@ -421,6 +425,7 @@ __all__ = [
     "EVENT",
     "MaskPattern",
     "PAT",
+    "BarrierType",
     "PadMode",
     "PositionMode",
     "OrderMode",

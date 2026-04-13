@@ -34,6 +34,14 @@ SUPPORTED_TOPLEVEL_PTO_CALLS = frozenset(
         "wait_flag",
         "pipe_barrier",
         "barrier",
+        "get_buf",
+        "rls_buf",
+        "mem_bar",
+        "set_cross_core",
+        "set_intra_block",
+        "set_intra_core",
+        "wait_flag_dev",
+        "wait_intra_core",
     }
 )
 
@@ -318,8 +326,6 @@ UNSUPPORTED_LANGUAGE_CONSTRUCTS = frozenset(
         "dma_store",
         "pto.dma_load",
         "pto.dma_store",
-        "pto.get_buf",
-        "pto.rls_buf",
         "pto.dma_copy",
         "pto.vreduce",
         "pto.tile",
@@ -340,6 +346,7 @@ LANGUAGE_CONSTRUCT_TIERS = {
     "pto.mask_b8": BASIC_TIER,
     "pto.mask_b16": BASIC_TIER,
     "pto.mask_b32": BASIC_TIER,
+    "BarrierType": BASIC_TIER,
     "PadMode": BASIC_TIER,
     "BLayout": BASIC_TIER,
     "SLayout": BASIC_TIER,

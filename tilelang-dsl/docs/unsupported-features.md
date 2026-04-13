@@ -48,14 +48,6 @@ The following guide surfaces are not implemented as public APIs:
 - `pto.tile_with_strides(...)`
 - `pto.tile_config(...)`
 
-### Missing Sync/Buffer Control Ops
-
-These documented surfaces are not accepted by the current frontend:
-
-- `pto.get_buf(...)`
-- `pto.rls_buf(...)`
-
-
 ### Missing Vector Load/Store Families
 
 The previously missing vector-memory surfaces

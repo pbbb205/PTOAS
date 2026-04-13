@@ -26,19 +26,25 @@ from .semantic import (
     SemanticExpr,
     SemanticExprStmt,
     SemanticForStmt,
+    SemanticGetBufStmt,
     SemanticIfStmt,
     SemanticIndexType,
     SemanticIfResult,
     SemanticKernel,
     SemanticLiteralExpr,
+    SemanticMemBarStmt,
     SemanticLowLevelCopyStmt,
     SemanticMaskType,
     SemanticMetaType,
     SemanticPipeBarrierStmt,
     SemanticPtrType,
     SemanticReturnStmt,
+    SemanticRlsBufStmt,
     SemanticScalarType,
+    SemanticSetCrossCoreStmt,
     SemanticSetFlagStmt,
+    SemanticSetIntraBlockStmt,
+    SemanticSetIntraCoreStmt,
     SemanticShapeType,
     SemanticStmt,
     SemanticVecscopeStmt,
@@ -54,7 +60,9 @@ from .semantic import (
     SemanticTupleType,
     SemanticVRegType,
     SemanticVectorStoreStmt,
+    SemanticWaitFlagDevStmt,
     SemanticWaitFlagStmt,
+    SemanticWaitIntraCoreStmt,
 )
 from .types import MaskPattern, MemorySpace, ScalarType, TileConfig, get_lanes, tile_strides
 
@@ -408,6 +416,22 @@ class _AuthoringRenderer:
             ]
         if isinstance(stmt, SemanticPipeBarrierStmt):
             return [self._indent(indent) + f"pto.barrier #pto.pipe<{stmt.pipe}>"]
+        if isinstance(stmt, SemanticGetBufStmt):
+            return self._render_buffer_sync_stmt("get_buf", stmt.pipe, stmt.buf_id, stmt.mode, env, indent=indent)
+        if isinstance(stmt, SemanticRlsBufStmt):
+            return self._render_buffer_sync_stmt("rls_buf", stmt.pipe, stmt.buf_id, stmt.mode, env, indent=indent)
+        if isinstance(stmt, SemanticMemBarStmt):
+            return [self._indent(indent) + f'pto.mem_bar "{stmt.barrier_type}"']
+        if isinstance(stmt, SemanticSetCrossCoreStmt):
+            return self._render_i64_pair_stmt("set_cross_core", stmt.core_id, stmt.event_id, env, indent=indent)
+        if isinstance(stmt, SemanticSetIntraBlockStmt):
+            return self._render_i64_pair_stmt("set_intra_block", stmt.block_id, stmt.event_id, env, indent=indent)
+        if isinstance(stmt, SemanticSetIntraCoreStmt):
+            return self._render_i32_stmt("set_intra_core", stmt.config, env, indent=indent)
+        if isinstance(stmt, SemanticWaitFlagDevStmt):
+            return self._render_i64_pair_stmt("wait_flag_dev", stmt.core_id, stmt.event_id, env, indent=indent)
+        if isinstance(stmt, SemanticWaitIntraCoreStmt):
+            return self._render_i64_pair_stmt("wait_intra_core", stmt.block_id, stmt.event_id, env, indent=indent)
         if isinstance(stmt, SemanticDmaConfigStmt):
             return self._render_dma_config(stmt, env, indent=indent)
         if isinstance(stmt, SemanticLowLevelCopyStmt):
@@ -442,6 +466,59 @@ class _AuthoringRenderer:
         lines.append(
             self._indent(indent)
             + f"pto.{stmt.name} {first.name}, {second.name} : i64, i64"
+        )
+        return lines
+
+    def _render_buffer_sync_stmt(
+        self,
+        name: str,
+        pipe: str,
+        buf_id: SemanticExpr,
+        mode: SemanticExpr,
+        env: dict[str, _RenderedValue],
+        *,
+        indent: int,
+    ) -> list[str]:
+        lines: list[str] = []
+        rendered_buf_id = self._lower_to_i64(buf_id, env, indent=indent, into=lines)
+        rendered_mode = self._lower_to_i64(mode, env, indent=indent, into=lines)
+        lines.append(
+            self._indent(indent)
+            + f'pto.{name} "{pipe}", {rendered_buf_id.name}, {rendered_mode.name} : i64, i64'
+        )
+        return lines
+
+    def _render_i64_pair_stmt(
+        self,
+        name: str,
+        first: SemanticExpr,
+        second: SemanticExpr,
+        env: dict[str, _RenderedValue],
+        *,
+        indent: int,
+    ) -> list[str]:
+        lines: list[str] = []
+        rendered_first = self._lower_to_i64(first, env, indent=indent, into=lines)
+        rendered_second = self._lower_to_i64(second, env, indent=indent, into=lines)
+        lines.append(
+            self._indent(indent)
+            + f"pto.{name} {rendered_first.name}, {rendered_second.name} : i64, i64"
+        )
+        return lines
+
+    def _render_i32_stmt(
+        self,
+        name: str,
+        value: SemanticExpr,
+        env: dict[str, _RenderedValue],
+        *,
+        indent: int,
+    ) -> list[str]:
+        lines: list[str] = []
+        rendered_value = self._lower_to_i32(value, env, indent=indent, into=lines)
+        lines.append(
+            self._indent(indent)
+            + f"pto.{name} {rendered_value.name} : i32"
         )
         return lines
 
@@ -3097,6 +3174,26 @@ class _AuthoringRenderer:
     ) -> _RenderedValue:
         value = self._lower_expr(expr, env, indent=indent, into=into)
         return self._coerce_rendered_to_i64(value, indent=indent, into=into)
+
+    def _lower_to_i32(
+        self,
+        expr: SemanticExpr,
+        env: dict[str, _RenderedValue],
+        *,
+        indent: int,
+        into: list[str],
+    ) -> _RenderedValue:
+        value = self._lower_expr(expr, env, indent=indent, into=into)
+        if isinstance(value.type, SemanticScalarType) and value.type.dtype.name == "i32":
+            return value
+        if isinstance(value.type, SemanticIndexType):
+            cast_name = self._new_temp()
+            into.append(
+                self._indent(indent)
+                + f"{cast_name} = arith.index_cast {value.name} : index to i32"
+            )
+            return _RenderedValue(name=cast_name, type=_I32_TYPE)
+        raise NotImplementedError("expected an i32 or index operand during TileLang DSL v1 lowering")
 
     def _coerce_rendered_to_i64(
         self,

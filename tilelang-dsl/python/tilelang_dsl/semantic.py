@@ -48,6 +48,7 @@ from .support_matrix import (
 )
 from .types import (
     BLayout,
+    BarrierType,
     DeinterleaveDist,
     Event,
     InterleaveDist,
@@ -97,6 +98,7 @@ _MASK_TYPE_SYMBOLS = {
 _PATTERN_SYMBOLS = {pattern.name: pattern for pattern in MaskPattern}
 _PIPE_SYMBOLS = {pipe.name: pipe for pipe in Pipe}
 _EVENT_SYMBOLS = {event.name: event for event in Event}
+_BARRIER_TYPE_SYMBOLS = {barrier_type.name: barrier_type for barrier_type in BarrierType}
 _MEMORY_SPACE_SYMBOLS = {memory_space.name: memory_space for memory_space in MemorySpace}
 _B_LAYOUT_SYMBOLS = {layout.name: layout for layout in BLayout}
 _S_LAYOUT_SYMBOLS = {layout.name: layout for layout in SLayout}
@@ -484,6 +486,54 @@ class SemanticWaitFlagStmt(SemanticStmt):
 @dataclass(frozen=True)
 class SemanticPipeBarrierStmt(SemanticStmt):
     pipe: str
+
+
+@dataclass(frozen=True)
+class SemanticGetBufStmt(SemanticStmt):
+    pipe: str
+    buf_id: SemanticExpr
+    mode: SemanticExpr
+
+
+@dataclass(frozen=True)
+class SemanticRlsBufStmt(SemanticStmt):
+    pipe: str
+    buf_id: SemanticExpr
+    mode: SemanticExpr
+
+
+@dataclass(frozen=True)
+class SemanticMemBarStmt(SemanticStmt):
+    barrier_type: str
+
+
+@dataclass(frozen=True)
+class SemanticSetCrossCoreStmt(SemanticStmt):
+    core_id: SemanticExpr
+    event_id: SemanticExpr
+
+
+@dataclass(frozen=True)
+class SemanticSetIntraBlockStmt(SemanticStmt):
+    block_id: SemanticExpr
+    event_id: SemanticExpr
+
+
+@dataclass(frozen=True)
+class SemanticSetIntraCoreStmt(SemanticStmt):
+    config: SemanticExpr
+
+
+@dataclass(frozen=True)
+class SemanticWaitFlagDevStmt(SemanticStmt):
+    core_id: SemanticExpr
+    event_id: SemanticExpr
+
+
+@dataclass(frozen=True)
+class SemanticWaitIntraCoreStmt(SemanticStmt):
+    block_id: SemanticExpr
+    event_id: SemanticExpr
 
 
 @dataclass(frozen=True)
@@ -1285,7 +1335,20 @@ class _SemanticAnalyzer:
         return (
             isinstance(expr, FrontendCallExpr)
             and expr.namespace == "pto"
-            and expr.name in {"set_flag", "wait_flag", "pipe_barrier", "barrier"}
+            and expr.name in {
+                "set_flag",
+                "wait_flag",
+                "pipe_barrier",
+                "barrier",
+                "get_buf",
+                "rls_buf",
+                "mem_bar",
+                "set_cross_core",
+                "set_intra_block",
+                "set_intra_core",
+                "wait_flag_dev",
+                "wait_intra_core",
+            }
         )
 
     def _is_low_level_dma_call(self, expr: FrontendExprNode) -> bool:
@@ -1663,6 +1726,40 @@ class _SemanticAnalyzer:
             if expr.name == "set_flag":
                 return SemanticSetFlagStmt(src_pipe=src_pipe, dst_pipe=dst_pipe, event=event), dict(env)
             return SemanticWaitFlagStmt(src_pipe=src_pipe, dst_pipe=dst_pipe, event=event), dict(env)
+        if expr.name in {"get_buf", "rls_buf"}:
+            if len(args) not in {2, 3}:
+                raise TypeError(f"pto.{expr.name} expects 2 or 3 positional arguments in TileLang DSL v1")
+            pipe = self._require_sync_pipe(args[0], f"pto.{expr.name} pipe")
+            self._require_i64_like_expr(args[1], f"pto.{expr.name} buf_id")
+            mode = args[2] if len(args) == 3 else SemanticLiteralExpr(value=0, type=SemanticScalarType(dtype=i64))
+            self._require_i64_like_expr(mode, f"pto.{expr.name} mode")
+            if expr.name == "get_buf":
+                return SemanticGetBufStmt(pipe=pipe, buf_id=args[1], mode=mode), dict(env)
+            return SemanticRlsBufStmt(pipe=pipe, buf_id=args[1], mode=mode), dict(env)
+        if expr.name == "mem_bar":
+            if len(args) != 1:
+                raise TypeError("pto.mem_bar expects exactly 1 positional argument in TileLang DSL v1")
+            barrier_type = self._require_barrier_type(args[0], "pto.mem_bar barrier_type")
+            return SemanticMemBarStmt(barrier_type=barrier_type), dict(env)
+        if expr.name in {"set_cross_core", "set_intra_block", "wait_flag_dev", "wait_intra_core"}:
+            if len(args) != 2:
+                raise TypeError(f"pto.{expr.name} expects exactly 2 positional arguments in TileLang DSL v1")
+            identifier = self._require_scalar_or_index_expr(args[0], f"pto.{expr.name} first operand")
+            self._require_i64_like_expr(identifier, f"pto.{expr.name} first operand")
+            event_id = self._normalize_event_id_expr(args[1], f"pto.{expr.name} event_id")
+            if expr.name == "set_cross_core":
+                return SemanticSetCrossCoreStmt(core_id=identifier, event_id=event_id), dict(env)
+            if expr.name == "set_intra_block":
+                return SemanticSetIntraBlockStmt(block_id=identifier, event_id=event_id), dict(env)
+            if expr.name == "wait_flag_dev":
+                return SemanticWaitFlagDevStmt(core_id=identifier, event_id=event_id), dict(env)
+            return SemanticWaitIntraCoreStmt(block_id=identifier, event_id=event_id), dict(env)
+        if expr.name == "set_intra_core":
+            if len(args) != 1:
+                raise TypeError("pto.set_intra_core expects exactly 1 positional argument in TileLang DSL v1")
+            config = self._require_scalar_or_index_expr(args[0], "pto.set_intra_core config")
+            self._require_i32_like_expr(config, "pto.set_intra_core config")
+            return SemanticSetIntraCoreStmt(config=config), dict(env)
         if expr.name in {"pipe_barrier", "barrier"}:
             if len(args) != 1:
                 raise TypeError(f"pto.{expr.name} expects exactly 1 positional argument in TileLang DSL v1")
@@ -2741,7 +2838,7 @@ class _SemanticAnalyzer:
                     value=pattern,
                     type=SemanticMetaType(kind="mask_pattern"),
                 )
-        if expr.namespace in {"PIPE", "Pipe", "pto.PIPE", "pto.Pipe"}:
+        if expr.namespace in {"PIPE", "pto.PIPE", "Pipe", "pto.Pipe"}:
             pipe = _PIPE_SYMBOLS.get(expr.name)
             if pipe is not None:
                 return SemanticSymbolExpr(
@@ -2750,7 +2847,7 @@ class _SemanticAnalyzer:
                     value=pipe,
                     type=SemanticMetaType(kind="pipe"),
                 )
-        if expr.namespace in {"EVENT", "Event", "pto.EVENT", "pto.Event"}:
+        if expr.namespace in {"EVENT", "pto.EVENT", "Event", "pto.Event"}:
             event = _EVENT_SYMBOLS.get(expr.name)
             if event is not None:
                 return SemanticSymbolExpr(
@@ -2759,7 +2856,16 @@ class _SemanticAnalyzer:
                     value=event,
                     type=SemanticMetaType(kind="event"),
                 )
-        if expr.namespace in {"pto.MemorySpace"}:
+        if expr.namespace in {"BarrierType", "pto.BarrierType"}:
+            barrier_type = _BARRIER_TYPE_SYMBOLS.get(expr.name)
+            if barrier_type is not None:
+                return SemanticSymbolExpr(
+                    namespace=expr.namespace,
+                    name=expr.name,
+                    value=barrier_type,
+                    type=SemanticMetaType(kind="barrier_type"),
+                )
+        if expr.namespace in {"MemorySpace", "pto.MemorySpace"}:
             memory_space = _MEMORY_SPACE_SYMBOLS.get(expr.name)
             if memory_space is not None:
                 return SemanticSymbolExpr(
@@ -2768,7 +2874,7 @@ class _SemanticAnalyzer:
                     value=memory_space,
                     type=SemanticMetaType(kind="memory_space"),
                 )
-        if expr.namespace in {"pto.BLayout"}:
+        if expr.namespace in {"BLayout", "pto.BLayout"}:
             b_layout = _B_LAYOUT_SYMBOLS.get(expr.name)
             if b_layout is not None:
                 return SemanticSymbolExpr(
@@ -2777,7 +2883,7 @@ class _SemanticAnalyzer:
                     value=b_layout,
                     type=SemanticMetaType(kind="b_layout"),
                 )
-        if expr.namespace in {"pto.SLayout"}:
+        if expr.namespace in {"SLayout", "pto.SLayout"}:
             s_layout = _S_LAYOUT_SYMBOLS.get(expr.name)
             if s_layout is not None:
                 return SemanticSymbolExpr(
@@ -2786,7 +2892,7 @@ class _SemanticAnalyzer:
                     value=s_layout,
                     type=SemanticMetaType(kind="s_layout"),
                 )
-        if expr.namespace in {"pto.PadValue"}:
+        if expr.namespace in {"PadValue", "pto.PadValue"}:
             pad_value = _PAD_VALUE_SYMBOLS.get(expr.name)
             if pad_value is not None:
                 return SemanticSymbolExpr(
@@ -2795,7 +2901,7 @@ class _SemanticAnalyzer:
                     value=pad_value,
                     type=SemanticMetaType(kind="pad_value"),
                 )
-        if expr.namespace in {"pto.PadMode"}:
+        if expr.namespace in {"PadMode", "pto.PadMode"}:
             pad_mode = _PAD_MODE_SYMBOLS.get(expr.name)
             if pad_mode is not None:
                 return SemanticSymbolExpr(
@@ -2804,7 +2910,7 @@ class _SemanticAnalyzer:
                     value=pad_mode,
                     type=SemanticMetaType(kind="pad_mode"),
                 )
-        if expr.namespace in {"pto.PositionMode"}:
+        if expr.namespace in {"PositionMode", "pto.PositionMode"}:
             position_mode = _POSITION_MODE_SYMBOLS.get(expr.name)
             if position_mode is not None:
                 return SemanticSymbolExpr(
@@ -2813,7 +2919,7 @@ class _SemanticAnalyzer:
                     value=position_mode,
                     type=SemanticMetaType(kind="position_mode"),
                 )
-        if expr.namespace in {"pto.OrderMode"}:
+        if expr.namespace in {"OrderMode", "pto.OrderMode"}:
             order_mode = _ORDER_MODE_SYMBOLS.get(expr.name)
             if order_mode is not None:
                 return SemanticSymbolExpr(
@@ -4645,6 +4751,13 @@ class _SemanticAnalyzer:
         if scalar.dtype != i1:
             raise TypeError(f"{context} must be an i1 value in TileLang DSL")
 
+    def _require_i32_like_expr(self, expr: SemanticExpr, context: str) -> None:
+        if isinstance(expr.type, SemanticIndexType):
+            return
+        scalar = self._require_scalar_expr(expr, context)
+        if scalar.dtype != i32:
+            raise TypeError(f"{context} must be an i32 or index value in TileLang DSL")
+
     def _require_i64_like_expr(self, expr: SemanticExpr, context: str) -> None:
         if isinstance(expr.type, SemanticIndexType):
             return
@@ -4788,6 +4901,31 @@ class _SemanticAnalyzer:
         if isinstance(expr, SemanticLiteralExpr) and isinstance(expr.type, SemanticMetaType) and expr.type.kind == "string":
             return expr.value
         raise TypeError(f"{context} must be an EVENT symbol or event string in TileLang DSL v1")
+
+    def _require_barrier_type(self, expr: SemanticExpr, context: str) -> str:
+        if isinstance(expr, SemanticSymbolExpr) and expr.type.kind == "barrier_type":
+            return expr.value.value
+        if isinstance(expr, SemanticBindingRef) and isinstance(expr.type, SemanticMetaType):
+            if expr.type.kind == "barrier_type" and isinstance(expr.binding.value, BarrierType):
+                return expr.binding.value.value
+        if isinstance(expr, SemanticLiteralExpr) and isinstance(expr.type, SemanticMetaType) and expr.type.kind == "string":
+            return expr.value
+        raise TypeError(f"{context} must be a BarrierType symbol or string literal in TileLang DSL v1")
+
+    def _normalize_event_id_expr(self, expr: SemanticExpr, context: str) -> SemanticExpr:
+        if isinstance(expr, SemanticSymbolExpr) and expr.type.kind == "event" and isinstance(expr.value, Event):
+            return SemanticLiteralExpr(
+                value=int(expr.value.name[2:]),
+                type=SemanticScalarType(dtype=i64),
+            )
+        if isinstance(expr, SemanticBindingRef) and isinstance(expr.type, SemanticMetaType):
+            if expr.type.kind == "event" and isinstance(expr.binding.value, Event):
+                return SemanticLiteralExpr(
+                    value=int(expr.binding.value.name[2:]),
+                    type=SemanticScalarType(dtype=i64),
+                )
+        self._require_i64_like_expr(expr, context)
+        return expr
 
     def _pad_mode_value(
         self,
@@ -5142,17 +5280,23 @@ __all__ = [
     "SemanticExpr",
     "SemanticExprStmt",
     "SemanticForStmt",
+    "SemanticGetBufStmt",
     "SemanticIfResult",
     "SemanticIfStmt",
     "SemanticIndexType",
     "SemanticKernel",
     "SemanticLiteralExpr",
+    "SemanticMemBarStmt",
     "SemanticMaskType",
     "SemanticParameter",
     "SemanticPipeBarrierStmt",
+    "SemanticRlsBufStmt",
     "SemanticReturnStmt",
     "SemanticScalarType",
+    "SemanticSetCrossCoreStmt",
     "SemanticSetFlagStmt",
+    "SemanticSetIntraBlockStmt",
+    "SemanticSetIntraCoreStmt",
     "SemanticShapeType",
     "SemanticSliceExpr",
     "SemanticSliceType",
@@ -5173,6 +5317,8 @@ __all__ = [
     "SemanticType",
     "SemanticVRegType",
     "SemanticVectorStoreStmt",
+    "SemanticWaitFlagDevStmt",
     "SemanticWaitFlagStmt",
+    "SemanticWaitIntraCoreStmt",
     "analyze_frontend_kernel",
 ]
