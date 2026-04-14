@@ -2545,12 +2545,19 @@ class _AuthoringRenderer:
         if expr.name == "vdup":
             value = self._lower_expr(expr.args[0], env, indent=indent, into=into)
             mask = self._lower_expr(expr.args[1], env, indent=indent, into=into)
-            position = self._render_string_literal(expr.args[2])
-            into.append(
-                self._indent(indent)
-                + f"{result_name} = pto.vdup {value.name}, {mask.name} {{position = {position}}} : "
-                + f"{self._render_type(value.type)}, {self._render_type(mask.type)} -> {self._render_type(expr.type)}"
-            )
+            if len(expr.args) == 3:
+                position = self._render_string_literal(expr.args[2])
+                into.append(
+                    self._indent(indent)
+                    + f"{result_name} = pto.vdup {value.name}, {mask.name} {{position = {position}}} : "
+                    + f"{self._render_type(value.type)}, {self._render_type(mask.type)} -> {self._render_type(expr.type)}"
+                )
+            else:
+                into.append(
+                    self._indent(indent)
+                    + f"{result_name} = pto.vdup {value.name}, {mask.name} : "
+                    + f"{self._render_type(value.type)}, {self._render_type(mask.type)} -> {self._render_type(expr.type)}"
+                )
             return _RenderedValue(name=result_name, type=expr.type)
 
         if expr.name == "vci":

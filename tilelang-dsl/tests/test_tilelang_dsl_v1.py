@@ -2517,8 +2517,9 @@ class TileLangDSLDescriptorTests(unittest.TestCase):
         )
         self.assertRegex(
             text,
-            r'pto\.vdup\s+%[^\s]+,\s+%[^\s]+\s+\{position = "LOWEST"\}\s+:',
+            r'pto\.vdup\s+%[^\s]+,\s+%[^\s]+\s+:',
         )
+        self.assertNotIn('position = "LOWEST"', text)
         self.assertNotIn('position = "POS_LOWEST"', text)
         self.assertRegex(
             text,
@@ -2528,6 +2529,27 @@ class TileLangDSLDescriptorTests(unittest.TestCase):
             text,
             r'pto\.vci\s+%[^\s]+,\s*"ORDER_ASC"\s+:',
         )
+
+    def test_vdup_scalar_input_rejects_position_argument(self) -> None:
+        with self.assertRaises(TypeError) as ctx:
+
+            @pto.vkernel(
+                op="vdup_scalar_reject_position_unique",
+                dtypes=[(pto.i32, pto.i32)],
+                advanced=True,
+            )
+            def kernel(dst: pto.Tile, seed: pto.i32):
+                all_mask = pto.make_mask(pto.i32, pto.PAT.ALL)
+                out = pto.vdup(seed, all_mask, pto.PositionMode.HIGHEST)
+                pto.vsts(out, dst, 0, all_mask)
+                return None
+
+            specialized = kernel.specialize(
+                dst=pto.TileSpecialization(shape=(8, 128), memory_space=pto.MemorySpace.UB),
+            )
+            specialized.mlir_text()
+
+        self.assertIn("pto.vdup scalar input does not accept `position`", str(ctx.exception))
 
     def test_signed_and_unsigned_integer_dtypes_lower_distinctly(self) -> None:
         @pto.vkernel(

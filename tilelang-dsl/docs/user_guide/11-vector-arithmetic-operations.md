@@ -893,12 +893,8 @@ rowmax_seed_f32 = pto.vbr(pto.f32("-inf"))
 rowmax_seed_f16 = pto.vbr(pto.f16("0xFC00"))
 ```
 
-**Position Mode Enum**: The `PositionMode` enum provides type-safe source-lane
-selection for `pto.vdup`. `LOWEST` selects the lowest-index element of the
-source vector and `HIGHEST` selects the highest-index element. When the input is
-a scalar, the duplicated scalar value is independent of `position`.
-
-#### `pto.vdup(input: ScalarType | VRegType, mask: MaskType, position: PositionMode = PositionMode.LOWEST) -> VRegType`
+#### `pto.vdup(input: ScalarType, mask: MaskType) -> VRegType`
+#### `pto.vdup(input: VRegType, mask: MaskType, position: PositionMode = PositionMode.LOWEST) -> VRegType`
 
 **Description**: Duplicate a scalar value or one selected vector element into
 the active lanes of a destination vector.
@@ -908,7 +904,12 @@ the active lanes of a destination vector.
 |-----------|------|-------------|
 | `input` | `ScalarType` or `VRegType` | Input scalar or source vector |
 | `mask` | `MaskType` | Predicate mask controlling which lanes are written |
-| `position` | `PositionMode` | Optional enum selecting the source vector element to duplicate (default: `PositionMode.LOWEST`) |
+| `position` | `PositionMode` | Optional enum for the vector-input overload, selecting the source vector element to duplicate (default: `PositionMode.LOWEST`) |
+
+**Position Mode Enum**: The `PositionMode` enum provides type-safe source-lane
+selection for `pto.vdup`. `LOWEST` selects the lowest-index element of the
+source vector and `HIGHEST` selects the highest-index element. The enum is only
+used by the vector-input overload.
 
 **Returns**:
 | Return Value | Type | Description |
@@ -921,6 +922,7 @@ the active lanes of a destination vector.
 - When `input` is a scalar, the scalar value is duplicated to every active lane.
 - When `input` is a vector, `position` selects a single source element and that
   value is duplicated to every active lane.
+- The scalar overload does not accept `position`.
 - Inactive lanes follow VPTO predicate semantics and are not guaranteed to carry
   meaningful values for subsequent masked-off use.
 - Supported scalar types are the 8/16/32-bit integer families (`i*`, `si*`, `ui*`) plus `f16`, `bf16`, and `f32`.
@@ -932,7 +934,7 @@ the active lanes of a destination vector.
 mask32 = pto.make_mask(pto.f32, pto.PAT.ALL)
 
 # Duplicate a scalar into all active lanes.
-broadcast = pto.vdup(3.14, mask32)  # position defaults to "LOWEST"
+broadcast = pto.vdup(3.14, mask32)
 
 # Use dtype constructors for floating-point special values.
 seed = pto.vdup(pto.f32("-inf"), mask32)

@@ -4032,16 +4032,29 @@ class _SemanticAnalyzer:
             value = args[0]
             if isinstance(value.type, SemanticVRegType):
                 vec_type = value.type
-            else:
-                vec_type = self._vreg_type_for_scalar_or_index(value, "pto.vdup input")
+                mask = args[1]
+                self._require_mask_for_vreg(mask, vec_type, "pto.vdup")
+                position_arg = args[2] if len(args) == 3 else None
+                position = self._normalize_position_mode(position_arg, "pto.vdup position")
+                return SemanticCallExpr(
+                    namespace="pto",
+                    name=name,
+                    args=(value, mask, position),
+                    type=vec_type,
+                )
+
+            if len(args) == 3:
+                raise TypeError(
+                    "pto.vdup scalar input does not accept `position`; use `pto.vdup(input, mask)` "
+                    "in TileLang DSL v1"
+                )
+            vec_type = self._vreg_type_for_scalar_or_index(value, "pto.vdup input")
             mask = args[1]
             self._require_mask_for_vreg(mask, vec_type, "pto.vdup")
-            position_arg = args[2] if len(args) == 3 else None
-            position = self._normalize_position_mode(position_arg, "pto.vdup position")
             return SemanticCallExpr(
                 namespace="pto",
                 name=name,
-                args=(value, mask, position),
+                args=(value, mask),
                 type=vec_type,
             )
 
