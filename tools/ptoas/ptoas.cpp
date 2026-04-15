@@ -486,6 +486,7 @@ static bool containsVPTOIR(llvm::StringRef input) {
          line.contains("!pto.align") ||
          containsVPTOOpPrefix(line, "pto.copy_") ||
          containsVPTOOpPrefix(line, "pto.set_loop") ||
+         containsVPTOOpPrefix(line, "pto.set_mov_pad_val") ||
          containsVPTOOpPrefix(line, "pto.v") ||
          containsVPTOOpPrefix(line, "pto.plt_") ||
          containsVPTOOpPrefix(line, "pto.pset_") ||

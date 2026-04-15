@@ -1576,6 +1576,9 @@ static FailureOr<VcvtContract> buildVcvtContract(pto::VcvtOp op) {
 template <typename LoopOp>
 static StringRef buildSetLoopCallee(MLIRContext *context);
 
+template <typename ConfigOp>
+static StringRef buildUnaryConfigCallee(MLIRContext *context);
+
 template <>
 StringRef buildSetLoopCallee<pto::SetLoop2StrideOutToUbOp>(MLIRContext *context) {
   return StringAttr::get(context, "llvm.hivm.SET.LOOP2.STRIDE.OUTTOUB")
@@ -1610,6 +1613,34 @@ template <>
 StringRef buildSetLoopCallee<pto::SetLoopSizeUbToOutOp>(MLIRContext *context) {
   return StringAttr::get(context, "llvm.hivm.SET.LOOP.SIZE.UBTOOUT")
       .getValue();
+}
+
+template <>
+StringRef buildUnaryConfigCallee<pto::SetMovPadValOp>(MLIRContext *context) {
+  return StringAttr::get(context, "llvm.hivm.SET.MOV.PAD.VAL").getValue();
+}
+
+static FailureOr<Value> encodeMovPadValue(Location loc, Value value,
+                                          ConversionPatternRewriter &rewriter) {
+  Type type = value.getType();
+  Value payload = value;
+  unsigned bitWidth = 0;
+
+  if (auto intType = dyn_cast<IntegerType>(type)) {
+    bitWidth = intType.getWidth();
+  } else if (auto floatType = dyn_cast<FloatType>(type)) {
+    bitWidth = floatType.getWidth();
+    auto intType = rewriter.getIntegerType(bitWidth);
+    payload = rewriter.create<arith::BitcastOp>(loc, intType, value);
+  } else {
+    return failure();
+  }
+
+  if (bitWidth != 8 && bitWidth != 16 && bitWidth != 32)
+    return failure();
+
+  return rewriter.create<arith::ExtUIOp>(loc, rewriter.getI64Type(), payload)
+      .getResult();
 }
 
 template <typename SyncOp>
@@ -4187,6 +4218,37 @@ private:
   LoweringState &state;
 };
 
+template <typename ConfigOp>
+class LowerUnaryConfigOpPattern final : public OpConversionPattern<ConfigOp> {
+public:
+  explicit LowerUnaryConfigOpPattern(TypeConverter &typeConverter,
+                                     MLIRContext *context,
+                                     LoweringState &state)
+      : OpConversionPattern<ConfigOp>(typeConverter, context), state(state) {}
+
+  LogicalResult
+  matchAndRewrite(ConfigOp op, typename ConfigOp::Adaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    FailureOr<Value> encoded =
+        encodeMovPadValue(op.getLoc(), adaptor.getValue(), rewriter);
+    if (failed(encoded))
+      return rewriter.notifyMatchFailure(
+          op, "expected 8/16/32-bit integer or float mov-pad payload");
+
+    StringRef calleeName = buildUnaryConfigCallee<ConfigOp>(op.getContext());
+    auto funcType =
+        rewriter.getFunctionType(TypeRange{rewriter.getI64Type()}, TypeRange{});
+    rewriter.create<func::CallOp>(op.getLoc(), calleeName, TypeRange{},
+                                  ValueRange{*encoded});
+    state.plannedDecls.push_back(PlannedDecl{calleeName.str(), funcType});
+    rewriter.eraseOp(op);
+    return success();
+  }
+
+private:
+  LoweringState &state;
+};
+
 template <typename SyncOp>
 class LowerPipeEventSyncOpPattern final : public OpConversionPattern<SyncOp> {
 public:
@@ -4626,6 +4688,7 @@ static void populateVPTOOpLoweringPatterns(VPTOTypeConverter &typeConverter,
                LowerSetLoopConfigOpPattern<pto::SetLoop2StrideUbToOutOp>,
                LowerSetLoopConfigOpPattern<pto::SetLoop1StrideUbToOutOp>,
                LowerSetLoopConfigOpPattern<pto::SetLoopSizeUbToOutOp>,
+               LowerUnaryConfigOpPattern<pto::SetMovPadValOp>,
                LowerPipeEventSyncOpPattern<pto::SetFlagOp>,
                LowerPipeEventSyncOpPattern<pto::WaitFlagOp>,
                LowerBarrierOpPattern,
@@ -4670,7 +4733,8 @@ static void configureVPTOOpLoweringTarget(ConversionTarget &target,
                       pto::GetBlockNumOp, pto::GetSubBlockNumOp>();
   target.addIllegalOp<pto::SetLoop2StrideOutToUbOp, pto::SetLoop1StrideOutToUbOp,
                       pto::SetLoopSizeOutToUbOp, pto::SetLoop2StrideUbToOutOp,
-                      pto::SetLoop1StrideUbToOutOp, pto::SetLoopSizeUbToOutOp>();
+                      pto::SetLoop1StrideUbToOutOp, pto::SetLoopSizeUbToOutOp,
+                      pto::SetMovPadValOp>();
   target.addIllegalOp<pto::VldsOp, pto::VldsPostOp, pto::Vldsx2Op,
                       pto::VsldbOp, pto::VldasOp, pto::InitAlignOp,
                       pto::VldusOp, pto::SprclrOp, pto::VstsOp,

@@ -127,6 +127,17 @@ class PTO_BinaryI64ConfigOp<string mnemonic> : PTO_Op<mnemonic> {
   }];
 }
 
+def PTO_SetMovPadValOp : PTO_Op<"set_mov_pad_val"> {
+  let arguments = (ins AnyTypeOf<[AnyInteger, AnyFloat],
+                                "integer/float scalar">:$value);
+  let results = (outs);
+  let hasVerifier = 1;
+
+  let assemblyFormat = [{
+    $value attr-dict `:` type($value)
+  }];
+}
+
 def PTO_SetLoop2StrideOutToUbOp : PTO_BinaryI64ConfigOp<"set_loop2_stride_outtoub">;
 def PTO_SetLoop1StrideOutToUbOp : PTO_BinaryI64ConfigOp<"set_loop1_stride_outtoub">;
 def PTO_SetLoopSizeOutToUbOp : PTO_BinaryI64ConfigOp<"set_loop_size_outtoub">;

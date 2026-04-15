@@ -187,6 +187,8 @@ static FailureOr<IntrinsicSelection> selectConfigLike(Operation *op) {
                         "");
   if (isa<pto::SetLoopSizeUbToOutOp>(op))
     return makeResolved(op, "llvm.hivm.SET.LOOP.SIZE.UBTOOUT", usedFields, "");
+  if (isa<pto::SetMovPadValOp>(op))
+    return makeResolved(op, "llvm.hivm.SET.MOV.PAD.VAL", usedFields, "");
 
   llvm::SmallVector<std::string, 2> missingFields = {"confirmed_hivm_name"};
   return makeUnresolved(op, getOpMnemonic(op), "", usedFields, missingFields,
@@ -539,7 +541,8 @@ FailureOr<IntrinsicSelection> selectIntrinsic(Operation *op) {
 
   if (isa<pto::SetLoop2StrideOutToUbOp, pto::SetLoop1StrideOutToUbOp,
           pto::SetLoopSizeOutToUbOp, pto::SetLoop2StrideUbToOutOp,
-          pto::SetLoop1StrideUbToOutOp, pto::SetLoopSizeUbToOutOp>(op))
+          pto::SetLoop1StrideUbToOutOp, pto::SetLoopSizeUbToOutOp,
+          pto::SetMovPadValOp>(op))
     return selectConfigLike(op);
 
   if (succeeded(selectLoadIntrinsic(op)))

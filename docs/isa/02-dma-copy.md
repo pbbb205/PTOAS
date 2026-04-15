@@ -107,6 +107,36 @@ Note: UB stride fields are 21 bits (sufficient for 256KB UB address space), GM s
 
 ---
 
+## Pad Value Configuration
+
+### `pto.set_mov_pad_val`
+
+- **syntax:** `pto.set_mov_pad_val %value : T`
+- **supported `T`:** `i8`, `i16`, `i32`, `f16`, `bf16`, `f32`
+- **semantics:** Configure the pad fill value used by GM→UB DMA when `data_select_bit = true`.
+
+This op programs the hardware pad register consumed by `pto.copy_gm_to_ubuf`. The operand is a typed scalar. Its raw bit pattern is encoded into the underlying hardware configuration payload:
+
+- integer inputs use their zero-extended bit pattern
+- floating-point inputs use their bitcast-to-integer bit pattern, then zero-extend to `i64`
+
+This configuration affects only the GM→UB padding path. UB→GM DMA ignores the pad value.
+
+**Parameter Table:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `%value` | Pad fill scalar. Must be one of `i8/i16/i32/f16/bf16/f32`. |
+
+**Example:**
+
+```mlir
+%pad = arith.constant 0 : i16
+pto.set_mov_pad_val %pad : i16
+```
+
+---
+
 ## DMA Transfer Execution
 
 ### `pto.copy_gm_to_ubuf`
@@ -445,6 +475,8 @@ UB (128 cols wide, 32B-aligned, padded):
 ```
 
 ```mlir
+%pad = arith.constant 0 : i16
+pto.set_mov_pad_val %pad : i16
 pto.set_loop_size_outtoub %c1_i64, %c1_i64 : i64, i64
 pto.set_loop1_stride_outtoub %c0_i64, %c0_i64 : i64, i64
 pto.set_loop2_stride_outtoub %c0_i64, %c0_i64 : i64, i64

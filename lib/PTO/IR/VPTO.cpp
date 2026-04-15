@@ -120,6 +120,16 @@ static bool isSupportedVdupPosition(std::optional<StringRef> position) {
   return !position || *position == "LOWEST" || *position == "HIGHEST";
 }
 
+static bool isSupportedMovPadScalarType(Type type) {
+  if (auto intType = dyn_cast<IntegerType>(type))
+    return intType.isSignless() &&
+           (intType.getWidth() == 8 || intType.getWidth() == 16 ||
+            intType.getWidth() == 32);
+  if (auto floatType = dyn_cast<FloatType>(type))
+    return floatType.isF16() || floatType.isBF16() || floatType.isF32();
+  return false;
+}
+
 static std::optional<StringRef> getVdupMaskGranularity(Type elementType) {
   if (auto intType = dyn_cast<IntegerType>(elementType)) {
     switch (intType.getWidth()) {
@@ -1194,6 +1204,15 @@ void CopyGmToUbufOp::getEffects(
 
 LogicalResult CopyGmToUbufOp::verify() {
   return verifyCopyGmToUbufOp(*this, true);
+}
+
+LogicalResult SetMovPadValOp::verify() {
+  Type valueType = getValue().getType();
+  if (isSupportedMovPadScalarType(valueType))
+    return success();
+  return emitOpError()
+         << "expects i8/i16/i32 or f16/bf16/f32 scalar operand, but got "
+         << valueType;
 }
 
 LogicalResult VbrOp::verify() {
