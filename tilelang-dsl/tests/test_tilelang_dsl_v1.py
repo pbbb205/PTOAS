@@ -72,6 +72,7 @@ from tilelang_dsl.semantic import (
 )
 
 GLOBAL_TILELANG_LITERAL_BLOCK_SIZE = 32
+INLINE_PROC_GLOBAL_LANE = 0
 
 
 class TileLangDSLPackageTests(unittest.TestCase):
@@ -4417,6 +4418,13 @@ class TileLangDSLInlineProcTests(unittest.TestCase):
         pto.vlds(dst, lane)
         return None
 
+    @pto.inline_proc
+    def _inline_capture_global_literal(dst: pto.Tile):
+        mask = pto.make_mask(pto.f32, pto.PAT.ALL)
+        vec = pto.vlds(dst, INLINE_PROC_GLOBAL_LANE)
+        pto.vsts(vec, dst, INLINE_PROC_GLOBAL_LANE, mask)
+        return None
+
     def test_inline_proc_exports_from_package_surface(self) -> None:
         self.assertTrue(hasattr(pto, "inline_proc"))
         self.assertTrue(hasattr(pto, "InlineProcDescriptor"))
@@ -4527,6 +4535,26 @@ class TileLangDSLInlineProcTests(unittest.TestCase):
 
         self.assertIn("implicit capture of 'lane' is not allowed in inline_proc", str(ctx.exception))
         self.assertIn(f"{__file__}:", str(ctx.exception))
+
+    def test_inline_proc_allows_module_level_literal_capture(self) -> None:
+        @pto.vkernel(op="inline_proc_global_literal_capture_unique", dtypes=[(pto.f32,)])
+        def kernel(dst: pto.Tile):
+            _inline_capture_global_literal(dst)
+            return None
+
+        specialized = kernel.specialize(
+            dst=pto.TileSpecialization(shape=(8, 16), memory_space=pto.MemorySpace.UB)
+        )
+
+        frontend_kernel = build_frontend_kernel_node(specialized)
+        self.assertIn(
+            "_inline_capture_global_literal",
+            {proc.name for proc in frontend_kernel.inline_procs},
+        )
+
+        text = specialized.mlir_text()
+        self.assertIn("func.call", text)
+        self.assertIn("arith.constant 0 : index", text)
 
     def test_inline_proc_rejects_kw_only_vararg_and_kwargs(self) -> None:
         with self.assertRaises(pto.TileLangFrontendError) as kw_only_ctx:

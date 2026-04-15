@@ -204,6 +204,7 @@ class _FrontendInlineProc:
 @dataclass(frozen=True)
 class _FrontendBuildContext:
     source_info: Any
+    module_globals: dict[str, Any] | None
     templates: dict[str, dict[str, str]]
     selected_op: str | None
     advanced_enabled: bool
@@ -221,6 +222,7 @@ class _FrontendBuildContext:
     def nested_vecscope(self) -> "_FrontendBuildContext":
         return _FrontendBuildContext(
             source_info=self.source_info,
+            module_globals=self.module_globals,
             templates=self.templates,
             selected_op=self.selected_op,
             advanced_enabled=self.advanced_enabled,
@@ -232,14 +234,21 @@ class _FrontendBuildContext:
         )
 
     def enter_inline_proc(self, name: str, source_info: Any) -> "_FrontendBuildContext":
+        local_bindings = _collect_source_local_bindings(source_info)
+        global_literal_constants = _collect_module_literal_constants(
+            source_info,
+            module_globals=self.module_globals,
+            local_bindings=local_bindings,
+        )
         return _FrontendBuildContext(
             source_info=source_info,
+            module_globals=self.module_globals,
             templates=self.templates,
             selected_op=self.selected_op,
             advanced_enabled=self.advanced_enabled,
             inline_procs=self.inline_procs,
-            global_literal_constants=self.global_literal_constants,
-            local_bindings=_collect_source_local_bindings(source_info),
+            global_literal_constants=global_literal_constants,
+            local_bindings=local_bindings,
             active_inline_proc_stack=(*self.active_inline_proc_stack, name),
             vecscope_depth=self.vecscope_depth,
         )
@@ -500,7 +509,7 @@ def _validate_inline_capture(
     *,
     context: _FrontendBuildContext,
 ) -> None:
-    allowed = param_names | assigned_names
+    allowed = param_names | assigned_names | set(context.global_literal_constants)
     if isinstance(stmt, FrontendAssignStmt):
         missing = _collect_name_reads(stmt.value) - allowed
         if missing:
@@ -1377,6 +1386,7 @@ def build_frontend_kernel_node(descriptor: Any) -> FrontendKernelNode:
     sorted_inline_procs = tuple(sorted(descriptor.inline_procs.items(), key=lambda item: item[0]))
     context = _FrontendBuildContext(
         source_info=source_info,
+        module_globals=getattr(descriptor._py_fn, "__globals__", None),
         templates=descriptor.templates,
         selected_op=descriptor.selected_op,
         advanced_enabled=descriptor.advanced_enabled,
