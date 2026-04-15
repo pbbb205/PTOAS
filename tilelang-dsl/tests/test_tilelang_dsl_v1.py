@@ -24,8 +24,10 @@ from tilelang_dsl.frontend_ast import (
     FrontendCallExpr,
     FrontendExprStmt,
     FrontendForStmt,
+    FrontendIfStmt,
     FrontendStrictVecscopeStmt,
     FrontendVecscopeStmt,
+    FrontendNoOpStmt,
     build_frontend_kernel_node,
 )
 from tilelang_dsl.lowering import AuthoringModule, lower_semantic_kernel
@@ -4762,6 +4764,35 @@ class TileLangDSLDiagnosticsTests(unittest.TestCase):
 
         self.assertIn("unsupported Python syntax `while`", str(ctx.exception))
         self.assertIn(f"{__file__}:", str(ctx.exception))
+
+    def test_pass_statement_builds_frontend_noop_and_compiles(self) -> None:
+        @pto.vkernel(op="pass_statement_frontend_noop_unique", dtypes=[(pto.f32,)])
+        def kernel(dst: pto.Tile):
+            pass
+            if pto.constexpr(True):
+                pass
+            else:
+                pass
+            return None
+
+        selected = pto.select_kernel(
+            "a5",
+            "pass_statement_frontend_noop_unique",
+            (pto.f32,),
+        )
+        frontend_kernel = build_frontend_kernel_node(selected)
+        self.assertIsInstance(frontend_kernel.body[0], FrontendNoOpStmt)
+        self.assertIsInstance(frontend_kernel.body[1], FrontendIfStmt)
+        if_stmt = frontend_kernel.body[1]
+        self.assertTrue(if_stmt.is_constexpr)
+        self.assertIsInstance(if_stmt.then_body[0], FrontendNoOpStmt)
+        self.assertIsInstance(if_stmt.else_body[0], FrontendNoOpStmt)
+
+        text = selected.specialize(
+            dst=pto.TileSpecialization(shape=(8, 16), memory_space=pto.MemorySpace.UB),
+        ).mlir_text()
+        self.assertIn("return", text)
+        self.assertNotIn("scf.if", text)
 
     def test_vreg_annotated_assignment_rejects_mismatched_dtype(self) -> None:
         with self.assertRaises(TypeError) as ctx:

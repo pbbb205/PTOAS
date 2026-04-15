@@ -29,6 +29,7 @@ from .frontend_ast import (
     FrontendKernelNode,
     FrontendNameExpr,
     FrontendNameTarget,
+    FrontendNoOpStmt,
     FrontendReturnStmt,
     FrontendSliceExpr,
     FrontendSourceLocation,
@@ -1006,6 +1007,9 @@ class _SemanticAnalyzer:
         *,
         allow_outer_lookup: bool,
     ) -> tuple[tuple[SemanticStmt, ...], dict[str, SemanticBinding]]:
+        if isinstance(stmt, FrontendNoOpStmt):
+            # Python `pass` lowers to a frontend no-op and does not materialize semantic IR.
+            return tuple(), dict(env)
         if (
             isinstance(stmt, FrontendExprStmt)
             and isinstance(stmt.expr, FrontendConstantExpr)
@@ -1132,7 +1136,7 @@ class _SemanticAnalyzer:
         self,
         stmt: FrontendStmtNode,
     ) -> bool:
-        return isinstance(stmt, FrontendAssignStmt) or (
+        return isinstance(stmt, FrontendNoOpStmt) or isinstance(stmt, FrontendAssignStmt) or (
             isinstance(stmt, FrontendExprStmt)
             and isinstance(stmt.expr, FrontendCallExpr)
             and stmt.expr.namespace == "pto"

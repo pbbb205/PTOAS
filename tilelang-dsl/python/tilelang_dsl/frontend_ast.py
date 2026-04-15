@@ -121,6 +121,11 @@ class FrontendStmtNode:
 
 
 @dataclass(frozen=True)
+class FrontendNoOpStmt(FrontendStmtNode):
+    pass
+
+
+@dataclass(frozen=True)
 class FrontendAssignStmt(FrontendStmtNode):
     target: FrontendTargetNode
     value: FrontendExprNode
@@ -510,6 +515,8 @@ def _validate_inline_capture(
     context: _FrontendBuildContext,
 ) -> None:
     allowed = param_names | assigned_names | set(context.global_literal_constants)
+    if isinstance(stmt, FrontendNoOpStmt):
+        return
     if isinstance(stmt, FrontendAssignStmt):
         missing = _collect_name_reads(stmt.value) - allowed
         if missing:
@@ -638,6 +645,8 @@ def _collect_inline_proc_calls_stmt(
     inline_proc_names: set[str],
     into: set[str],
 ) -> None:
+    if isinstance(stmt, FrontendNoOpStmt):
+        return
     if isinstance(stmt, FrontendAssignStmt):
         _collect_inline_proc_calls_expr(stmt.value, inline_proc_names, into)
         return
@@ -1206,6 +1215,8 @@ def _build_stmt_list(nodes: list[ast.stmt] | tuple[ast.stmt, ...], context: _Fro
 
 
 def _build_stmt(node: ast.stmt, context: _FrontendBuildContext) -> FrontendStmtNode:
+    if isinstance(node, ast.Pass):
+        return _attach_source_location(FrontendNoOpStmt(), node, context)
     if isinstance(node, ast.Assign):
         if len(node.targets) != 1:
             raise context.error(node, "multiple assignment targets are not supported in TileLang DSL v1")
@@ -1516,6 +1527,7 @@ __all__ = [
     "FrontendKernelNode",
     "FrontendNameExpr",
     "FrontendNameTarget",
+    "FrontendNoOpStmt",
     "FrontendParameterNode",
     "FrontendReturnStmt",
     "FrontendSliceExpr",
