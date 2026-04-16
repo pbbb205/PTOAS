@@ -749,6 +749,7 @@ class SemanticKernel:
 class _SemanticAnalyzer:
     def __init__(self, node: FrontendKernelNode):
         self.node = node
+        self._context_attrs = dict(node.context_attrs)
         self._counter = 0
         self._disable_inference_depth = 0
         self._has_explicit_vecscope = self._contains_explicit_vecscope(node.body)
@@ -3722,6 +3723,8 @@ class _SemanticAnalyzer:
             return self._analyze_bytewidth(args)
         if name in {"get_lanes", "elements_per_vreg"}:
             return self._analyze_get_lanes(args, call_name=name)
+        if name == "get_op_attr":
+            return self._analyze_get_op_attr(args)
         if name == "constexpr":
             raise TypeError(
                 "pto.constexpr(...) is only supported as an if-condition wrapper in TileLang DSL v1"
@@ -3812,6 +3815,50 @@ class _SemanticAnalyzer:
                     _I32_TYPE,
                 )
             ),
+        )
+
+    def _literal_expr_from_context_value(self, value: object, context: str) -> SemanticExpr:
+        if isinstance(value, bool):
+            return SemanticLiteralExpr(value=value, type=SemanticScalarType(dtype=i1))
+        if isinstance(value, int) and not isinstance(value, bool):
+            return SemanticLiteralExpr(value=value, type=SemanticIndexType())
+        if isinstance(value, float):
+            return SemanticLiteralExpr(value=value, type=SemanticScalarType(dtype=f32))
+        if isinstance(value, str):
+            return SemanticLiteralExpr(value=value, type=SemanticMetaType(kind="string"))
+        if isinstance(value, ScalarType):
+            return SemanticSymbolExpr(
+                namespace="pto",
+                name=value.name,
+                value=value,
+                type=SemanticMetaType(kind="dtype"),
+            )
+        if isinstance(value, MemorySpace):
+            return SemanticSymbolExpr(
+                namespace="pto",
+                name=value.name,
+                value=value,
+                type=SemanticMetaType(kind="memory_space"),
+            )
+        raise TypeError(
+            f"{context} resolved to unsupported static value {value!r} in TileLang DSL v1"
+        )
+
+    def _analyze_get_op_attr(self, args: tuple[SemanticExpr, ...]) -> SemanticExpr:
+        if len(args) not in {1, 2}:
+            raise TypeError(
+                "pto.get_op_attr expects 1 or 2 positional arguments `(name, default?)` in TileLang DSL v1"
+            )
+        attr_name = self._require_string_expr(args[0], "pto.get_op_attr name")
+        if attr_name in self._context_attrs:
+            return self._literal_expr_from_context_value(
+                self._context_attrs[attr_name],
+                f"pto.get_op_attr({attr_name!r})",
+            )
+        if len(args) == 2:
+            return args[1]
+        raise TypeError(
+            f"pto.get_op_attr could not resolve attribute {attr_name!r} and no default was provided"
         )
 
     def _analyze_scalar_constructor(
@@ -5215,10 +5262,15 @@ class _SemanticAnalyzer:
             raise TypeError("pto.vprelu only supports f16/f32 in TileLang DSL v1")
         if name in {"vaddreluconv", "vmulconv"} and dtype.name not in {"f16", "bf16", "f32"}:
             raise TypeError(f"pto.{name} only supports f16/bf16/f32 in TileLang DSL v1")
-        if name in {"vand", "vor", "vxor"} and not (
+        if name in {"vand", "vxor"} and not (
             is_integer_dtype(dtype) and integer_bitwidth(dtype) in {8, 16, 32}
         ):
             raise TypeError(f"pto.{name} only supports integer vector dtypes in TileLang DSL v1")
+        if name == "vor" and not (
+            (is_integer_dtype(dtype) and integer_bitwidth(dtype) in {8, 16, 32})
+            or dtype.name in {"f16", "bf16", "f32"}
+        ):
+            raise TypeError("pto.vor only supports integer vector dtypes and f16/bf16/f32 in TileLang DSL v1")
         if name in {"vshl", "vshr"} and not (
             is_integer_dtype(dtype) and integer_bitwidth(dtype) in {8, 16, 32}
         ):

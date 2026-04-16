@@ -1,0 +1,76 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Test the first regular tcvt paths through ExpandTileOp.
+// Current scope is intentionally narrow:
+//   - f32 -> i32: regular vcvt with rnd + sat
+//   - i32 -> f32: regular vcvt with rnd only
+//   - round_mode must reach the template so different rmode values materialize
+//     different vcvt attrs
+//
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --enable-tile-op-expand %s -o - 2>/dev/null | FileCheck %s
+
+// CHECK-LABEL: func.func @TCVT_F32_TO_I32
+// CHECK-NOT: pto.tcvt ins
+// CHECK: pto.vecscope
+// CHECK: pto.vcvt {{.*}} {rnd = "R", sat = "SAT"} : !pto.vreg<64xf32> -> !pto.vreg<64xi32>
+// CHECK: pto.vcvt {{.*}} {rnd = "A", sat = "SAT"} : !pto.vreg<64xf32> -> !pto.vreg<64xi32>
+
+// CHECK-LABEL: func.func @TCVT_I32_TO_F32
+// CHECK-NOT: pto.tcvt ins
+// CHECK: pto.vecscope
+// CHECK: pto.vcvt {{.*}} {rnd = "R"} : !pto.vreg<64xi32> -> !pto.vreg<64xf32>
+// CHECK: pto.vcvt {{.*}} {rnd = "A"} : !pto.vreg<64xi32> -> !pto.vreg<64xf32>
+
+module {
+  func.func @TCVT_F32_TO_I32() {
+    %src = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst_r = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=64, v_row=16, v_col=64,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst_a = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=64, v_row=16, v_col=64,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.tcvt ins(%src : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                                        blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+             outs(%dst_r : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=64, v_row=16, v_col=64,
+                                         blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+
+    pto.tcvt ins(%src {rmode = #pto<round_mode ROUND>} : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                                                           blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+             outs(%dst_a : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=64, v_row=16, v_col=64,
+                                         blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  func.func @TCVT_I32_TO_F32() {
+    %src = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=64, v_row=16, v_col=64,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst_r = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst_a = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.tcvt ins(%src : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=64, v_row=16, v_col=64,
+                                        blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+             outs(%dst_r : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                                         blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+
+    pto.tcvt ins(%src {rmode = #pto<round_mode ROUND>} : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=64, v_row=16, v_col=64,
+                                                           blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+             outs(%dst_a : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                                         blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}

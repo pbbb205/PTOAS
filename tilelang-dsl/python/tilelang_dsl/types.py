@@ -649,6 +649,12 @@ def constexpr(value: bool) -> bool:
     return value
 
 
+def get_op_attr(name: str, default: Any = None) -> Any:
+    if not isinstance(name, str) or not name:
+        raise TypeError("get_op_attr expects a non-empty string attribute name")
+    return default
+
+
 __all__ = [
     "ScalarType",
     "WildcardType",
@@ -705,6 +711,7 @@ __all__ = [
     "mask_b16",
     "mask_b32",
     "constexpr",
+    "get_op_attr",
     "bytewidth",
     "get_lanes",
     "elements_per_vreg",

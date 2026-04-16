@@ -21,6 +21,7 @@ SUPPORTED_TOPLEVEL_PTO_CALLS = frozenset(
         "bytewidth",
         "get_lanes",
         "elements_per_vreg",
+        "get_op_attr",
         "vreg",
         "i1",
         "i8",

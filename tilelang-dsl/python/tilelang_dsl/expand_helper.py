@@ -271,6 +271,7 @@ def _select_descriptor(
     target: str,
     op_name: str,
     operand_specs: list[dict],
+    extra_context_attrs: dict[str, object] | None = None,
 ) -> VKernelDescriptor:
     filtered_descriptors = _filter_descriptors_by_operand_schema(
         descriptors,
@@ -285,14 +286,28 @@ def _select_descriptor(
             f"target={target!r}, op={op_name!r}, operand_types={operand_types!r}"
         )
     registry = KernelRegistry(tuple(filtered_descriptors))
+    context_attrs = _build_positional_context_attrs(operand_specs)
+    if extra_context_attrs:
+        context_attrs.update(extra_context_attrs)
     return select_kernel(
         target,
         op_name,
         operand_types,
-        context_attrs=_build_positional_context_attrs(operand_specs),
+        context_attrs=context_attrs,
         registry=registry,
         return_metadata=False,
     )
+
+
+def _parse_context_attrs(spec_text: str) -> dict[str, object]:
+    try:
+        raw = json.loads(spec_text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid context-attrs JSON: {exc}") from exc
+
+    if not isinstance(raw, dict):
+        raise ValueError("context-attrs must be a JSON object")
+    return dict(raw)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -307,6 +322,10 @@ def main(argv: list[str] | None = None) -> int:
         "--operand-specs",
         help="JSON array describing each operand (tile/scalar schema)",
     )
+    parser.add_argument(
+        "--context-attrs",
+        help="JSON object describing static op/context attrs visible to the template",
+    )
     args = parser.parse_args(argv)
 
     template_dir = Path(args.template_dir)
@@ -315,6 +334,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     operand_specs: list[dict] | None = None
+    extra_context_attrs: dict[str, object] = {}
     if args.operand_specs:
         try:
             operand_specs = _parse_operand_specs(args.operand_specs)
@@ -341,6 +361,13 @@ def main(argv: list[str] | None = None) -> int:
             {"kind": "tile", "dtype": target_dtype, "shape": shape, "memory_space": mem_space}
         ]
 
+    if args.context_attrs:
+        try:
+            extra_context_attrs = _parse_context_attrs(args.context_attrs)
+        except ValueError as exc:
+            print(f"expand_helper: error: {exc}", file=sys.stderr)
+            return 1
+
     # Scan all .py files for descriptors.
     all_descriptors: list[VKernelDescriptor] = []
     for py_path in sorted(template_dir.glob("*.py")):
@@ -359,6 +386,7 @@ def main(argv: list[str] | None = None) -> int:
             target=args.target,
             op_name=args.op,
             operand_specs=operand_specs,
+            extra_context_attrs=extra_context_attrs,
         )
     except Exception as exc:
         print(f"expand_helper: error: {exc}", file=sys.stderr)
