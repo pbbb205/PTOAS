@@ -2352,6 +2352,30 @@ class TileLangDSLDescriptorTests(unittest.TestCase):
 
         self.assertIn("PadValue.NULL.eval() is invalid", str(ctx.exception))
 
+    def test_unsigned_integer_constants_lower_with_signless_arith_types(self) -> None:
+        @pto.vkernel(op="tile_pad_value_ui32_max_eval_unique", dtypes=[(pto.ui32,)])
+        def kernel(tile: pto.Tile):
+            scalar = tile.pad_value.eval()
+            explicit = pto.ui32(4294967295)
+            return None
+
+        specialized = kernel.specialize(
+            tile=pto.TileSpecialization(
+                shape=(8, 16),
+                memory_space=pto.MemorySpace.UB,
+                config=pto.TileConfig.from_mapping(
+                    {
+                        "pad_value": pto.PadValue.MAX,
+                    }
+                ),
+            )
+        )
+
+        text = specialized.mlir_text()
+        self.assertIn("dtype=ui32", text)
+        self.assertIn("arith.constant 4294967295 : i32", text)
+        self.assertNotIn("arith.constant 4294967295 : ui32", text)
+
 
     def test_make_mask_vlds_vsts_and_vector_families_lower_inside_strict_vecscope(self) -> None:
         @pto.vkernel(op="eltwise", dtypes=[(pto.f32, pto.f32)], advanced=True)
@@ -2523,7 +2547,8 @@ class TileLangDSLDescriptorTests(unittest.TestCase):
         text = specialized.mlir_text()
         self.assertRegex(text, r"= arith\.floordivsi %in_gate_\d+, %c2_i32 : i32")
         self.assertRegex(text, r"= arith\.remsi %in_gate_\d+, %c7_i32 : i32")
-        self.assertRegex(text, r"= arith\.mulf %tmp_\d+, %c0\.5_f32 : f32")
+        self.assertRegex(text, r"%c0_5_f32 = arith\.constant 0\.5 : f32")
+        self.assertRegex(text, r"= arith\.mulf %tmp_\d+, %c0_5_f32 : f32")
         self.assertRegex(text, r"= arith\.addf %tmp_\d+, %tmp_\d+ : f32")
 
     def test_index_floordiv_lowers_to_divui_instead_of_floordivsi(self) -> None:

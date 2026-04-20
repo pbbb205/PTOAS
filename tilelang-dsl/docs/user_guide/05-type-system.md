@@ -424,6 +424,26 @@ rank = tile.rank                      # 2
 - `tile.pad_value.eval()` with `PadValue.custom_f32(...)` becomes the authored floating scalar
 - `tile.pad_value.eval()` with `PadValue.NULL` raises a frontend error
 
+For dtype-dependent fill seeds, prefer `tile.pad_value.eval()` over handwritten
+`if dtype == ...` ladders.
+
+```python
+@pto.vkernel(op="fill_pad_value", dtypes=[(pto.AnyType,)])
+def fill_pad_value(dst: pto.Tile):
+    pad_scalar = dst.pad_value.eval()
+    pad_vec = pto.vbr(pad_scalar)
+    # ...
+```
+
+Typical materialized values:
+
+- `PadValue.ZERO` -> `0` / `0.0`
+- `PadValue.MAX` -> dtype-aware max, for example `4294967295` for `pto.ui32`
+- `PadValue.MIN` -> dtype-aware min, for example `-2147483648` for `pto.i32` and `0` for `pto.ui32`
+
+This is usually simpler than spelling every dtype case manually with
+`pto.constexpr(dst.element_type == ...)`.
+
 Example: reading pad value from a `Tile`
 
 ```python

@@ -2455,7 +2455,7 @@ class _AuthoringRenderer:
                 into.append(
                     self._indent(indent)
                     + f"{desired_name} = arith.constant {self._format_constant(expr.value, expr.type)} : "
-                    f"{self._render_type(expr.type)}"
+                    f"{self._render_arith_constant_type(expr.type)}"
                 )
                 return _RenderedValue(name=desired_name, type=expr.type)
             return _RenderedValue(
@@ -3525,7 +3525,7 @@ class _AuthoringRenderer:
             into.append(
                 self._indent(indent)
                 + f"{desired_name} = arith.constant {self._format_constant(value, expr.type)} : "
-                f"{self._render_type(expr.type)}"
+                f"{self._render_arith_constant_type(expr.type)}"
             )
             return _RenderedValue(name=desired_name, type=expr.type)
         return _RenderedValue(
@@ -3652,7 +3652,8 @@ class _AuthoringRenderer:
         self._constant_cache[cache_key] = name
         self._constant_lines.append(
             self._indent(4)
-            + f"{name} = arith.constant {self._format_constant(value, ty)} : {self._render_type(ty)}"
+            + f"{name} = arith.constant {self._format_constant(value, ty)} : "
+            f"{self._render_arith_constant_type(ty)}"
         )
         return name
 
@@ -3695,6 +3696,16 @@ class _AuthoringRenderer:
                 return "1" if value else "0"
             return str(value)
         raise NotImplementedError(f"unsupported constant type {ty!r}")
+
+    def _render_arith_constant_type(self, ty: SemanticType) -> str:
+        if isinstance(ty, SemanticScalarType) and is_integer_dtype(ty.dtype):
+            width = integer_bitwidth(ty.dtype)
+            if width is None:
+                raise NotImplementedError(
+                    f"unsupported integer dtype {ty.dtype.name!r} for arith.constant emission"
+                )
+            return f"i{width}"
+        return self._render_type(ty)
 
     def _format_float_constant(self, value: float, dtype_name: str) -> str:
         # Emit stable bit-pattern literals for values that are parse-sensitive
