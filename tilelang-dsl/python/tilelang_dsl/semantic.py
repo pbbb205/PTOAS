@@ -3513,14 +3513,10 @@ class _SemanticAnalyzer:
             raise TypeError("`eval()` expects a PadValue descriptor in TileLang DSL v1")
         element_dtype = base.type.element_dtype
         if dtype_expr is not None:
-            if not (
-                isinstance(dtype_expr, SemanticSymbolExpr)
-                and isinstance(dtype_expr.type, SemanticMetaType)
-                and dtype_expr.type.kind == "dtype"
-                and isinstance(dtype_expr.value, ScalarType)
-            ):
+            explicit_dtype = self._try_static_value(dtype_expr)
+            if not isinstance(explicit_dtype, ScalarType):
                 raise TypeError("PadValue.eval(dtype) expects a TileLang scalar dtype symbol in TileLang DSL v1")
-            element_dtype = dtype_expr.value
+            element_dtype = explicit_dtype
         if element_dtype is None:
             raise TypeError(
                 "PadValue.eval() requires either a Tile-bound pad descriptor or an explicit dtype argument "
