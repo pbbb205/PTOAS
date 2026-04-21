@@ -2505,16 +2505,12 @@ class _AuthoringRenderer:
         if isinstance(expr, SemanticBindingRef):
             return env.get(expr.binding.name, _RenderedValue(expr.binding.ssa_name, expr.type))
         if isinstance(expr, SemanticLiteralExpr):
-            if desired_name is not None and into is not None:
-                into.append(
-                    self._indent(indent)
-                    + f"{desired_name} = arith.constant {self._format_constant(expr.value, expr.type)} : "
-                    f"{self._render_arith_constant_type(expr.type)}"
-                )
-                return _RenderedValue(name=desired_name, type=expr.type)
-            return _RenderedValue(
-                name=self._materialize_constant(expr.value, expr.type),
-                type=expr.type,
+            return self._lower_literal_expr(
+                expr.value,
+                expr.type,
+                indent=indent,
+                desired_name=desired_name,
+                into=into,
             )
         if isinstance(expr, SemanticSubscriptAccess):
             return self._lower_subscript_access(
@@ -3710,6 +3706,56 @@ class _AuthoringRenderer:
             f"{self._render_arith_constant_type(ty)}"
         )
         return name
+
+    def _signless_integer_scalar_type(self, ty: SemanticType) -> SemanticScalarType | None:
+        if not isinstance(ty, SemanticScalarType) or not is_integer_dtype(ty.dtype):
+            return None
+        signedness = integer_signedness(ty.dtype)
+        if signedness in {None, "signless"}:
+            return None
+        bitwidth = integer_bitwidth(ty.dtype)
+        if bitwidth not in {8, 16, 32, 64}:
+            raise NotImplementedError(
+                f"unsupported integer bitwidth {bitwidth!r} for signless literal lowering"
+            )
+        return SemanticScalarType(dtype=ScalarType(f"i{bitwidth}"))
+
+    def _lower_literal_expr(
+        self,
+        value: object,
+        ty: SemanticType,
+        *,
+        indent: int,
+        desired_name: str | None = None,
+        into: list[str] | None = None,
+    ) -> _RenderedValue:
+        raw_type = self._signless_integer_scalar_type(ty) or ty
+        if desired_name is not None and into is not None and raw_type == ty:
+            into.append(
+                self._indent(indent)
+                + f"{desired_name} = arith.constant {self._format_constant(value, ty)} : "
+                f"{self._render_arith_constant_type(ty)}"
+            )
+            return _RenderedValue(name=desired_name, type=ty)
+
+        if desired_name is not None and into is not None:
+            raw_name = self._new_temp()
+            into.append(
+                self._indent(indent)
+                + f"{raw_name} = arith.constant {self._format_constant(value, raw_type)} : "
+                f"{self._render_arith_constant_type(raw_type)}"
+            )
+            into.append(
+                self._indent(indent)
+                + f"{desired_name} = builtin.unrealized_conversion_cast {raw_name} : "
+                f"{self._render_type(raw_type)} to {self._render_type(ty)}"
+            )
+            return _RenderedValue(name=desired_name, type=ty)
+
+        return _RenderedValue(
+            name=self._materialize_constant(value, ty),
+            type=ty,
+        )
 
     def _constant_name(self, value: object, ty: SemanticType) -> str:
         if isinstance(ty, SemanticIndexType):

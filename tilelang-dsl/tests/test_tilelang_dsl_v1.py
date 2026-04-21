@@ -2450,6 +2450,32 @@ class TileLangDSLDescriptorTests(unittest.TestCase):
         self.assertIn("arith.constant 4294967295 : i32", text)
         self.assertNotIn("arith.constant 4294967295 : ui32", text)
 
+    def test_unsigned_pad_value_eval_broadcast_bitcasts_signless_literal(self) -> None:
+        @pto.vkernel(op="tile_pad_value_ui16_vbr_unique", dtypes=[(pto.ui16,)], advanced=True)
+        def kernel(tile: pto.Tile):
+            scalar = tile.pad_value.eval()
+            vec = pto.vbr(scalar)
+            return None
+
+        specialized = kernel.specialize(
+            tile=pto.TileSpecialization(
+                shape=(8, 16),
+                memory_space=pto.MemorySpace.UB,
+                config=pto.TileConfig.from_mapping(
+                    {
+                        "pad_value": pto.PadValue.MAX,
+                    }
+                ),
+            )
+        )
+
+        text = specialized.mlir_text()
+        self.assertIn("dtype=ui16", text)
+        self.assertIn("arith.constant 65535 : i16", text)
+        self.assertIn("builtin.unrealized_conversion_cast", text)
+        self.assertIn(": i16 to ui16", text)
+        self.assertIn("pto.vbr", text)
+
 
     def test_make_mask_vlds_vsts_and_vector_families_lower_inside_strict_vecscope(self) -> None:
         @pto.vkernel(op="eltwise", dtypes=[(pto.f32, pto.f32)], advanced=True)
