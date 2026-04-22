@@ -7,9 +7,9 @@ Operations for pipeline synchronization and buffer management.
 The following enum types provide type-safe parameter specification for synchronization operations:
 
 - **`BarrierType`**: Memory barrier types for `pto.mem_bar`
-  - `VV_ALL`: All prior vector ops complete before subsequent
-  - `VST_VLD`: All prior vector stores visible before subsequent loads  
-  - `VLD_VST`: All prior vector loads complete before subsequent stores
+  - `VV_ALL`, `VST_VLD`, `VLD_VST`, `VST_VST`: vector→vector barriers
+  - `VS_ALL`, `VST_LD`, `VLD_ST`, `VST_ST`: vector→scalar barriers
+  - `SV_ALL`, `ST_VLD`, `LD_VST`, `ST_VST`: scalar→vector barriers
 
 - **`Pipe`**: Hardware pipeline identifiers
   - `MTE2`: Memory Transfer Engine 2 pipeline
@@ -127,7 +127,7 @@ pto.rls_buf(Pipe.MTE2, 0, 0)
 **Parameters**:
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `barrier_type` | `BarrierType` | Barrier type: `BarrierType.VV_ALL` (all prior vector ops complete before subsequent), `BarrierType.VST_VLD` (all prior vector stores visible before subsequent loads), `BarrierType.VLD_VST` (all prior vector loads complete before subsequent stores) |
+| `barrier_type` | `BarrierType` | Barrier type controlling prior/subsequent instruction ordering. Supported values are `BarrierType.VV_ALL`, `BarrierType.VST_VLD`, `BarrierType.VLD_VST`, `BarrierType.VST_VST`, `BarrierType.VS_ALL`, `BarrierType.VST_LD`, `BarrierType.VLD_ST`, `BarrierType.VST_ST`, `BarrierType.SV_ALL`, `BarrierType.ST_VLD`, `BarrierType.LD_VST`, and `BarrierType.ST_VST`. |
 
 **Returns**: None (side-effect operation)
 

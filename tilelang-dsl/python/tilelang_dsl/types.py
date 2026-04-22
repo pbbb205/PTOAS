@@ -178,6 +178,15 @@ class BarrierType(str, Enum):
     VV_ALL = "VV_ALL"
     VST_VLD = "VST_VLD"
     VLD_VST = "VLD_VST"
+    VST_VST = "VST_VST"
+    VS_ALL = "VS_ALL"
+    VST_LD = "VST_LD"
+    VLD_ST = "VLD_ST"
+    VST_ST = "VST_ST"
+    SV_ALL = "SV_ALL"
+    ST_VLD = "ST_VLD"
+    LD_VST = "LD_VST"
+    ST_VST = "ST_VST"
 
 
 class MaskPattern(str, Enum):

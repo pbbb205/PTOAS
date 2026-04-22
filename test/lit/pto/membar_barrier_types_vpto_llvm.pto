@@ -1,0 +1,43 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --vpto-emit-hivm-llvm %s -o - | FileCheck %s
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @membar_all_documented_kinds() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    pto.vecscope {
+      pto.mem_bar "VV_ALL"
+      pto.mem_bar "VST_VLD"
+      pto.mem_bar "VLD_VST"
+      pto.mem_bar "VST_VST"
+      pto.mem_bar "VS_ALL"
+      pto.mem_bar "VST_LD"
+      pto.mem_bar "VLD_ST"
+      pto.mem_bar "VST_ST"
+      pto.mem_bar "SV_ALL"
+      pto.mem_bar "ST_VLD"
+      pto.mem_bar "LD_VST"
+      pto.mem_bar "ST_VST"
+    }
+    return
+  }
+}
+
+// CHECK-LABEL: define void @membar_all_documented_kinds(
+// CHECK: call void @llvm.hivm.mem.bar.vv.all()
+// CHECK: call void @llvm.hivm.mem.bar.vst.vld()
+// CHECK: call void @llvm.hivm.mem.bar.vld.vst()
+// CHECK: call void @llvm.hivm.mem.bar.vst.vst()
+// CHECK: call void @llvm.hivm.mem.bar.vs.all()
+// CHECK: call void @llvm.hivm.mem.bar.vst.ld()
+// CHECK: call void @llvm.hivm.mem.bar.vld.st()
+// CHECK: call void @llvm.hivm.mem.bar.vst.st()
+// CHECK: call void @llvm.hivm.mem.bar.sv.all()
+// CHECK: call void @llvm.hivm.mem.bar.st.vld()
+// CHECK: call void @llvm.hivm.mem.bar.ld.vst()
+// CHECK: call void @llvm.hivm.mem.bar.st.vst()

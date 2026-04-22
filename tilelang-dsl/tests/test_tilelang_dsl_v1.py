@@ -128,6 +128,15 @@ class TileLangDSLPackageTests(unittest.TestCase):
         self.assertTrue(hasattr(pto, "si64"))
         self.assertTrue(hasattr(pto, "ui64"))
         self.assertEqual(pto.BarrierType.VST_VLD.value, "VST_VLD")
+        self.assertEqual(pto.BarrierType.VST_VST.value, "VST_VST")
+        self.assertEqual(pto.BarrierType.VS_ALL.value, "VS_ALL")
+        self.assertEqual(pto.BarrierType.VST_LD.value, "VST_LD")
+        self.assertEqual(pto.BarrierType.VLD_ST.value, "VLD_ST")
+        self.assertEqual(pto.BarrierType.VST_ST.value, "VST_ST")
+        self.assertEqual(pto.BarrierType.SV_ALL.value, "SV_ALL")
+        self.assertEqual(pto.BarrierType.ST_VLD.value, "ST_VLD")
+        self.assertEqual(pto.BarrierType.LD_VST.value, "LD_VST")
+        self.assertEqual(pto.BarrierType.ST_VST.value, "ST_VST")
         self.assertEqual(pto.PadMode.PadNull.value, "PadNull")
         self.assertEqual(pto.PadMode.PadFirstElem.value, "PadFirstElem")
         self.assertEqual(pto.PadMode.PadValue.value, "PadValue")
@@ -5367,6 +5376,78 @@ class TileLangDSLDescriptorTests(unittest.TestCase):
         self.assertIn("pto.set_intra_core %arg5 : i32", text)
         self.assertIn("pto.wait_flag_dev %arg3, %c8_i64 : i64, i64", text)
         self.assertIn("pto.wait_intra_core %arg4, %c31_i64 : i64, i64", text)
+
+    def test_mem_bar_accepts_extended_barrier_type_enum(self) -> None:
+        BarrierType = pto.BarrierType
+
+        @pto.vkernel(
+            op="mem_bar_extended_enum_unique",
+            dtypes=[(pto.f32, pto.f32)],
+            advanced=True,
+        )
+        def kernel(dst: pto.Tile, src: pto.Tile):
+            pto.mem_bar(BarrierType.ST_VST)
+            mask = pto.make_mask(pto.f32, pto.PAT.ALL)
+            vec = pto.vlds(src, 0)
+            pto.vsts(vec, dst, 0, mask)
+            return None
+
+        specialized = kernel.specialize(
+            dst=pto.TileSpecialization(shape=(8, 16), memory_space=pto.MemorySpace.UB),
+            src=pto.TileSpecialization(shape=(8, 16), memory_space=pto.MemorySpace.UB),
+        )
+
+        semantic_kernel = analyze_frontend_kernel(build_frontend_kernel_node(specialized))
+        self.assertIsInstance(semantic_kernel.body[0], SemanticMemBarStmt)
+
+        text = specialized.mlir_text()
+        self.assertIn('pto.mem_bar "ST_VST"', text)
+
+    def test_mem_bar_accepts_extended_barrier_type_enum_vst_st(self) -> None:
+        BarrierType = pto.BarrierType
+
+        @pto.vkernel(
+            op="mem_bar_extended_enum_vst_st_unique",
+            dtypes=[(pto.f32, pto.f32)],
+            advanced=True,
+        )
+        def kernel(dst: pto.Tile, src: pto.Tile):
+            pto.mem_bar(BarrierType.VST_ST)
+            mask = pto.make_mask(pto.f32, pto.PAT.ALL)
+            vec = pto.vlds(src, 0)
+            pto.vsts(vec, dst, 0, mask)
+            return None
+
+        specialized = kernel.specialize(
+            dst=pto.TileSpecialization(shape=(8, 16), memory_space=pto.MemorySpace.UB),
+            src=pto.TileSpecialization(shape=(8, 16), memory_space=pto.MemorySpace.UB),
+        )
+
+        text = specialized.mlir_text()
+        self.assertIn('pto.mem_bar "VST_ST"', text)
+
+    def test_mem_bar_rejects_unknown_barrier_string(self) -> None:
+        with self.assertRaises(TypeError) as ctx:
+
+            @pto.vkernel(
+                op="mem_bar_invalid_string_unique",
+                dtypes=[(pto.f32, pto.f32)],
+                advanced=True,
+            )
+            def kernel(dst: pto.Tile, src: pto.Tile):
+                pto.mem_bar("NOT_A_BARRIER")
+                mask = pto.make_mask(pto.f32, pto.PAT.ALL)
+                vec = pto.vlds(src, 0)
+                pto.vsts(vec, dst, 0, mask)
+                return None
+
+            specialized = kernel.specialize(
+                dst=pto.TileSpecialization(shape=(8, 16), memory_space=pto.MemorySpace.UB),
+                src=pto.TileSpecialization(shape=(8, 16), memory_space=pto.MemorySpace.UB),
+            )
+            specialized.mlir_text()
+
+        self.assertIn("canonical barrier string", str(ctx.exception))
 
     def test_runtime_block_queries_and_scalar_pointer_helpers_lower_to_v0_3_surface(self) -> None:
         @pto.vkernel(

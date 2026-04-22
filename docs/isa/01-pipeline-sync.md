@@ -116,21 +116,30 @@ The `mode` parameter controls how `get_buf` and `rls_buf` interact with pipeline
 ### `pto.mem_bar`
 
 - **syntax:** `pto.mem_bar "BARRIER_TYPE"`
-- **semantics:** Intra-vector-pipe memory fence within `__VEC_SCOPE__`. Required when UB addresses alias between vector load/store operations.
+- **semantics:** Shared-memory (UB address space) memory fence within `__VEC_SCOPE__`. Required when UB addresses alias between memory operations. The barrier type selects which classes of prior instructions must complete before which classes of subsequent instructions may proceed.
 
 ```c
 mem_bar(barrier_type);
 ```
 
-**Barrier types:**
+**Barrier types** are organized into three families by the scope of prior vs. subsequent instructions:
 
-| Type | Semantics |
-|------|-----------|
-| `VV_ALL` | All prior vector ops complete before subsequent |
-| `VST_VLD` | All prior vector stores visible before subsequent loads |
-| `VLD_VST` | All prior vector loads complete before subsequent stores |
+| Family | Barrier type | Prior instructions | Subsequent instructions |
+|--------|-------------|-------------------|------------------------|
+| **VV** (vector→vector) | `VV_ALL` | All vector load/store | All vector load/store |
+| | `VST_VLD` | All vector store | All vector load |
+| | `VLD_VST` | All vector load | All vector store |
+| | `VST_VST` | All vector store | All vector store |
+| **VS** (vector→scalar) | `VS_ALL` | All vector load/store | All scalar load/store |
+| | `VST_LD` | All vector store | All scalar load |
+| | `VLD_ST` | All vector load | All scalar store |
+| | `VST_ST` | All vector store | All scalar store |
+| **SV** (scalar→vector) | `SV_ALL` | All scalar load/store | All vector load/store |
+| | `ST_VLD` | All scalar store | All vector load |
+| | `LD_VST` | All scalar load | All vector store |
+| | `ST_VST` | All scalar store | All vector store |
 
-**Example:** Ensure stores are visible before loads to same UB region:
+**Example:** Ensure vector stores are visible before subsequent vector loads to the same UB region:
 ```mlir
 pto.vsts %v0, %ub[%c0] : !pto.vreg<64xf32>, !pto.ptr<f32, ub>
 pto.mem_bar "VST_VLD"

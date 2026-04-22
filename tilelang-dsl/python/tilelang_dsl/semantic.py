@@ -6007,8 +6007,14 @@ class _SemanticAnalyzer:
             if expr.type.kind == "barrier_type" and isinstance(expr.binding.value, BarrierType):
                 return expr.binding.value.value
         if isinstance(expr, SemanticLiteralExpr) and isinstance(expr.type, SemanticMetaType) and expr.type.kind == "string":
-            return expr.value
-        raise TypeError(f"{context} must be a BarrierType symbol or string literal in TileLang DSL v1")
+            if expr.value in {barrier_type.value for barrier_type in BarrierType}:
+                return expr.value
+        raise TypeError(
+            f"{context} must be a BarrierType symbol or canonical barrier string "
+            "(`VV_ALL`, `VST_VLD`, `VLD_VST`, `VST_VST`, `VS_ALL`, `VST_LD`, "
+            "`VLD_ST`, `VST_ST`, `SV_ALL`, `ST_VLD`, `LD_VST`, or `ST_VST`) "
+            "in TileLang DSL v1"
+        )
 
     def _normalize_event_id_expr(self, expr: SemanticExpr, context: str) -> SemanticExpr:
         if isinstance(expr, SemanticSymbolExpr) and expr.type.kind == "event" and isinstance(expr.value, Event):
