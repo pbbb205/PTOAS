@@ -78,3 +78,7 @@ test/samples/**/npu_validation/*
 .DS_Store
 .ipynb_checkpoints/
 *.orig
+
+# Local workspace
+.work/
+.local/
