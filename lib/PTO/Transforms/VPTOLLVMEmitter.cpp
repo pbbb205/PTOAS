@@ -48,9 +48,31 @@ static std::string getElementTypeFragment(Type type);
 static Type getElementTypeFromVectorLike(Type type);
 static std::optional<int64_t> getElementCountFromVectorLike(Type type);
 
+static Type normalizeIntegerTypeForLLVMLowering(Type type, Builder &builder) {
+  if (auto intType = dyn_cast<IntegerType>(type)) {
+    if (!intType.isSignless())
+      return builder.getIntegerType(intType.getWidth());
+    return type;
+  }
+
+  if (auto vecType = dyn_cast<VectorType>(type)) {
+    Type normalizedElement =
+        normalizeIntegerTypeForLLVMLowering(vecType.getElementType(), builder);
+    if (normalizedElement == vecType.getElementType())
+      return type;
+    return VectorType::get(vecType.getShape(), normalizedElement,
+                           vecType.getScalableDims());
+  }
+
+  return type;
+}
+
 static Type convertVPTOType(Type type, Builder &builder) {
-  if (auto vecType = dyn_cast<pto::VRegType>(type))
-    return VectorType::get({vecType.getElementCount()}, vecType.getElementType());
+  if (auto vecType = dyn_cast<pto::VRegType>(type)) {
+    Type elementType =
+        normalizeIntegerTypeForLLVMLowering(vecType.getElementType(), builder);
+    return VectorType::get({vecType.getElementCount()}, elementType);
+  }
   if (isa<pto::MaskType>(type))
     return VectorType::get({256}, builder.getI1Type());
   if (isa<pto::AlignType>(type))
@@ -60,7 +82,7 @@ static Type convertVPTOType(Type type, Builder &builder) {
         builder.getContext(),
         static_cast<unsigned>(ptrType.getMemorySpace().getAddressSpace()));
   }
-  return type;
+  return normalizeIntegerTypeForLLVMLowering(type, builder);
 }
 
 static bool hasVPTOConvertibleType(Type type) {
