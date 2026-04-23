@@ -29,14 +29,14 @@ Cycle-accurate simulator **popped→retire** latency (cycles). Only representati
 
 ## `pto.vci`
 
-- **syntax:** `%result = pto.vci %index {order = "ORDER"} : integer -> !pto.vreg<NxT>`
+- **syntax:** `%result = pto.vci %index {order = "ASC|DESC"} : integer -> !pto.vreg<NxT>`
 - **semantics:** Generate a lane-index vector from a scalar seed/index value.
 - **inputs:**
   `%index` is the scalar seed or base index.
 - **outputs:**
   `%result` is the generated index vector.
 - **constraints and limitations:**
-  This is an index-generation family, not a numeric conversion. `ORDER` and the
+  This is an index-generation family, not a numeric conversion. `order` and the
   result element type together determine how indices are generated. `%result`
   uses an integer element type, and the scalar `%index` type matches that
   result element type.

@@ -1499,7 +1499,7 @@ None. The op writes UB memory directly.
 - `dest` and `src0` through `src3` must be UB-backed pointers
 - Inputs must already be sorted according to the order encoded by `config`
 
-**Order Mode Enum**: The `OrderMode` enum provides type-safe order selection for `pto.vci` operations. Currently only `ASC` (ascending order) is supported, with more order options planned for future releases.
+**Order Mode Enum**: The `OrderMode` enum provides type-safe order selection for `pto.vci` operations. `ASC` and `DESC` are supported.
 
 #### `pto.vci(index: ScalarType, order: OrderMode = OrderMode.ASC) -> VRegType`
 
@@ -1509,7 +1509,7 @@ None. The op writes UB memory directly.
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `index` | `ScalarType` | Scalar seed or base index value |
-| `order` | `OrderMode` | Order mode enum (default: `OrderMode.ASC` for ascending order) |
+| `order` | `OrderMode` | Order mode enum (default: `OrderMode.ASC`; supported values: `ASC`, `DESC`) |
 
 **Returns**:
 | Return Value | Type | Description |
@@ -1519,12 +1519,15 @@ None. The op writes UB memory directly.
 **Constraints**:
 - This is an index-generation family, not a numeric conversion
 - The `order` parameter and result element type together determine how indices are generated
-- Currently only ascending order (`OrderMode.ASC`) is supported
+- Supported order modes are ascending (`OrderMode.ASC`) and descending (`OrderMode.DESC`)
 
 **Example**:
 ```python
 # Generate ascending indices starting from 0
 indices = pto.vci(pto.i32(0), OrderMode.ASC)
+
+# Generate descending indices starting from the seed value
+indices_desc = pto.vci(pto.i32(63), OrderMode.DESC)
 
 # Keyword form for the optional order argument is also supported
 indices_kw = pto.vci(pto.i32(0), order=OrderMode.ASC)

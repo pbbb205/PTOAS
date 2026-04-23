@@ -5469,8 +5469,10 @@ class _SemanticAnalyzer:
         ):
             return SemanticLiteralExpr(value=expr.binding.value.value, type=SemanticMetaType(kind="string"))
         order = self._require_string_expr(expr, context)
-        if order != OrderMode.ASC.value:
-            raise TypeError("pto.vci currently only supports order `OrderMode.ASC` in TileLang DSL v1")
+        if order not in {OrderMode.ASC.value, OrderMode.DESC.value}:
+            raise TypeError(
+                "pto.vci currently only supports order `OrderMode.ASC` or `OrderMode.DESC` in TileLang DSL v1"
+            )
         return SemanticLiteralExpr(value=order, type=SemanticMetaType(kind="string"))
 
     def _normalize_vcvt_round_mode(self, expr: SemanticExpr | None) -> SemanticExpr | None:

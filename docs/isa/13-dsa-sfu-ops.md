@@ -149,7 +149,7 @@ for (int i = 0; i < N; i++)
 
 ### `pto.vci`
 
-- **syntax:** `%result = pto.vci %index {order = "ORDER"} : integer -> !pto.vreg<NxT>`
+- **syntax:** `%result = pto.vci %index {order = "ASC|DESC"} : integer -> !pto.vreg<NxT>`
 - **semantics:** Generate lane index vector.
 
 ```c
@@ -208,7 +208,7 @@ for (int i = 0; i < N; i++)
 
 - `pto.vmull %lhs, %rhs, %mask : !pto.vreg<NxT>, !pto.vreg<NxT>, !pto.mask<G> -> !pto.vreg<NxT>, !pto.vreg<NxT>`
 - `pto.vmula %acc, %lhs, %rhs, %mask : !pto.vreg<NxT>, !pto.vreg<NxT>, !pto.vreg<NxT>, !pto.mask<G> -> !pto.vreg<NxT>`
-- `pto.vci %index {order = "ORDER"} : integer -> !pto.vreg<NxT>`
+- `pto.vci %index {order = "ASC|DESC"} : integer -> !pto.vreg<NxT>`
 - `pto.vbitsort %dest, %src, %indices, %repeat_times : !pto.ptr<...>, !pto.ptr<...>, !pto.ptr<...>, index`
 - `pto.vmrgsort4 %dest, %src0, %src1, %src2, %src3, %count, %config : !pto.ptr<...>, !pto.ptr<...>, !pto.ptr<...>, !pto.ptr<...>, !pto.ptr<...>, i64, i64`
 

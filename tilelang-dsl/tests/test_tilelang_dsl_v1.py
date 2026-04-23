@@ -161,7 +161,8 @@ class TileLangDSLPackageTests(unittest.TestCase):
         self.assertEqual(pto.InterleaveDist.INTLV.value, "INTLV")
         self.assertEqual(pto.PositionMode.LOWEST.value, "LOWEST")
         self.assertEqual(pto.PositionMode.HIGHEST.value, "HIGHEST")
-        self.assertEqual(pto.OrderMode.ASC.value, "ORDER_ASC")
+        self.assertEqual(pto.OrderMode.ASC.value, "ASC")
+        self.assertEqual(pto.OrderMode.DESC.value, "DESC")
         self.assertEqual(pto.PredicateDist.NORM.value, "NORM")
         self.assertEqual(pto.PredicateDist.US.value, "US")
         self.assertEqual(pto.PredicateDist.DS.value, "DS")
@@ -4471,11 +4472,36 @@ class TileLangDSLDescriptorTests(unittest.TestCase):
         self.assertNotIn('position = "POS_LOWEST"', text)
         self.assertRegex(
             text,
-            r'pto\.vci\s+%[^\s]+\s+\{order = "ORDER_ASC"\}\s+:',
+            r'pto\.vci\s+%[^\s]+\s+\{order = "ASC"\}\s+:',
         )
         self.assertNotRegex(
             text,
-            r'pto\.vci\s+%[^\s]+,\s*"ORDER_ASC"\s+:',
+            r'pto\.vci\s+%[^\s]+,\s*"ASC"\s+:',
+        )
+
+    def test_vci_desc_lowers_to_desc_order_attr(self) -> None:
+        @pto.vkernel(
+            op="vci_desc_order_unique",
+            dtypes=[(pto.i32, pto.i32, pto.i32)],
+            advanced=True,
+        )
+        def kernel(dst: pto.Tile, src: pto.Tile, seed: pto.i32):
+            mask = pto.make_mask(pto.i32, pto.PAT.ALL)
+            indices = pto.vci(seed, pto.OrderMode.DESC)
+            vec = pto.vlds(src, 0)
+            out = pto.vadd(vec, indices, mask)
+            pto.vsts(out, dst, 0, mask)
+            return None
+
+        specialized = kernel.specialize(
+            dst=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB),
+            src=pto.TileSpecialization(shape=(8, 64), memory_space=pto.MemorySpace.UB),
+        )
+
+        text = specialized.mlir_text()
+        self.assertRegex(
+            text,
+            r'pto\.vci\s+%[^\s]+\s+\{order = "DESC"\}\s+:',
         )
 
     def test_vdup_scalar_input_rejects_position_argument(self) -> None:

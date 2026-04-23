@@ -437,7 +437,8 @@ class PositionMode(str, Enum):
 
 
 class OrderMode(str, Enum):
-    ASC = "ORDER_ASC"
+    ASC = "ASC"
+    DESC = "DESC"
 
 
 class VcvtRoundMode(str, Enum):
