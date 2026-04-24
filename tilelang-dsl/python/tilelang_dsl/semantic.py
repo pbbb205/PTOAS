@@ -1076,7 +1076,7 @@ class _SemanticAnalyzer:
             return False
         return self._frontend_stmt_can_live_in_inferred_vecscope(
             stmt
-        ) or self._frontend_stmt_is_neutral_vecscope_stmt(stmt)
+        ) or self._frontend_stmt_is_scalar_vecscope_stmt(stmt)
 
     def _stmt_allows_inferred_vecscope(self, allow_inferred_vecscope: bool) -> bool:
         if self._has_explicit_vecscope:

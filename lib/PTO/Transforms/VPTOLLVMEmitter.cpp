@@ -395,21 +395,24 @@ static FailureOr<Value> reinterpretPointerToAddrSpace(Operation *anchor,
 }
 
 static FailureOr<Value> normalizeVdupScalarOperand(OpBuilder &builder, Location loc,
-                                                   pto::VdupOp op) {
-  Value input = op.getInput();
+                                                   Value input,
+                                                   Type resultType) {
   auto intType = dyn_cast<IntegerType>(input.getType());
   if (!intType || intType.getWidth() != 8)
     return input;
 
-  Type resultElemType = getElementTypeFromVectorLike(op.getResult().getType());
+  Type resultElemType = getElementTypeFromVectorLike(resultType);
   std::string resultElemFragment = getElementTypeFragment(resultElemType);
   if (resultElemFragment != "s8" && resultElemFragment != "u8")
     return input;
 
-  Type i16Type = builder.getIntegerType(16);
-  if (resultElemFragment == "u8")
-    return builder.create<arith::ExtUIOp>(loc, i16Type, input).getResult();
-  return builder.create<arith::ExtSIOp>(loc, i16Type, input).getResult();
+  if (intType.isSignless())
+    return input;
+
+  Type signlessType = builder.getIntegerType(intType.getWidth());
+  return builder
+      .create<UnrealizedConversionCastOp>(loc, TypeRange{signlessType}, input)
+      .getResult(0);
 }
 
 static Value normalizeByteScalarOperandForHivmCall(OpBuilder &builder, Location loc,
@@ -4133,7 +4136,8 @@ public:
                                            "unexpected scalar-input vdup type");
       }
       FailureOr<Value> normalizedScalar =
-          normalizeVdupScalarOperand(rewriter, op.getLoc(), op);
+          normalizeVdupScalarOperand(rewriter, op.getLoc(), adaptor.getInput(),
+                                     op.getResult().getType());
       if (failed(normalizedScalar))
         return rewriter.notifyMatchFailure(op,
                                            "failed to normalize scalar vdup input");
