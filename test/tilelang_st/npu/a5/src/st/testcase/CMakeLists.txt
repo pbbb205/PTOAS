@@ -133,6 +133,14 @@ set(ALL_TESTCASES
     tcvt
     tload
     softmax
+    tabs
+    texp
+    tlog
+    tneg
+    tnot
+    trecip
+    trsqrt
+    tsqrt
 )
 
 if((TEST_CASE IN_LIST ALL_TESTCASES) OR (TEST_CASE STREQUAL "all"))
