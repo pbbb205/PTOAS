@@ -1,0 +1,45 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Test that ExpandTileOp + InlineLibCall + FoldTileBufIntrinsics pipeline
+//
+// Pipeline: MemrefToTileBuf -> ExpandTileOp -> InlineLibCall -> FoldTileBufIntrinsics
+//
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --enable-tile-op-expand %s -o - 2>/dev/null | FileCheck %s
+// After the full tile-op-expand path on the VPTO backend, the original
+// CHECK: func.func @TROWARGMAX
+// CHECK-NOT: pto.trowargmax ins
+// CHECK: pto.vecscope
+// CHECK: pto.castptr
+// CHECK: pto.vbr
+// CHECK: pto.vlds
+// CHECK: pto.vcmax
+// CHECK: pto.vdintlv
+// CHECK: pto.vsts
+
+module {
+  func.func @TROWARGMAX() {
+    %src = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %tmp = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile
+      : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=1, v_row=16, v_col=1,
+                      blayout=row_major, slayout=none_box, fractal=512, pad=0>
+
+    pto.trowargmax ins(%src, %tmp : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                                        blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+                                    !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                                        blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+                   outs(%dst : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=1, v_row=16, v_col=1,
+                                        blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}

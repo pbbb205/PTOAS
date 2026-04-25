@@ -143,6 +143,12 @@ set(ALL_TESTCASES
     tpartadd
     tpartmul
     trecip
+    trowargmax
+    trowargmin
+    trowsum
+    trowmax
+    trowmin
+    trowprod
     trsqrt
     tsqrt
 )
