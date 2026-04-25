@@ -22,6 +22,8 @@
 #     ptoas           - Wrapper script that sets up LD_LIBRARY_PATH
 #     bin/ptoas       - The actual ptoas binary
 #     lib/*.so*       - Required shared library dependencies
+#     share/ptoas/TileOps - TileLang template library
+#     tilelang_dsl/   - TileLang DSL Python package
 
 set -euo pipefail
 
@@ -45,6 +47,10 @@ export LD_LIBRARY_PATH="${LLVM_BUILD_DIR}/lib:${PTO_INSTALL_DIR}/lib:${LD_LIBRAR
 PTO_BUILD_DIR="${PTO_BUILD_DIR:-${PTO_SOURCE_DIR}/build}"
 PTOAS_BIN="${PTO_BUILD_DIR}/tools/ptoas/ptoas"
 PTOAS_DEPS_DIR="${PTOAS_DIST_DIR}/lib"
+PTOAS_TILEOPS_SRC_DIR="${PTO_INSTALL_DIR}/share/ptoas/TileOps"
+PTOAS_TILEOPS_DIST_DIR="${PTOAS_DIST_DIR}/share/ptoas/TileOps"
+PTOAS_TILELANG_DSL_SRC_DIR="${PTO_INSTALL_DIR}/tilelang_dsl"
+PTOAS_TILELANG_DSL_DIST_DIR="${PTOAS_DIST_DIR}/tilelang_dsl"
 
 if [ ! -f "$PTOAS_BIN" ]; then
   echo "Error: ptoas binary not found at $PTOAS_BIN" >&2
@@ -121,7 +127,10 @@ harden_elf() {
 }
 
 # Create output directories
-mkdir -p "${PTOAS_DIST_DIR}/bin" "${PTOAS_DEPS_DIR}"
+mkdir -p \
+  "${PTOAS_DIST_DIR}/bin" \
+  "${PTOAS_DEPS_DIR}" \
+  "$(dirname "${PTOAS_TILEOPS_DIST_DIR}")"
 
 # Copy ptoas binary
 echo "Copying ptoas binary..."
@@ -151,6 +160,19 @@ while read -r packaged; do
   harden_elf "$packaged"
 done < <(find "${PTOAS_DIST_DIR}/bin" "${PTOAS_DEPS_DIR}" -type f | sort)
 
+echo "Copying TileLang runtime resources..."
+if [ ! -d "${PTOAS_TILEOPS_SRC_DIR}" ]; then
+  echo "Error: TileOps resource directory not found at ${PTOAS_TILEOPS_SRC_DIR}" >&2
+  exit 1
+fi
+if [ ! -d "${PTOAS_TILELANG_DSL_SRC_DIR}" ]; then
+  echo "Error: tilelang_dsl package directory not found at ${PTOAS_TILELANG_DSL_SRC_DIR}" >&2
+  exit 1
+fi
+rm -rf "${PTOAS_TILEOPS_DIST_DIR}" "${PTOAS_TILELANG_DSL_DIST_DIR}"
+cp -R "${PTOAS_TILEOPS_SRC_DIR}" "${PTOAS_TILEOPS_DIST_DIR}"
+cp -R "${PTOAS_TILELANG_DSL_SRC_DIR}" "${PTOAS_TILELANG_DSL_DIST_DIR}"
+
 # Create wrapper script
 echo "Creating wrapper script..."
 cat > "${PTOAS_DIST_DIR}/ptoas" << 'WRAPPER_EOF'
@@ -175,11 +197,16 @@ else
   echo "$VERSION_OUTPUT" | grep -Eq '^ptoas [0-9]+\.[0-9]+$'
 fi
 
+test -d "${PTOAS_TILEOPS_DIST_DIR}"
+test -f "${PTOAS_TILELANG_DSL_DIST_DIR}/__init__.py"
+
 # Show collected files
 echo ""
 echo "=== ptoas distribution contents ==="
 ls -la "${PTOAS_DIST_DIR}/"
 ls -la "${PTOAS_DIST_DIR}/bin/"
+ls -la "${PTOAS_DIST_DIR}/share/ptoas/"
+ls -la "${PTOAS_TILELANG_DSL_DIST_DIR}"
 SO_COUNT=$(find "${PTOAS_DEPS_DIR}" -name "*.so*" 2>/dev/null | wc -l)
 echo "=== Collected .so dependencies (${SO_COUNT} files) ==="
 du -sh "${PTOAS_DEPS_DIR}/"

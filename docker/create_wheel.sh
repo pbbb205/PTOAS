@@ -44,6 +44,13 @@ echo "Wheel package version: ${PTOAS_PYTHON_PACKAGE_VERSION}"
 echo "Copying PTO dialect files..."
 cp "${PTO_INSTALL_DIR}/mlir/dialects/"*.py "${PY_PACKAGE_DIR}/mlir/dialects/"
 
+# Copy TileLang resources into the wheel staging tree so wheel installs keep
+# the template library and Python DSL available.
+echo "Copying TileLang resources..."
+rm -rf "${PY_PACKAGE_DIR}/tilelang_dsl" "${PY_PACKAGE_DIR}/TileOps"
+cp -R "${PTO_INSTALL_DIR}/tilelang_dsl" "${PY_PACKAGE_DIR}/tilelang_dsl"
+cp -R "${PTO_INSTALL_DIR}/share/ptoas/TileOps" "${PY_PACKAGE_DIR}/TileOps"
+
 # Copy platform-specific setup.py to package directory.
 # On macOS, use setup_mac.py and rename it to setup.py in the build dir.
 SETUP_TEMPLATE="${PTO_SOURCE_DIR}/docker/setup.py"

@@ -29,6 +29,7 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/FileSystem.h" // [Fix] Required for OF_None
+#include "llvm/Support/Path.h"
 #include "ptobc/ptobc_decode.h"
 #include "mlir/Dialect/Bufferization/Transforms/OneShotAnalysis.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
@@ -72,8 +73,65 @@ using StringRefVector =
 
 } // namespace
 
+int main(int argc, char **argv);
+
 static void printPTOASVersion(llvm::raw_ostream &os) {
   os << "ptoas " << PTOAS_RELEASE_VERSION << "\n";
+}
+
+static std::string getParentDir(llvm::StringRef path) {
+  llvm::SmallString<256> parent(path);
+  llvm::sys::path::remove_filename(parent);
+  llvm::sys::path::remove_dots(parent, true);
+  return std::string(parent);
+}
+
+static bool pathExists(llvm::StringRef path) {
+  return !path.empty() && llvm::sys::fs::exists(path);
+}
+
+static std::string joinPath(llvm::StringRef lhs, llvm::StringRef rhs) {
+  llvm::SmallString<256> joined(lhs);
+  llvm::sys::path::append(joined, rhs);
+  llvm::sys::path::remove_dots(joined, true);
+  return std::string(joined);
+}
+
+static std::string detectInstalledTilelangPath(const char *argv0) {
+  std::string exePath = llvm::sys::fs::getMainExecutable(argv0, (void *)&main);
+  if (exePath.empty())
+    return {};
+
+  const std::string exeDir = getParentDir(exePath);
+  const std::string prefixDir = getParentDir(exeDir);
+  const std::string installedTileOps = joinPath(prefixDir, "share/ptoas/TileOps");
+  if (pathExists(installedTileOps))
+    return installedTileOps;
+  return {};
+}
+
+static std::string detectInstalledTilelangPkgPath(const char *argv0) {
+  std::string exePath = llvm::sys::fs::getMainExecutable(argv0, (void *)&main);
+  if (exePath.empty())
+    return {};
+
+  const std::string exeDir = getParentDir(exePath);
+  const std::string prefixDir = getParentDir(exeDir);
+  const std::string installedPkgRoot = prefixDir;
+  const std::string installedPkg = joinPath(installedPkgRoot, "tilelang_dsl");
+  if (pathExists(installedPkg))
+    return installedPkgRoot;
+  return {};
+}
+
+static bool hasCLIOption(int argc, char **argv, llvm::StringRef option) {
+  const std::string optionWithValue = (option + "=").str();
+  for (int i = 1; i < argc; ++i) {
+    llvm::StringRef arg(argv[i]);
+    if (arg == option || arg.starts_with(optionWithValue))
+      return true;
+  }
+  return false;
 }
 
 static LogicalResult applyConfiguredPassManagerCLOptions(
@@ -260,6 +318,27 @@ static llvm::cl::opt<std::string> tilelangPkgPath(
     llvm::cl::desc("PYTHONPATH for tilelang_dsl package "
                    "(default: <source>/tilelang-dsl/python, baked in at build time)"),
     llvm::cl::init(PTOAS_DEFAULT_TILELANG_PKG_PATH));
+
+static pto::ExpandTileOpOptions resolveExpandTileOpOptions(int argc,
+                                                           char **argv) {
+  pto::ExpandTileOpOptions expandOpts;
+  expandOpts.tilelangPath = tilelangPath;
+  expandOpts.tilelangPkgPath = tilelangPkgPath;
+
+  if (!hasCLIOption(argc, argv, "--tilelang-path")) {
+    std::string detectedTilelangPath = detectInstalledTilelangPath(argv[0]);
+    if (!detectedTilelangPath.empty())
+      expandOpts.tilelangPath = detectedTilelangPath;
+  }
+
+  if (!hasCLIOption(argc, argv, "--tilelang-pkg-path")) {
+    std::string detectedTilelangPkgPath = detectInstalledTilelangPkgPath(argv[0]);
+    if (!detectedTilelangPkgPath.empty())
+      expandOpts.tilelangPkgPath = detectedTilelangPkgPath;
+  }
+
+  return expandOpts;
+}
 
 static llvm::cl::opt<bool> disableInferLayout(
     "disable-infer-layout",
@@ -1428,7 +1507,8 @@ static LogicalResult prepareVPTOForEmission(ModuleOp module) {
   return success();
 }
 
-static LogicalResult lowerPTOToVPTOBackend(ModuleOp module) {
+static LogicalResult lowerPTOToVPTOBackend(ModuleOp module, int argc,
+                                           char **argv) {
   PassManager backendPM(module.getContext());
   // TileOp Expand path:
   //   1. MemrefToTileBuf: recover tile_buf from memref
@@ -1439,9 +1519,7 @@ static LogicalResult lowerPTOToVPTOBackend(ModuleOp module) {
   //      tile_valid_cols to concrete memref/constant values
   backendPM.addPass(pto::createMemrefToTileBufPass());
 
-  pto::ExpandTileOpOptions expandOpts;
-  expandOpts.tilelangPath = tilelangPath;
-  expandOpts.tilelangPkgPath = tilelangPkgPath;
+  pto::ExpandTileOpOptions expandOpts = resolveExpandTileOpOptions(argc, argv);
   backendPM.addPass(pto::createExpandTileOpPass(expandOpts));
 
   backendPM.addPass(pto::createPTOInlineLibCallPass());
@@ -1573,10 +1651,8 @@ int main(int argc, char **argv) {
   bool cliArchSpecified = false;
   for (int i = 1; i < argc; ++i) {
     llvm::StringRef arg(argv[i]);
-    if (arg == "--pto-arch" || arg.starts_with("--pto-arch=")) {
+    if (arg == "--pto-arch" || arg.starts_with("--pto-arch="))
       cliArchSpecified = true;
-      break;
-    }
   }
 
   // Register all passes so that --mlir-print-ir-after/before can resolve
@@ -1906,7 +1982,7 @@ int main(int argc, char **argv) {
     if (failed(emitSharedPreBackendSeamIR(*module, ptoSeamIRFile)))
       return 1;
 
-    if (failed(lowerPTOToVPTOBackend(*module)))
+    if (failed(lowerPTOToVPTOBackend(*module, argc, argv)))
       return 1;
     return emitVPTOBackendResult(*module, *outputFile);
   }

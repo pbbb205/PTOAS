@@ -29,12 +29,14 @@ env:
 
 jobs:
   build_wheel:
-    name: Build wheel (Python ${{ matrix.python }}, ${{ matrix.arch }})
+    # Wheel publication is paused, but this job still builds and uploads the
+    # packaged ptoas binary distribution.
+    name: Build ptoas-bin (${{ matrix.arch }})
     runs-on: ${{ matrix.arch == 'x86_64' && 'ubuntu-latest' || 'ubuntu-24.04-arm' }}
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.10", "3.11", "3.12"]
+        python: ["3.11"]
         arch: ["x86_64", "aarch64"]
 
     container:
@@ -163,12 +165,14 @@ jobs:
           ninja -C $PTO_BUILD_DIR install
 
       - name: Create Python wheel
+        if: false
         run: |
           export PATH="${PY_PATH}/bin:$PATH"
           export PTOAS_PYTHON_PACKAGE_VERSION="${PTOAS_VERSION}"
           bash $PTO_SOURCE_DIR/docker/create_wheel.sh
 
       - name: Repair wheel with auditwheel
+        if: false
         run: |
           export PATH="${PY_PATH}/bin:$PATH"
           export PY_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core
@@ -177,6 +181,7 @@ jobs:
           auditwheel repair --plat manylinux_2_34_${{ matrix.arch }} dist/ptoas*.whl -w wheelhouse
 
       - name: Test wheel installation
+        if: false
         run: |
           export PATH="${PY_PATH}/bin:$PATH"
           export PY_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core
@@ -189,32 +194,33 @@ jobs:
           bash $PTO_SOURCE_DIR/docker/test_ptoas_cli.sh
 
       - name: Copy wheel to workspace
+        if: false
         run: |
           export PY_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core
           mkdir -p $GITHUB_WORKSPACE/wheelhouse
           cp $PY_PACKAGE_DIR/wheelhouse/ptoas*.whl $GITHUB_WORKSPACE/wheelhouse/
 
       - name: Upload wheel artifact
+        if: false
         uses: actions/upload-artifact@v4
         with:
           name: ptoas-wheel-py${{ matrix.python }}-${{ matrix.arch }}
           path: wheelhouse/*.whl
 
       - name: Collect ptoas binary and dependencies
-        if: matrix.python == '3.11'
         run: |
           bash $PTO_SOURCE_DIR/docker/collect_ptoas_dist.sh $GITHUB_WORKSPACE/ptoas-dist
 
       - name: Upload ptoas binary artifact
-        if: matrix.python == '3.11'
         uses: actions/upload-artifact@v4
         with:
           name: ptoas-bin-${{ matrix.arch }}
           path: ptoas-dist/
 
   upload_release_assets:
+    # Disabled together with build_wheel because wheel publication is paused.
+    if: false
     name: Upload release assets
-    if: github.event_name == 'release' || github.event_name == 'schedule'
     needs: build_wheel
     runs-on: ubuntu-latest
 

@@ -75,3 +75,8 @@ target_link_libraries(pto-opt PRIVATE
 add_dependencies(pto-opt
   PTOOpsIncGen 
 )
+
+install(TARGETS pto-opt
+  RUNTIME DESTINATION bin
+  COMPONENT PTOAS_Runtime
+)

@@ -74,6 +74,7 @@ ENV PY_PACKAGE_DIR=$LLVM_BUILD_DIR/tools/mlir/python_packages/mlir_core/
 
 # copy pto.py, _pto_ops_gen.py 
 RUN cp $PTO_INSTALL_DIR/mlir/dialects/*.py $PY_PACKAGE_DIR/mlir/dialects/
+RUN rm -rf $PY_PACKAGE_DIR/tilelang_dsl $PY_PACKAGE_DIR/TileOps     && cp -R $PTO_INSTALL_DIR/tilelang_dsl $PY_PACKAGE_DIR/tilelang_dsl     && cp -R $PTO_INSTALL_DIR/share/ptoas/TileOps $PY_PACKAGE_DIR/TileOps
 
 COPY ./setup.py $PY_PACKAGE_DIR/
 
