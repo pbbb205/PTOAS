@@ -155,6 +155,10 @@ set(ALL_TESTCASES
     trowprod
     trsqrt
     tsqrt
+    texpands
+    tfillpad
+    tfillpad_inplace
+    tfillpad_expand
     tadds
     tands
     tdivs
