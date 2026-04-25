@@ -1,7 +1,10 @@
 name: CI
 
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 on:
-  push:
   pull_request:
   # Nightly remote-board validation (GitHub cron is UTC).
   # 22:00 CST (UTC+8) == 14:00 UTC.
@@ -67,7 +70,7 @@ permissions:
 
 jobs:
   license-header-check:
-    if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
+    if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
