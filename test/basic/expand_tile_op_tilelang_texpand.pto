@@ -18,8 +18,8 @@
 // pto.texpands should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TEXPANDS
 // CHECK-NOT: pto.texpands ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
+// CHECK: pto.vecscope
 // CHECK: pto.vdup
 // CHECK: pto.vsts
 

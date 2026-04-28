@@ -18,8 +18,8 @@
 // pto.tmul should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TMUL
 // CHECK-NOT: pto.tmul ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
+// CHECK: pto.vecscope
 // CHECK: pto.vlds
 // CHECK: pto.vmul
 // CHECK: pto.vsts

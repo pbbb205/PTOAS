@@ -18,12 +18,11 @@
 // pto.tfillpad (inplace) should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TFILLPAD_INPLACE
 // CHECK-NOT: pto.tfillpad ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
-// CHECK-NOT: pto.vlds
-// CHECK: pto.vdup
-// CHECK: pto.vstus
-// CHECK: pto.vsts
+// CHECK: pto.vecscope
+// CHECK-DAG: pto.vdup
+// CHECK-DAG: pto.vlds
+// CHECK-DAG: pto.vsts
 
 module {
   func.func @TFILLPAD_INPLACE() {

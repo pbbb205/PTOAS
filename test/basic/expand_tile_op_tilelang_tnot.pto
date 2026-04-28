@@ -16,8 +16,8 @@
 // pto.tnot should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TNOT
 // CHECK-NOT: pto.tnot ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
+// CHECK: pto.vecscope
 // CHECK: pto.vlds
 // CHECK: pto.vnot
 // CHECK: pto.vsts

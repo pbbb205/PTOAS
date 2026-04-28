@@ -18,8 +18,8 @@
 // pto.tdiv should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TDIV
 // CHECK-NOT: pto.tdiv ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
+// CHECK: pto.vecscope
 // CHECK: pto.vlds
 // CHECK: pto.vdiv
 // CHECK: pto.vsts

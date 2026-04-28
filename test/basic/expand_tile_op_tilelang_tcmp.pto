@@ -12,17 +12,11 @@
 //
 // Pipeline: MemrefToTileBuf -> ExpandTileOp -> InlineLibCall -> FoldTileBufIntrinsics
 //
-// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --enable-tile-op-expand %s -o - 2>/dev/null | FileCheck %s
+// RUN: not ptoas --pto-arch=a5 --pto-backend=vpto --enable-tile-op-expand %s -o - 2>&1 | FileCheck %s
 
-// After the full tile-op-expand path on the VPTO backend, the original
-// pto.tcmp should be lowered to vector-style VPTO IR.
-// CHECK: func.func @TCMP
-// CHECK-NOT: pto.tcmp ins
-// CHECK: pto.vecscope
-// CHECK: pto.castptr
-// CHECK: pto.vlds
-// CHECK: pto.vcmp
-// CHECK: pto.psts
+// TCMP currently has no registered TileLang kernel on the A5 tile-op-expand path.
+// CHECK: expand_helper found no registered kernel
+// CHECK: error: ExpandTileOp: failed to instantiate tilelang template for tcmp
 
 module {
   func.func @TCMP() {

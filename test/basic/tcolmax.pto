@@ -18,8 +18,8 @@
 // pto.tcolmax should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TCOLMAX
 // CHECK-NOT: pto.tcolmax ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
+// CHECK: pto.vecscope
 // CHECK: pto.vlds
 // CHECK: pto.vmax
 // CHECK: pto.vsts

@@ -10,8 +10,8 @@
 // pto.tcolexpandmul should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TCOLEXPANDMUL
 // CHECK-NOT: pto.tcolexpandmul ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
+// CHECK: pto.vecscope
 // CHECK: pto.vlds
 // CHECK: pto.vmul
 // CHECK: pto.vsts

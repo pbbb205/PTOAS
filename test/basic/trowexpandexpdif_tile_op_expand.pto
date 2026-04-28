@@ -18,11 +18,11 @@
 // pto.trowexpandexpdif should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TROWEXPANDEXPDIF
 // CHECK-NOT: pto.trowexpandexpdif ins
+// CHECK: pto.castptr
 // CHECK: pto.vecscope
 // CHECK: pto.vlds
 // CHECK: pto.vdup
-// CHECK: pto.vsubs
-// CHECK: pto.vexp
+// CHECK: pto.vexpdif
 // CHECK: pto.vsts
 
 module {

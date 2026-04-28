@@ -14,8 +14,8 @@
 // After the full tile-op-expand path on the VPTO backend, the original
 // CHECK: func.func @TROWARGMAX
 // CHECK-NOT: pto.trowargmax ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
+// CHECK: pto.vecscope
 // CHECK: pto.vbr
 // CHECK: pto.vlds
 // CHECK: pto.vcmax

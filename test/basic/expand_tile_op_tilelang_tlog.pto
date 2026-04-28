@@ -16,8 +16,8 @@
 // pto.tlog should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TLOG
 // CHECK-NOT: pto.tlog ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
+// CHECK: pto.vecscope
 // CHECK: pto.vlds
 // CHECK: pto.vln
 // CHECK: pto.vsts

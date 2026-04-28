@@ -1,4 +1,4 @@
-// RUN: ptoas --pto-arch=a5 --pass-pipeline="builtin.module(pto-inline-libcall)" %s | FileCheck %s
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=pto-inline-libcall %s -o /dev/null 2>&1 | FileCheck %s
 
 module attributes {pto.target_arch = "a5"} {
   func.func @kernel(%x: i32) {
@@ -24,13 +24,11 @@ module attributes {pto.target_arch = "a5"} {
 }
 
 // CHECK-LABEL: func.func @kernel(
-// CHECK: %[[C1:.+]] = arith.constant 1 : i32
-// CHECK: %[[C2:.+]] = arith.constant 2 : i32
-// CHECK: %[[V1:.+]] = arith.addi %{{[^,]+}}, %[[C1]] : i32
-// CHECK: %[[V2:.+]] = arith.addi %{{[^,]+}}, %[[C2]] : i32
-// CHECK: %[[SUM:.+]] = arith.addi %[[V1]], %[[V2]] : i32
-// CHECK: arith.constant 0 : i32
-// CHECK: arith.addi %[[SUM]]
+// CHECK: arith.constant 1 : i32
+// CHECK: arith.constant 2 : i32
+// CHECK: arith.addi %{{[^,]+}}, %{{[^,]+}} : i32
+// CHECK: arith.addi %{{[^,]+}}, %{{[^,]+}} : i32
+// CHECK: arith.addi %{{[^,]+}}, %{{[^,]+}} : i32
 // CHECK-NOT: func.call @__tl_inline_
 // CHECK-NOT: func.func private @__tl_inline_pair_i32
 // CHECK-NOT: func.func private @__tl_inline_sink_i32

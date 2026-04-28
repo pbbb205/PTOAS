@@ -16,8 +16,8 @@
 // pto.texp should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TEXP
 // CHECK-NOT: pto.texp ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
+// CHECK: pto.vecscope
 // CHECK: pto.vlds
 // CHECK: pto.vexp
 // CHECK: pto.vsts

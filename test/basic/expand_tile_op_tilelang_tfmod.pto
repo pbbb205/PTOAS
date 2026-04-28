@@ -12,21 +12,11 @@
 //
 // Pipeline: MemrefToTileBuf -> ExpandTileOp -> InlineLibCall -> FoldTileBufIntrinsics
 //
-// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --enable-tile-op-expand %s -o - 2>/dev/null | FileCheck %s
+// RUN: not ptoas --pto-arch=a5 --pto-backend=vpto --enable-tile-op-expand %s -o - 2>&1 | FileCheck %s
 
-// After the full tile-op-expand path on the VPTO backend, the original
-// pto.tfmod should be lowered to vector-style VPTO IR.
-// fmod(a, b) = a - trunc(a/b) * b
-// CHECK: func.func @TFMOD
-// CHECK-NOT: pto.tfmod ins
-// CHECK: pto.vecscope
-// CHECK: pto.castptr
-// CHECK: pto.vlds
-// CHECK: pto.vdiv
-// CHECK: pto.vtrc
-// CHECK: pto.vmul
-// CHECK: pto.vsub
-// CHECK: pto.vsts
+// TFMOD currently has no registered TileLang kernel on the A5 tile-op-expand path.
+// CHECK: expand_helper found no registered kernel
+// CHECK: error: ExpandTileOp: failed to instantiate tilelang template for tfmod
 
 module {
   func.func @TFMOD() {

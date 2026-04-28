@@ -16,10 +16,10 @@
 // pto.tneg should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TNEG
 // CHECK-NOT: pto.tneg ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
+// CHECK: pto.vecscope
 // CHECK: pto.vlds
-// CHECK: pto.vmuls
+// CHECK: pto.vneg
 // CHECK: pto.vsts
 
 module {

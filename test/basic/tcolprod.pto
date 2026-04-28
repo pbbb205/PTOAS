@@ -18,8 +18,8 @@
 // pto.tcolprod should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TCOLPROD
 // CHECK-NOT: pto.tcolprod ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
+// CHECK: pto.vecscope
 // CHECK: pto.vlds
 // CHECK: pto.vmul
 // CHECK: pto.vsts

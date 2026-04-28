@@ -10,6 +10,17 @@
 // Multiple cases with different shapes in a single module.
 // Compiled by ptoas --enable-insert-sync --enable-tile-op-expand --vpto-emit-hivm-llvm
 // to produce LLVM IR.
+//
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto %s -o - 2>/dev/null | FileCheck %s
+//
+// CHECK-LABEL: func.func @TLRELU_f32_32x64_dst128
+// CHECK: pto.copy_gm_to_ubuf
+// CHECK: pto.vecscope
+// CHECK: pto.vlrelu
+// CHECK: pto.copy_ubuf_to_gm
+// CHECK-LABEL: func.func @TLRELU_f16_63x64_dst128
+// CHECK: arith.truncf
+// CHECK: pto.vlrelu
 
 module {
   // Case 0: f32 src 32x64 -> dst 32x128 (valid 32x64)

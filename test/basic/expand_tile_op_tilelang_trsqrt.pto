@@ -16,11 +16,11 @@
 // pto.trsqrt should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TRSQRT
 // CHECK-NOT: pto.trsqrt ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
+// CHECK: pto.vecscope
 // CHECK: pto.vlds
 // CHECK: pto.vsqrt
-// CHECK: pto.vrec
+// CHECK: pto.vdiv
 // CHECK: pto.vsts
 
 module {

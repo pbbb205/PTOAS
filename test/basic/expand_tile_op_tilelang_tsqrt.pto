@@ -16,8 +16,8 @@
 // pto.tsqrt should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TSQRT
 // CHECK-NOT: pto.tsqrt ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
+// CHECK: pto.vecscope
 // CHECK: pto.vlds
 // CHECK: pto.vsqrt
 // CHECK: pto.vsts

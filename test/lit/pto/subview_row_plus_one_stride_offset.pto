@@ -1,4 +1,4 @@
-// RUN: ptoas %s 2>&1 --mlir-print-ir-after=pto-view-to-memref | FileCheck %s
+// RUN: ptoas %s 2>&1 --emit-pto-ir | FileCheck %s
 
 module {
   func.func @subview_row_plus_one_stride_offset(
@@ -21,6 +21,6 @@ module {
 }
 
 // RowPlusOne: major stride should be 17 (not 16).
-// CHECK-DAG: memref.alloc() : memref<16x16xf32, strided<[17, 1]>, #pto.address_space<vec>>
-// CHECK-DAG: memref.subview {{.*}} to memref<8x8xf32, strided<[17, 1], offset: ?>, #pto.address_space<vec>>
-// CHECK-DAG: Tile<TileType::Vec, float, 16, 16, BLayout::RowMajor, 8, 8, SLayout::NoneBox, 512, PadValue::Null, CompactMode::RowPlusOne>
+// CHECK: pto.pointer_cast(%c0_i64) {{.*}} : memref<16x16xf32, strided<[17, 1]>, #pto.address_space<vec>>
+// CHECK: compact=#pto.compact_mode<row_plus_one>
+// CHECK: memref.subview {{.*}} to memref<8x8xf32, strided<[17, 1], offset: ?>, #pto.address_space<vec>>

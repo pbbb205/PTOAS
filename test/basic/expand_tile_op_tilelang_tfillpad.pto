@@ -18,11 +18,11 @@
 // pto.tfillpad should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TFILLPAD
 // CHECK-NOT: pto.tfillpad ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
-// CHECK: pto.vlds
-// CHECK: pto.vsts
-// CHECK: pto.vdup
+// CHECK: pto.vecscope
+// CHECK-DAG: pto.vdup
+// CHECK-DAG: pto.vlds
+// CHECK-DAG: pto.vsts
 // Note: vstus is not supported in TileLang DSL v1, so padding uses vsts instead
 
 module {

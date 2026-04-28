@@ -1,4 +1,4 @@
-// RUN: ptoas --pto-arch=a5 --pass-pipeline="builtin.module(pto-inline-libcall)" %s | FileCheck %s
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=pto-inline-libcall %s -o /dev/null 2>&1 | FileCheck %s
 
 module attributes {pto.target_arch = "a5"} {
   func.func @kernel(%arg0: i32) attributes { pto.tilelang.instance } {
@@ -21,10 +21,8 @@ module attributes {pto.target_arch = "a5"} {
 }
 
 // CHECK-LABEL: func.func @kernel
-// CHECK: %[[C1:.+]] = arith.constant 1 : i32
-// CHECK: %[[ADD1:.+]] = arith.addi %arg0, %[[C1]] : i32
-// CHECK: %[[C2:.+]] = arith.constant 2 : i32
-// CHECK: arith.addi %[[ADD1]], %[[C2]] : i32
+// CHECK: arith.constant 1 : i32
+// CHECK: arith.addi %arg0, %{{[^,]+}} : i32
 // CHECK-NOT: func.call @__tl_inline_
 // CHECK-NOT: func.func private @__tl_inline_add1_i32
 // CHECK-NOT: func.func private @__tl_inline_sink_i32

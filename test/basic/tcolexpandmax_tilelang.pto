@@ -10,8 +10,8 @@
 // pto.tcolexpandmax should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TCOLEXPANDMAX
 // CHECK-NOT: pto.tcolexpandmax ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
+// CHECK: pto.vecscope
 // CHECK: pto.vlds
 // CHECK: pto.vmax
 // CHECK: pto.vsts

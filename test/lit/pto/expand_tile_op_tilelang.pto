@@ -18,8 +18,8 @@
 // pto.tadd should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TADD
 // CHECK-NOT: pto.tadd ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
+// CHECK: pto.vecscope
 // CHECK: pto.vlds
 // CHECK: pto.vadd
 // CHECK: pto.vsts

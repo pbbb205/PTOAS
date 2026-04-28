@@ -10,8 +10,8 @@
 // pto.tcolexpand should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TCOLEXPAND
 // CHECK-NOT: pto.tcolexpand ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
+// CHECK: pto.vecscope
 // CHECK: pto.vlds
 // CHECK: pto.vsts
 

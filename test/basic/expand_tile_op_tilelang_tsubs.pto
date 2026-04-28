@@ -10,7 +10,7 @@
 // CHECK-NOT: pto.tsubs ins
 // CHECK: pto.vecscope
 // CHECK: pto.vlds
-// CHECK: pto.vsubs
+// CHECK: pto.vsub
 // CHECK: pto.vsts
 
 module {

@@ -18,8 +18,8 @@
 // pto.txor should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TXOR
 // CHECK-NOT: pto.txor ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
+// CHECK: pto.vecscope
 // CHECK: pto.vlds
 // CHECK: pto.vxor
 // CHECK: pto.vsts
@@ -36,10 +36,12 @@ module {
       : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=64, v_row=16, v_col=64,
                       blayout=row_major, slayout=none_box, fractal=512, pad=0>
 
-    pto.txor ins(%a, %b : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=64, v_row=16, v_col=64,
-                              blayout=row_major, slayout=none_box, fractal=512, pad=0>,
-                          !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=64, v_row=16, v_col=64,
-                              blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    pto.txor ins(%a, %b, %tile_buf : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=64, v_row=16, v_col=64,
+                                   blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+                               !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=64, v_row=16, v_col=64,
+                                   blayout=row_major, slayout=none_box, fractal=512, pad=0>,
+                               !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=64, v_row=16, v_col=64,
+                                   blayout=row_major, slayout=none_box, fractal=512, pad=0>)
              outs(%tile_buf : !pto.tile_buf<loc=vec, dtype=i32, rows=16, cols=64, v_row=16, v_col=64,
                                    blayout=row_major, slayout=none_box, fractal=512, pad=0>)
     return

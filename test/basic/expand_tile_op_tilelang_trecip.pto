@@ -16,10 +16,10 @@
 // pto.trecip should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TRECIP
 // CHECK-NOT: pto.trecip ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
+// CHECK: pto.vecscope
 // CHECK: pto.vlds
-// CHECK: pto.vrec
+// CHECK: pto.vdiv
 // CHECK: pto.vsts
 
 module {

@@ -18,39 +18,39 @@
 // pto.tsels should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TSELS_test
 // CHECK-NOT: pto.tsels ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
-// CHECK: pto.vlds
-// CHECK: pto.vcmps
-// CHECK: pto.vdup
-// CHECK: pto.vsel
-// CHECK: pto.vsts
+// CHECK: pto.vecscope
+// CHECK-DAG: pto.vdup
+// CHECK-DAG: pto.plds
+// CHECK-DAG: pto.vlds
+// CHECK-DAG: pto.vsel
+// CHECK-DAG: pto.vsts
 
 module {
   func.func @TSELS_test() {
     %mask = pto.alloc_tile
-      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+      : !pto.tile_buf<loc=vec, dtype=i8, rows=2, cols=32, v_row=2, v_col=32,
                       blayout=row_major, slayout=none_box, fractal=512, pad=0>
     %src = pto.alloc_tile
-      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+      : !pto.tile_buf<loc=vec, dtype=i8, rows=2, cols=32, v_row=2, v_col=32,
                       blayout=row_major, slayout=none_box, fractal=512, pad=0>
     %tmp = pto.alloc_tile
-      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+      : !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=32, v_row=1, v_col=32,
                       blayout=row_major, slayout=none_box, fractal=512, pad=0>
     %dst = pto.alloc_tile
-      : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+      : !pto.tile_buf<loc=vec, dtype=i8, rows=2, cols=32, v_row=2, v_col=32,
                       blayout=row_major, slayout=none_box, fractal=512, pad=0>
 
-    %scalar = arith.constant 42.0 : f32
+    %scalar = arith.constant 42 : i8
 
-    pto.tsels ins(%mask, %src, %tmp, %scalar : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+    pto.tsels ins(%mask, %src, %tmp, %scalar : !pto.tile_buf<loc=vec, dtype=i8, rows=2, cols=32, v_row=2, v_col=32,
                               blayout=row_major, slayout=none_box, fractal=512, pad=0>,
-                          !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                          !pto.tile_buf<loc=vec, dtype=i8, rows=2, cols=32, v_row=2, v_col=32,
                               blayout=row_major, slayout=none_box, fractal=512, pad=0>,
-                          !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                          !pto.tile_buf<loc=vec, dtype=i8, rows=1, cols=32, v_row=1, v_col=32,
                               blayout=row_major, slayout=none_box, fractal=512, pad=0>,
-                          f32)
-             outs(%dst : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=64, v_row=16, v_col=64,
+                          i8)
+             outs(%dst : !pto.tile_buf<loc=vec, dtype=i8, rows=2, cols=32, v_row=2, v_col=32,
                                    blayout=row_major, slayout=none_box, fractal=512, pad=0>)
     return
   }

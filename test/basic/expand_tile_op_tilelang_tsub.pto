@@ -18,8 +18,8 @@
 // pto.tsub should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TSUB
 // CHECK-NOT: pto.tsub ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
+// CHECK: pto.vecscope
 // CHECK: pto.vlds
 // CHECK: pto.vsub
 // CHECK: pto.vsts

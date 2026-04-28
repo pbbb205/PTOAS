@@ -16,8 +16,8 @@
 // pto.tabs should be lowered to vector-style VPTO IR.
 // CHECK: func.func @TABS
 // CHECK-NOT: pto.tabs ins
-// CHECK: pto.vecscope
 // CHECK: pto.castptr
+// CHECK: pto.vecscope
 // CHECK: pto.vlds
 // CHECK: pto.vabs
 // CHECK: pto.vsts

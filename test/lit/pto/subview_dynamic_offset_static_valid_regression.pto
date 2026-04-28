@@ -1,4 +1,4 @@
-// RUN: ptoas --mlir-print-ir-after=pto-plan-memory %s 2>&1 | FileCheck %s
+// RUN: ptoas --emit-pto-ir %s -o - | FileCheck %s
 
 module {
   func.func @subview_dynamic_offset_static_valid_regression(
@@ -24,4 +24,5 @@ module {
 }
 
 // CHECK: func.func @subview_dynamic_offset_static_valid_regression
-// CHECK: Tile<TileType::Vec, float, 1, 64, BLayout::RowMajor, 1, 64, SLayout::NoneBox, 512, PadValue::Null, CompactMode::Null>
+// CHECK: memref.subview %{{.*}}[0, %{{.*}}] [1, 64] [1, 1]
+// CHECK: pto.bind_tile %{{.*}}, %c1, %c64
