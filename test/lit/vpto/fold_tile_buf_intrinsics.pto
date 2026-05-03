@@ -8,22 +8,36 @@
 
 // Unit test for FoldTileBufIntrinsics on the VPTO tile-op expansion path.
 //
-// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=pto-fold-tile-buf-intrinsics %s -o /dev/null 2>&1 | FileCheck %s
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=pto-fold-tile-buf-intrinsics %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=SHAPE
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=pto-fold-tile-buf-intrinsics %s -o /dev/null 2>&1 | FileCheck %s --check-prefix=ADDR
 //
-// After FoldTileBufIntrinsics:
-// - tile_buf_addr / tile_valid_rows / tile_valid_cols should be gone
-// - the expanded body should already use concrete memrefs/constants
-// CHECK-LABEL: func.func @TADD
-// CHECK-NOT: pto.tile_buf_addr
-// CHECK-NOT: pto.tile_valid_rows
-// CHECK-NOT: pto.tile_valid_cols
-// CHECK-NOT: pto.bind_tile
-// CHECK: pto.pointer_cast(
-// CHECK: arith.constant 16 : index
-// CHECK: arith.constant 64 : index
-// CHECK: pto.vlds
-// CHECK: pto.vadd
-// CHECK: pto.vsts
+// After the first shape-only FoldTileBufIntrinsics:
+// - tile_valid_rows / tile_valid_cols should be gone
+// - tile_buf_addr is intentionally preserved for the later addr-only fold
+// SHAPE-LABEL: func.func @TADD
+// SHAPE: pto.tile_buf_addr
+// SHAPE-NOT: pto.tile_valid_rows
+// SHAPE-NOT: pto.tile_valid_cols
+// SHAPE: arith.constant 16 : index
+// SHAPE: arith.constant 64 : index
+// SHAPE: pto.vlds
+// SHAPE: pto.vadd
+// SHAPE: pto.vsts
+
+// After the later addr-only FoldTileBufIntrinsics:
+// - tile_buf_addr should also be gone
+// - the expanded body should use concrete memrefs/constants
+// ADDR-LABEL: func.func @TADD
+// ADDR: pto.pointer_cast(
+// ADDR: pto.pointer_cast(
+// ADDR: pto.pointer_cast(
+// ADDR-NOT: pto.tile_buf_addr
+// ADDR-NOT: pto.tile_valid_rows
+// ADDR-NOT: pto.tile_valid_cols
+// ADDR-NOT: pto.bind_tile
+// ADDR: pto.vlds
+// ADDR: pto.vadd
+// ADDR: pto.vsts
 
 module attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
   func.func @TADD() {

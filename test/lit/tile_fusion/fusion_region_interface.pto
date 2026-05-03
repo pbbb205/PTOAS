@@ -1,0 +1,67 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guards fusion_region interface construction: escaping values become explicit
+// results while external inputs stay implicit captures.
+//
+// RUN: { ptoas --pto-backend=vpto --pto-arch=a5 --pto-level=level2 --enable-op-fusion --emit-pto-ir %s --mlir-print-ir-after=pto-fusion-region-gen -o /dev/null 2>&1 || true; } | FileCheck %s
+
+module {
+  func.func @fusion_region_interface(
+      %dst0_ptr: !pto.ptr<f32>,
+      %dst1_ptr: !pto.ptr<f32>,
+      %full0: !pto.tile_buf<vec, 32x32xf32>,
+      %full1: !pto.tile_buf<vec, 32x32xf32>,
+      %row0: !pto.tile_buf<vec, 32x1xf32>,
+      %row1: !pto.tile_buf<vec, 32x1xf32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+
+    %dst0_view = pto.make_tensor_view %dst0_ptr,
+      shape = [%c32, %c32], strides = [%c32, %c1]
+      : !pto.tensor_view<?x?xf32>
+    %dst0_part = pto.partition_view %dst0_view,
+      offsets = [%c0, %c0], sizes = [%c32, %c32]
+      : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<32x32xf32>
+    %dst1_view = pto.make_tensor_view %dst1_ptr,
+      shape = [%c32, %c32], strides = [%c32, %c1]
+      : !pto.tensor_view<?x?xf32>
+    %dst1_part = pto.partition_view %dst1_view,
+      offsets = [%c0, %c0], sizes = [%c32, %c32]
+      : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<32x32xf32>
+
+    %tmp0 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %tmp1 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %sum = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+
+    pto.trowexpandmul ins(%full0, %row0 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x1xf32>) outs(%tmp0 : !pto.tile_buf<vec, 32x32xf32>)
+    pto.trowexpandmul ins(%full1, %row1 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x1xf32>) outs(%tmp1 : !pto.tile_buf<vec, 32x32xf32>)
+    pto.tadd ins(%tmp0, %tmp1 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%sum : !pto.tile_buf<vec, 32x32xf32>)
+
+    pto.tstore ins(%tmp0 : !pto.tile_buf<vec, 32x32xf32>)
+               outs(%dst0_part : !pto.partition_tensor_view<32x32xf32>)
+    pto.tstore ins(%sum : !pto.tile_buf<vec, 32x32xf32>)
+               outs(%dst1_part : !pto.partition_tensor_view<32x32xf32>)
+    return
+  }
+}
+
+// CHECK: // -----// IR Dump After PTOFusionRegionGen (pto-fusion-region-gen) //----- //
+// CHECK-LABEL: func.func @fusion_region_interface(
+// CHECK: %[[REGION:.*]]:2 = pto.fusion_region {
+// CHECK: %[[TMP0:[0-9]+]] = pto.alloc_tile
+// CHECK: %[[TMP1:[0-9]+]] = pto.alloc_tile
+// CHECK: %[[SUM:[0-9]+]] = pto.alloc_tile
+// CHECK: pto.trowexpandmul ins(%{{.*}}, %{{.*}} : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x1xf32>) outs(%[[TMP0]] : !pto.tile_buf<vec, 32x32xf32>)
+// CHECK: pto.trowexpandmul ins(%{{.*}}, %{{.*}} : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x1xf32>) outs(%[[TMP1]] : !pto.tile_buf<vec, 32x32xf32>)
+// CHECK: pto.tadd ins(%[[TMP0]], %[[TMP1]] : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%[[SUM]] : !pto.tile_buf<vec, 32x32xf32>)
+// CHECK: pto.yield(%[[TMP0]], %[[SUM]]) : (!pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) -> ()
+// CHECK: } {pto.fusion.group_id = 0 : i64} : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>
+// CHECK: pto.tstore ins(%[[REGION]]#0 : !pto.tile_buf<vec, 32x32xf32>)
+// CHECK: pto.tstore ins(%[[REGION]]#1 : !pto.tile_buf<vec, 32x32xf32>)

@@ -1,0 +1,88 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guards the level2 frontend fusion sequence: planning, scheduling, and
+// fusion_region generation before later level2 adapter passes.
+//
+// RUN: ptoas --pto-backend=vpto --pto-arch=a5 --pto-level=level2 --enable-op-fusion --emit-pto-ir %s --mlir-print-ir-after=pto-fusion-plan --mlir-print-ir-after=pto-op-scheduling --mlir-print-ir-after=pto-fusion-region-gen -o /dev/null 2>&1 | FileCheck %s --check-prefix=PLAN --check-prefix=SCHEDULE --check-prefix=REGION
+
+module {
+  func.func @fusion_frontend_stages_level2(
+      %dst_ptr: !pto.ptr<f32>,
+      %full0: !pto.tile_buf<vec, 32x32xf32>,
+      %full1: !pto.tile_buf<vec, 32x32xf32>,
+      %full2: !pto.tile_buf<vec, 32x32xf32>,
+      %full3: !pto.tile_buf<vec, 32x32xf32>,
+      %row0: !pto.tile_buf<vec, 32x1xf32, blayout=col_major>,
+      %row1: !pto.tile_buf<vec, 32x1xf32, blayout=col_major>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+
+    %dst_view = pto.make_tensor_view %dst_ptr,
+      shape = [%c32, %c32], strides = [%c32, %c1]
+      : !pto.tensor_view<?x?xf32>
+    %dst_part = pto.partition_view %dst_view,
+      offsets = [%c0, %c0], sizes = [%c32, %c32]
+      : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<32x32xf32>
+
+    %tmp0 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %noise0 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %tmp1 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %noise1 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %tmp2 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+
+    pto.trowexpandmul ins(%full0, %row0 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x1xf32, blayout=col_major>) outs(%tmp0 : !pto.tile_buf<vec, 32x32xf32>)
+    pto.tadd ins(%full2, %full3 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%noise0 : !pto.tile_buf<vec, 32x32xf32>)
+    pto.trowexpandmul ins(%full1, %row1 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x1xf32, blayout=col_major>) outs(%tmp1 : !pto.tile_buf<vec, 32x32xf32>)
+    pto.tmul ins(%full2, %full3 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%noise1 : !pto.tile_buf<vec, 32x32xf32>)
+    pto.tadd ins(%tmp0, %tmp1 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%tmp2 : !pto.tile_buf<vec, 32x32xf32>)
+    pto.tstore ins(%tmp2 : !pto.tile_buf<vec, 32x32xf32>)
+               outs(%dst_part : !pto.partition_tensor_view<32x32xf32>)
+    return
+  }
+}
+
+// PLAN: // -----// IR Dump After FusionPlan (pto-fusion-plan) //----- //
+// PLAN-LABEL: func.func @fusion_frontend_stages_level2(
+// PLAN: pto.trowexpandmul ins(%arg1, %arg5
+// PLAN-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 0 : i64}
+// PLAN: pto.tadd ins(%arg3, %arg4
+// PLAN-NOT: {pto.fusion.group_id
+// PLAN: pto.trowexpandmul ins(%arg2, %arg6
+// PLAN-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 1 : i64}
+// PLAN: pto.tmul ins(%arg3, %arg4
+// PLAN-NOT: {pto.fusion.group_id
+// PLAN: pto.tadd ins(%2, %4
+// PLAN-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 2 : i64}
+
+// SCHEDULE: // -----// IR Dump After OpScheduling (pto-op-scheduling) //----- //
+// SCHEDULE-LABEL: func.func @fusion_frontend_stages_level2(
+// SCHEDULE: pto.trowexpandmul ins(%arg1, %arg5
+// SCHEDULE-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 0 : i64}
+// SCHEDULE-NEXT: pto.trowexpandmul ins(%arg2, %arg6
+// SCHEDULE-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 1 : i64}
+// SCHEDULE-NEXT: pto.tadd ins(%2, %4
+// SCHEDULE-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 2 : i64}
+// SCHEDULE-NEXT: pto.tadd ins(%arg3, %arg4
+// SCHEDULE-NEXT: pto.tmul ins(%arg3, %arg4
+
+// REGION: // -----// IR Dump After PTOFusionRegionGen (pto-fusion-region-gen) //----- //
+// REGION-LABEL: func.func @fusion_frontend_stages_level2(
+// REGION: pto.fusion_region {
+// REGION: %[[INNER0:.*]] = pto.alloc_tile
+// REGION: %[[INNER1:.*]] = pto.alloc_tile
+// REGION: %[[INNER2:.*]] = pto.alloc_tile
+// REGION: pto.trowexpandmul ins(%arg1, %arg5
+// REGION-NEXT: pto.trowexpandmul ins(%arg2, %arg6
+// REGION-NEXT: pto.tadd ins(%[[INNER0]], %[[INNER1]]
+// REGION-NEXT: pto.yield(%[[INNER2]]) : (!pto.tile_buf<vec, 32x32xf32>) -> ()
+// REGION: } {pto.fusion.group_id = 0 : i64} : !pto.tile_buf<vec, 32x32xf32>
+// REGION-NEXT: pto.tadd ins(%arg3, %arg4
+// REGION-NEXT: pto.tmul ins(%arg3, %arg4
+// REGION: pto.tstore ins(%{{.*}} : !pto.tile_buf<vec, 32x32xf32>)

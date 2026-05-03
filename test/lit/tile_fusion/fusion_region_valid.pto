@@ -1,0 +1,27 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guards the canonical pto.fusion_region assembly form with one yielded result.
+//
+// RUN: ptoas --pto-level=level3 --emit-pto-ir %s | FileCheck %s
+
+module {
+  func.func @fusion_region_valid() {
+    %c0 = arith.constant 0 : index
+    %0 = pto.fusion_region {
+      pto.yield(%c0) : (index) -> ()
+    } : index
+    return
+  }
+}
+
+// CHECK-LABEL: func.func @fusion_region_valid()
+// CHECK: %[[C0:.*]] = arith.constant 0 : index
+// CHECK: %[[R:.*]] = pto.fusion_region {
+// CHECK:   pto.yield(%[[C0]]) : (index) -> ()
+// CHECK: } : index

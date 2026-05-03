@@ -1,0 +1,123 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guards the level3 backend fusion lifecycle through loop fusion, predicate
+// elision, load/store elision, and final region flattening.
+//
+// RUN: ptoas --pto-backend=vpto --pto-arch=a5 --pto-level=level3 --enable-op-fusion --emit-vpto %s --mlir-print-ir-after=pto-low-level-loop-fusion -o /dev/null 2>&1 | FileCheck %s --check-prefix=LLF
+// RUN: ptoas --pto-backend=vpto --pto-arch=a5 --pto-level=level3 --enable-op-fusion --emit-vpto %s --mlir-print-ir-after=pto-fusion-predicate-elision -o /dev/null 2>&1 | FileCheck %s --check-prefix=PRED
+// RUN: ptoas --pto-backend=vpto --pto-arch=a5 --pto-level=level3 --enable-op-fusion --emit-vpto %s --mlir-print-ir-after=pto-fusion-load-store-elision -o /dev/null 2>&1 | FileCheck %s --check-prefix=LS
+// RUN: ptoas --pto-backend=vpto --pto-arch=a5 --pto-level=level3 --enable-op-fusion --emit-vpto %s --mlir-print-ir-after=pto-flatten-fusion-region -o /dev/null 2>&1 | FileCheck %s --check-prefix=FLAT
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @fusion_backend_lifecycle_level3(%dst_ptr: !pto.ptr<f32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %c1024 = arith.constant 1024 : index
+
+    %dst_view = pto.make_tensor_view %dst_ptr,
+      shape = [%c1, %c1, %c1, %c32, %c32],
+      strides = [%c1024, %c1024, %c1024, %c32, %c1]
+      : !pto.tensor_view<1x1x1x32x32xf32>
+    %dst_part = pto.partition_view %dst_view,
+      offsets = [%c0, %c0, %c0, %c0, %c0],
+      sizes = [%c1, %c1, %c1, %c32, %c32]
+      : !pto.tensor_view<1x1x1x32x32xf32> -> !pto.partition_tensor_view<1x1x1x32x32xf32>
+
+    %c0_i64 = arith.constant 0 : i64
+    %c4096_i64 = arith.constant 4096 : i64
+    %c8192_i64 = arith.constant 8192 : i64
+    %c12288_i64 = arith.constant 12288 : i64
+    %c16384_i64 = arith.constant 16384 : i64
+    %c20480_i64 = arith.constant 20480 : i64
+    %c24576_i64 = arith.constant 24576 : i64
+
+    %a = pto.alloc_tile addr = %c0_i64 : !pto.tile_buf<vec, 32x32xf32>
+    %b = pto.alloc_tile addr = %c4096_i64 : !pto.tile_buf<vec, 32x32xf32>
+    %c = pto.alloc_tile addr = %c8192_i64 : !pto.tile_buf<vec, 32x32xf32>
+    %d = pto.alloc_tile addr = %c12288_i64 : !pto.tile_buf<vec, 32x32xf32>
+    %tmp0 = pto.alloc_tile addr = %c16384_i64 : !pto.tile_buf<vec, 32x32xf32>
+    %tmp1 = pto.alloc_tile addr = %c20480_i64 : !pto.tile_buf<vec, 32x32xf32>
+    %out = pto.alloc_tile addr = %c24576_i64 : !pto.tile_buf<vec, 32x32xf32>
+
+    pto.tadd ins(%a, %b : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%tmp0 : !pto.tile_buf<vec, 32x32xf32>)
+    pto.tadd ins(%c, %d : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%tmp1 : !pto.tile_buf<vec, 32x32xf32>)
+    pto.tadd ins(%tmp0, %tmp1 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%out : !pto.tile_buf<vec, 32x32xf32>)
+    pto.tstore ins(%out : !pto.tile_buf<vec, 32x32xf32>)
+               outs(%dst_part : !pto.partition_tensor_view<1x1x1x32x32xf32>)
+    return
+  }
+}
+
+// LLF: // -----// IR Dump After PTOLowLevelLoopFusion (pto-low-level-loop-fusion) //----- //
+// LLF-LABEL: func.func @fusion_backend_lifecycle_level3(
+// LLF: %[[REGION:.*]] = pto.fusion_region {
+// LLF: scf.for
+// LLF: scf.for {{.*}} -> (i32, i32, i32) {
+// LLF: pto.plt_b32
+// LLF: pto.vadd
+// LLF: pto.vsts
+// LLF: pto.plt_b32
+// LLF: pto.vadd
+// LLF: pto.vsts
+// LLF: pto.plt_b32
+// LLF: pto.vadd
+// LLF: pto.vsts
+// LLF: }
+// LLF: pto.yield(%{{.*}}) : (!pto.tile_buf<vec, 32x32xf32>) -> ()
+// LLF: pto.copy_ubuf_to_gm
+
+// PRED: // -----// IR Dump After PTOFusionPredicateElision (pto-fusion-predicate-elision) //----- //
+// PRED-LABEL: func.func @fusion_backend_lifecycle_level3(
+// PRED: %[[REGION:.*]] = pto.fusion_region {
+// PRED: scf.for
+// PRED: pto.plt_b32
+// PRED: pto.vadd
+// PRED: pto.vsts
+// PRED: pto.vlds
+// PRED: pto.vlds
+// PRED: pto.vadd
+// PRED: pto.vsts
+// PRED: pto.vlds
+// PRED: pto.vlds
+// PRED: pto.vadd
+// PRED: pto.yield(%{{.*}}) : (!pto.tile_buf<vec, 32x32xf32>) -> ()
+// PRED: pto.copy_ubuf_to_gm
+
+// LS: // -----// IR Dump After PTOFusionLoadStoreElision (pto-fusion-load-store-elision) //----- //
+// LS-LABEL: func.func @fusion_backend_lifecycle_level3(
+// LS: %[[REGION:.*]] = pto.fusion_region {
+// LS: pto.vadd
+// LS-NOT: pto.vsts
+// LS: pto.vlds
+// LS: pto.vlds
+// LS: pto.vadd
+// LS-NOT: pto.vsts
+// LS: pto.vadd
+// LS: pto.vsts
+// LS: pto.yield(%{{.*}}) : (!pto.tile_buf<vec, 32x32xf32>) -> ()
+// LS: pto.copy_ubuf_to_gm
+
+// FLAT: // -----// IR Dump After PTOFlattenFusionRegion (pto-flatten-fusion-region) //----- //
+// FLAT-LABEL: func.func @fusion_backend_lifecycle_level3(
+// FLAT-NOT: pto.fusion_region
+// FLAT: scf.for %arg1 = %c0 to %c32 step %c1 {
+// FLAT: pto.vlds
+// FLAT: pto.vlds
+// FLAT: pto.vadd
+// FLAT-NOT: pto.vsts
+// FLAT: pto.vlds
+// FLAT: pto.vlds
+// FLAT: pto.vadd
+// FLAT-NOT: pto.vsts
+// FLAT: pto.vadd
+// FLAT: pto.vsts
+// FLAT: }
+// FLAT: pto.copy_ubuf_to_gm
+// FLAT: return

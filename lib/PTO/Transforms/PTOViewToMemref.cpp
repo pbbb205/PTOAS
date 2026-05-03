@@ -138,6 +138,22 @@ static mlir::pto::TileBufConfigAttr lookupConfig(Value v) {
   if (auto cast = v.getDefiningOp<memref::CastOp>()) {
     return lookupConfig(cast.getSource());
   }
+
+  // 3. pto.fusion_region result 本身不携带 config；作为兜底情况，沿着
+  //    pto.yield 回溯到 region 内真正的 tile handle/memref 定义链继续查找。
+  if (auto regionResult = dyn_cast<OpResult>(v)) {
+    if (auto fusionRegion =
+            dyn_cast<mlir::pto::FusionRegionOp>(regionResult.getOwner())) {
+      auto yieldOp = dyn_cast<mlir::pto::YieldOp>(
+          fusionRegion.getBody().front().getTerminator());
+      if (!yieldOp)
+        return {};
+      unsigned resultIndex = regionResult.getResultNumber();
+      if (resultIndex >= yieldOp.getNumOperands())
+        return {};
+      return lookupConfig(yieldOp.getOperand(resultIndex));
+    }
+  }
   
   // 如果追溯到 BlockArgument (函数参数) 或其他无法穿透的 Op，则返回空
   return {}; 
@@ -169,6 +185,30 @@ static void lookupValidDims(Value v, Value &vRow, Value &vCol) {
     lookupValidDims(cast.getSource(), vRow, vCol);
     return;
   }
+
+  // pto.fusion_region result 不直接携带 valid dims；作为兜底情况，沿着
+  // pto.yield 回溯到 region 内真正的 tile handle/memref 定义链继续查找。
+  if (auto regionResult = dyn_cast<OpResult>(v)) {
+    if (auto fusionRegion =
+            dyn_cast<mlir::pto::FusionRegionOp>(regionResult.getOwner())) {
+      auto yieldOp = dyn_cast<mlir::pto::YieldOp>(
+          fusionRegion.getBody().front().getTerminator());
+      if (!yieldOp) {
+        vRow = Value();
+        vCol = Value();
+        return;
+      }
+      unsigned resultIndex = regionResult.getResultNumber();
+      if (resultIndex >= yieldOp.getNumOperands()) {
+        vRow = Value();
+        vCol = Value();
+        return;
+      }
+      lookupValidDims(yieldOp.getOperand(resultIndex), vRow, vCol);
+      return;
+    }
+  }
+
   vRow = Value();
   vCol = Value();
 }
@@ -181,6 +221,27 @@ static OpTy replaceOpWithClonedAttrs(IRRewriter &rewriter, Operation *op,
   newOp->setAttrs(op->getAttrs());
   rewriter.replaceOp(op, newOp->getResults());
   return newOp;
+}
+
+static Value resolveTileBufViewLikeSource(Value src) {
+  if (isa<MemRefType>(src.getType()))
+    return src;
+
+  if (auto regionResult = dyn_cast<OpResult>(src)) {
+    if (auto fusionRegion =
+            dyn_cast<mlir::pto::FusionRegionOp>(regionResult.getOwner())) {
+      auto yieldOp = dyn_cast<mlir::pto::YieldOp>(
+          fusionRegion.getBody().front().getTerminator());
+      if (!yieldOp)
+        return Value();
+      unsigned resultIndex = regionResult.getResultNumber();
+      if (resultIndex >= yieldOp.getNumOperands())
+        return Value();
+      return resolveTileBufViewLikeSource(yieldOp.getOperand(resultIndex));
+    }
+  }
+
+  return Value();
 }
 
 // =============================================================================
@@ -687,6 +748,43 @@ static LogicalResult reconcileSCFForResultTypes(func::FuncOp func) {
         iterArg.setType(initTy);
       if (forOp.getResult(i).getType() != initTy)
         forOp.getResult(i).setType(initTy);
+    }
+  }
+
+  return success();
+}
+
+// Ensure pto.fusion_region result types follow the rewritten pto.yield operand
+// types. PTOViewToMemref rewrites region-local tile values to memref, but the
+// region result types are not auto-updated by those op-local rewrites.
+static LogicalResult reconcileFusionRegionResultTypes(func::FuncOp func) {
+  SmallVector<pto::FusionRegionOp, 8> fusionRegions;
+  func.walk([&](pto::FusionRegionOp fusionRegion) {
+    fusionRegions.push_back(fusionRegion);
+  });
+
+  for (pto::FusionRegionOp fusionRegion : fusionRegions) {
+    if (fusionRegion.getNumResults() == 0)
+      continue;
+
+    auto yieldOp =
+        dyn_cast<pto::YieldOp>(fusionRegion.getBody().front().getTerminator());
+    if (!yieldOp) {
+      fusionRegion.emitError("result-bearing pto.fusion_region must end with "
+                             "pto.yield");
+      return failure();
+    }
+
+    if (yieldOp.getNumOperands() != fusionRegion.getNumResults()) {
+      fusionRegion.emitError(
+          "pto.fusion_region result count does not match yielded values");
+      return failure();
+    }
+
+    for (unsigned i = 0; i < fusionRegion.getNumResults(); ++i) {
+      Type yieldedTy = yieldOp.getOperand(i).getType();
+      if (fusionRegion.getResult(i).getType() != yieldedTy)
+        fusionRegion.getResult(i).setType(yieldedTy);
     }
   }
 
@@ -1286,7 +1384,8 @@ static Value buildTileBufViewLikeValue(Operation *anchorOp, Value src,
   IRRewriter rewriter(ctx);
   rewriter.setInsertionPoint(anchorOp);
 
-  auto srcMrTy = dyn_cast<MemRefType>(src.getType());
+  src = resolveTileBufViewLikeSource(src);
+  auto srcMrTy = dyn_cast_or_null<MemRefType>(src.getType());
   if (!srcMrTy) {
     anchorOp->emitError("tile_buf view op src must be lowered to memref first");
     return Value();
@@ -1723,6 +1822,10 @@ struct PTOViewToMemrefPass
       // Stage 1.4: Lower tile_buf view-like ops (treshape/bitcast)
       // ------------------------------------------------------------------
       if (failed(lowerTileBufViewLikeOps(func, ctx))) {
+        signalPassFailure();
+        return;
+      }
+      if (failed(reconcileFusionRegionResultTypes(func))) {
         signalPassFailure();
         return;
       }
@@ -3701,7 +3804,6 @@ struct PTOViewToMemrefPass
         signalPassFailure();
         return;
       }
-
       // Mark memref-form set_validshape only after control-flow result-type
       // reconciliation. Values such as scf.if results can stay tile_buf until
       // this late stage.

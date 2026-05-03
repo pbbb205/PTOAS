@@ -424,8 +424,8 @@ static pto::ExpandTileOpOptions resolveExpandTileOpOptions(int argc,
 
 static llvm::cl::opt<bool> enableOpFusion(
     "enable-op-fusion",
-    llvm::cl::desc("Enable frontend tile fusion on the A5 EmitC mainline "
-                   "(requires --pto-arch=a5 and --pto-level=level2|level3)"),
+    llvm::cl::desc("Enable A5 tile fusion on level2/level3. EmitC uses "
+                   "last-use annotation; VPTO uses fusion-region lifecycle."),
     llvm::cl::init(false));
 
 static llvm::cl::opt<bool> disableInferLayout(
@@ -1479,24 +1479,34 @@ static void prepareVPTOForEmission(PassManager &pm) {
   kernelModulePM.addPass(pto::createPTOValidateVPTOEmissionIRPass());
 }
 
-static void lowerPTOToVPTOBackend(PassManager &pm, int argc, char **argv) {
-  // TileOp Expand path:
-  //   1. ExpandTileOp: instantiate TileLang DSL templates, replace tile ops
-  //      with func.call to template functions (tile_buf params)
-  //   2. InlineLibCall: inline template function bodies
-  //   3. FoldTileBufIntrinsics: fold tile_buf_addr / tile_valid_rows /
-  //      tile_valid_cols to concrete memref/constant values
+static void lowerPTOToVPTOBackend(PassManager &pm, ModuleOp module, int argc,
+                                  char **argv) {
   auto &kernelModulePM = pm.nest<ModuleOp>();
+  auto moduleArchAttr =
+      module->getAttrOfType<mlir::StringAttr>("pto.target_arch");
+  const bool enableA5VPTOPostLoweringFusionLifecycle =
+      enableOpFusion && moduleArchAttr && moduleArchAttr.getValue() == "a5";
+
   pto::ExpandTileOpOptions expandOpts = resolveExpandTileOpOptions(argc, argv);
   kernelModulePM.addPass(pto::createExpandTileOpPass(expandOpts));
 
   kernelModulePM.addPass(pto::createPTOInlineLibCallPass());
   kernelModulePM.addNestedPass<mlir::func::FuncOp>(
-      pto::createFoldTileBufIntrinsicsPass());
-  // FoldTileBufIntrinsics materializes many constant branch conditions.
-  // Clean them up immediately on the TileOp expansion path before the
-  // authoring-stage VPTO verifier and let the existing CSE passes remove the
-  // resulting dead values later in the pipeline.
+      pto::createFoldTileBufIntrinsicsPass("shape-only"));
+  if (enableA5VPTOPostLoweringFusionLifecycle) {
+    kernelModulePM.addPass(pto::createPTOLowLevelLoopFusionPass());
+    kernelModulePM.addPass(mlir::createCanonicalizerPass());
+    kernelModulePM.addPass(mlir::createCSEPass());
+    kernelModulePM.addNestedPass<mlir::func::FuncOp>(
+        pto::createPTOFusionPredicateElisionPass());
+    kernelModulePM.addNestedPass<mlir::func::FuncOp>(
+        pto::createPTOFusionLoadStoreElisionPass());
+    kernelModulePM.addNestedPass<mlir::func::FuncOp>(
+        pto::createPTOFlattenFusionRegionPass());
+    kernelModulePM.addPass(mlir::createCSEPass());
+  }
+  kernelModulePM.addNestedPass<mlir::func::FuncOp>(
+      pto::createFoldTileBufIntrinsicsPass("addr-only"));
   kernelModulePM.addPass(mlir::createSCCPPass());
   kernelModulePM.addPass(mlir::createCanonicalizerPass());
 }
@@ -1563,7 +1573,7 @@ static LogicalResult runVPTOBackendPipeline(OwningOpRef<ModuleOp> &module,
   if (!hasTileOpsToExpand && hasTilelangHelpers)
     inlineTilelangHelpersOnVPTOInput(pm);
   if (hasTileOpsToExpand)
-    lowerPTOToVPTOBackend(pm, argc, argv);
+    lowerPTOToVPTOBackend(pm, module.get(), argc, argv);
   prepareVPTOForEmission(pm);
   if (failed(applyConfiguredPassManagerCLOptions(
           pm, "VPTO unified emission pipeline")))
@@ -1612,9 +1622,13 @@ int mlir::pto::compilePTOASModule(
     }
   }
 
-  const bool enableA5FrontendFusionPath =
+  const bool enableA5FusionPath =
       enableOpFusion && arch == "a5" &&
       effectiveLevel != PTOBuildLevel::Level1;
+  const bool enableA5EmitCFusionPath =
+      enableA5FusionPath && effectiveBackend == PTOBackend::EmitC;
+  const bool enableA5VPTOFusionPath =
+      enableA5FusionPath && effectiveBackend == PTOBackend::VPTO;
 
   bool invalidAutoSyncTailHint = false;
   module->walk([&](mlir::func::FuncOp func) {
@@ -1738,10 +1752,14 @@ int mlir::pto::compilePTOASModule(
 
   // Keep frontend fusion on tile-native PTO IR and annotate last_use directly
   // on scheduled block-local spans before the shared mainline lowers tiles.
-  if (enableA5FrontendFusionPath) {
+  if (enableA5EmitCFusionPath) {
     pm.addNestedPass<mlir::func::FuncOp>(pto::createFusionPlanPass());
     pm.addNestedPass<mlir::func::FuncOp>(pto::createOpSchedulingPass());
     pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOMarkLastUsePass());
+  } else if (enableA5VPTOFusionPath) {
+    pm.addNestedPass<mlir::func::FuncOp>(pto::createFusionPlanPass());
+    pm.addNestedPass<mlir::func::FuncOp>(pto::createOpSchedulingPass());
+    pm.addNestedPass<mlir::func::FuncOp>(pto::createPTOFusionRegionGenPass());
   }
 
   pm.addPass(pto::createPTOViewToMemrefPass());

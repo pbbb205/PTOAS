@@ -2190,6 +2190,64 @@ static std::optional<int64_t> getConstantIntegerValue(Value value) {
   return std::nullopt;
 }
 
+LogicalResult mlir::pto::FusionRegionOp::verify() {
+  Region &bodyRegion = getBody();
+  if (bodyRegion.empty())
+    return emitOpError("expects a non-empty body region");
+
+  Block &body = bodyRegion.front();
+  if (body.getNumArguments() != 0)
+    return emitOpError() << "expects body block to have no arguments, got "
+                         << body.getNumArguments();
+
+  if (body.empty() || !body.back().hasTrait<OpTrait::IsTerminator>())
+    return emitOpError("expects body to terminate with pto.yield");
+
+  auto yield = dyn_cast<YieldOp>(&body.back());
+  if (!yield)
+    return emitOpError("expects body to terminate with pto.yield");
+
+  if (yield.getValues().size() != getOutputs().size())
+    return emitOpError() << "expects pto.yield to return "
+                         << getOutputs().size() << " values, got "
+                         << yield.getValues().size();
+
+  for (auto [idx, pair] :
+       llvm::enumerate(llvm::zip(yield.getValues(), getOutputs()))) {
+    Value yielded = std::get<0>(pair);
+    Value output = std::get<1>(pair);
+    if (yielded.getType() != output.getType())
+      return emitOpError() << "expects yielded value #" << idx << " to have "
+                           << "type " << output.getType() << ", got "
+                           << yielded.getType();
+  }
+
+  return success();
+}
+
+LogicalResult mlir::pto::YieldOp::verify() {
+  auto parent = dyn_cast_or_null<FusionRegionOp>(getOperation()->getParentOp());
+  if (!parent)
+    return emitOpError("expects parent op to be pto.fusion_region");
+
+  if (getValues().size() != parent.getOutputs().size())
+    return emitOpError() << "expects " << parent.getOutputs().size()
+                         << " yielded values to match parent results, got "
+                         << getValues().size();
+
+  for (auto [idx, pair] :
+       llvm::enumerate(llvm::zip(getValues(), parent.getOutputs()))) {
+    Value yielded = std::get<0>(pair);
+    Value output = std::get<1>(pair);
+    if (yielded.getType() != output.getType())
+      return emitOpError() << "expects yielded value #" << idx << " to have "
+                           << "type " << output.getType() << ", got "
+                           << yielded.getType();
+  }
+
+  return success();
+}
+
 LogicalResult mlir::pto::MakeTensorViewOp::verify() {
   auto tvTy = dyn_cast<mlir::pto::TensorViewType>(getResult().getType());
   if (!tvTy)

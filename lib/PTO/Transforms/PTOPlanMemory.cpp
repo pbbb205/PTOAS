@@ -395,6 +395,9 @@ void MemLivenessAnalysis::RecursionIR(Region *region, Liveness live) {
     } else if (auto forOp = dyn_cast<scf::ForOp>(op)) {
       RecursiveForOp(forOp, live);
       return WalkResult::skip();
+    } else if (auto fusionRegion = dyn_cast<pto::FusionRegionOp>(op)) {
+      RecursiveFusionRegionOp(fusionRegion, live);
+      return WalkResult::skip();
     }
 
     // process operation
@@ -606,6 +609,34 @@ void MemLivenessAnalysis::RecursiveIfOp(scf::IfOp ifOp, Liveness live) {
   OpKillHandle(curIfEnd, live, ifOp->getBlock());
 }
 
+void MemLivenessAnalysis::UpdateFusionRegionBufferAlias(
+    pto::FusionRegionOp fusionRegion, pto::YieldOp yieldOp) {
+  if (fusionRegion.getResults().empty())
+    return;
+  if (fusionRegion->getResults().size() != yieldOp->getOperands().size()) {
+    llvm::report_fatal_error(
+        "pto.fusion_region result/yield sizes are inconsistent");
+  }
+  for (auto [i, yielded] : llvm::enumerate(yieldOp->getOperands())) {
+    UpdateBufferAlias(fusionRegion->getResult(i), yielded);
+  }
+}
+
+void MemLivenessAnalysis::RecursiveFusionRegionOp(pto::FusionRegionOp fusionRegion,
+                                                  Liveness live) {
+  UpdateLinearOperation(fusionRegion.getOperation());
+  RecursionIR(&fusionRegion.getBody(), live);
+
+  auto yieldOp =
+      dyn_cast<pto::YieldOp>(fusionRegion.getBody().front().getTerminator());
+  if (!yieldOp)
+    llvm::report_fatal_error("pto.fusion_region must terminate with pto.yield");
+  UpdateFusionRegionBufferAlias(fusionRegion, yieldOp);
+
+  auto regionEnd = UpdateLinearOperation(fusionRegion.getOperation());
+  OpKillHandle(regionEnd, live, fusionRegion->getBlock());
+}
+
 SmallVector<Value> MemLivenessAnalysis::GetLiveBuffersInLoop(scf::ForOp forOp,
                                                              Liveness live) {
   SmallVector<Value> allocBeforeLoopBuffers;
@@ -649,7 +680,7 @@ MemLivenessAnalysis::CheckLocalBufferAllocOp(Operation *op) const {
 bool MemLivenessAnalysis::isSkippableOp(Operation *op) const {
   // Call-like ops are still modeled explicitly. Only pure terminators and
   // dim queries are skipped here.
-  return isa<func::ReturnOp, scf::YieldOp, memref::DimOp>(op);
+  return isa<func::ReturnOp, scf::YieldOp, pto::YieldOp, memref::DimOp>(op);
 }
 
 LogicalResult

@@ -1,0 +1,61 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Guards fusion_region frontier analysis so overwritten region-local temporaries
+// are not added to pto.yield.
+//
+// RUN: { ptoas --pto-backend=vpto --pto-arch=a5 --pto-level=level2 --enable-op-fusion --emit-pto-ir %s --mlir-print-ir-after=pto-fusion-region-gen -o /dev/null 2>&1 || true; } | FileCheck %s
+
+module {
+  func.func @fusion_region_internal_dead_omission(
+      %dst_ptr: !pto.ptr<f32>,
+      %full0: !pto.tile_buf<vec, 32x32xf32>,
+      %full1: !pto.tile_buf<vec, 32x32xf32>,
+      %full2: !pto.tile_buf<vec, 32x32xf32>,
+      %full3: !pto.tile_buf<vec, 32x32xf32>,
+      %row0: !pto.tile_buf<vec, 32x1xf32>,
+      %scratch: !pto.tile_buf<vec, 32x32xf32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+
+    %dst_view = pto.make_tensor_view %dst_ptr,
+      shape = [%c32, %c32], strides = [%c32, %c1]
+      : !pto.tensor_view<?x?xf32>
+    %dst_part = pto.partition_view %dst_view,
+      offsets = [%c0, %c0], sizes = [%c32, %c32]
+      : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<32x32xf32>
+
+    %tmp = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+    %sum = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
+
+    pto.trowexpandmul ins(%full0, %row0 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x1xf32>)
+                       outs(%tmp : !pto.tile_buf<vec, 32x32xf32>)
+                       {pto.fusion.group_id = 0 : i64, pto.fusion.order = 0 : i64}
+    pto.tadd ins(%tmp, %full1 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>)
+             outs(%sum : !pto.tile_buf<vec, 32x32xf32>)
+             {pto.fusion.group_id = 0 : i64, pto.fusion.order = 1 : i64}
+    pto.tmul ins(%full2, %full3 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>)
+             outs(%tmp : !pto.tile_buf<vec, 32x32xf32>)
+    pto.tstore ins(%sum : !pto.tile_buf<vec, 32x32xf32>)
+               outs(%dst_part : !pto.partition_tensor_view<32x32xf32>)
+    return
+  }
+}
+
+// CHECK: // -----// IR Dump After PTOFusionRegionGen (pto-fusion-region-gen) //----- //
+// CHECK-LABEL: func.func @fusion_region_internal_dead_omission(
+// CHECK: %[[REGION:[0-9]+]] = pto.fusion_region {
+// CHECK: %[[TMP:[0-9]+]] = pto.alloc_tile
+// CHECK: %[[SUM:[0-9]+]] = pto.alloc_tile
+// CHECK: pto.trowexpandmul ins(%{{.*}}, %{{.*}} : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x1xf32>) outs(%[[TMP]] : !pto.tile_buf<vec, 32x32xf32>)
+// CHECK: pto.tadd ins(%[[TMP]], %{{.*}} : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x32xf32>) outs(%[[SUM]] : !pto.tile_buf<vec, 32x32xf32>)
+// CHECK-NOT: pto.yield(%[[TMP]])
+// CHECK: pto.yield(%[[SUM]]) : (!pto.tile_buf<vec, 32x32xf32>) -> ()
+// CHECK: } {pto.fusion.group_id = 0 : i64} : !pto.tile_buf<vec, 32x32xf32>
+// CHECK: pto.tstore ins(%[[REGION]] : !pto.tile_buf<vec, 32x32xf32>)
