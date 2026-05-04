@@ -10154,8 +10154,9 @@ struct PTOAllocTileToEmitC
         op->hasAttr(kForceDynamicValidShapeAttrName) &&
         hasFollowingSetValidShape();
     auto validShape = tileTy.getValidShape();
-    bool useConstructor = tileTy.hasDynamicValid() &&
-                          !suppressDynamicConstructor;
+    bool hasDynamicValidDim =
+        llvm::any_of(validShape, [](int64_t dim) { return dim < 0; });
+    bool useConstructor = hasDynamicValidDim && !suppressDynamicConstructor;
 
     SmallVector<Value> constructorArgs;
     if (useConstructor) {
@@ -10232,6 +10233,99 @@ struct PTOAllocTileToEmitC
     }
 
     rewriter.replaceOp(op, tile);
+    return success();
+  }
+};
+
+static FailureOr<Value>
+createEmitCTileVariable(ConversionPatternRewriter &rewriter, Location loc,
+                        const TypeConverter *typeConverter,
+                        pto::TileBufType tileTy) {
+  auto tileTypeString = getEmitCTileTypeString(tileTy);
+  if (!tileTypeString)
+    return failure();
+
+  Type convertedTy = typeConverter->convertType(tileTy);
+  if (!convertedTy)
+    convertedTy = emitc::OpaqueType::get(rewriter.getContext(), *tileTypeString);
+
+  return rewriter
+      .create<emitc::VariableOp>(
+          loc, convertedTy, emitc::OpaqueAttr::get(rewriter.getContext(), ""))
+      .getResult();
+}
+
+struct PTOTReshapeToEmitC : public OpConversionPattern<pto::TReshapeOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::TReshapeOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto tileTy = dyn_cast<pto::TileBufType>(op.getResult().getType());
+    if (!tileTy)
+      return failure();
+
+    FailureOr<Value> dst =
+        createEmitCTileVariable(rewriter, op.getLoc(), getTypeConverter(), tileTy);
+    if (failed(dst))
+      return failure();
+
+    Value src = peelUnrealized(adaptor.getSrc());
+    if (auto castOp = src.getDefiningOp<emitc::CastOp>())
+      src = castOp.getOperand();
+
+    rewriter.create<emitc::CallOpaqueOp>(op.getLoc(), TypeRange{}, "TRESHAPE",
+                                         ArrayAttr{}, ArrayAttr{},
+                                         ValueRange{*dst, src});
+    rewriter.replaceOp(op, *dst);
+    return success();
+  }
+};
+
+struct PTOBitcastToEmitC : public OpConversionPattern<pto::BitcastOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(pto::BitcastOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    auto dstTy = dyn_cast<pto::TileBufType>(op.getResult().getType());
+    auto srcTy = dyn_cast<pto::TileBufType>(op.getSrc().getType());
+    if (!dstTy || !srcTy)
+      return failure();
+
+    FailureOr<Value> dst =
+        createEmitCTileVariable(rewriter, op.getLoc(), getTypeConverter(), dstTy);
+    if (failed(dst))
+      return failure();
+
+    Value src = peelUnrealized(adaptor.getSrc());
+    if (auto castOp = src.getDefiningOp<emitc::CastOp>())
+      src = castOp.getOperand();
+
+    pto::AddressSpace as = pto::AddressSpace::GM;
+    if (auto asAttr =
+            dyn_cast_or_null<pto::AddressSpaceAttr>(srcTy.getMemorySpace()))
+      as = asAttr.getAddressSpace();
+    std::string elemTok = getEmitCScalarTypeToken(srcTy.getElementType());
+
+    Value rawPtr = materializeTileDataValue(rewriter, op.getLoc(), src, as, elemTok);
+    auto u64Ty = emitc::OpaqueType::get(rewriter.getContext(), "uint64_t");
+    Value addr = rawPtr;
+    if (isSetFFTsPointerLikeType(rawPtr.getType())) {
+      auto rcU64 =
+          rewriter.getArrayAttr({emitc::OpaqueAttr::get(rewriter.getContext(),
+                                                        "uint64_t")});
+      addr = rewriter
+                 .create<emitc::CallOpaqueOp>(op.getLoc(), u64Ty,
+                                              "reinterpret_cast", ArrayAttr{},
+                                              rcU64, ValueRange{rawPtr})
+                 .getResult(0);
+    } else if (addr.getType() != u64Ty) {
+      addr = rewriter.create<emitc::CastOp>(op.getLoc(), u64Ty, addr).getResult();
+    }
+
+    rewriter.create<emitc::CallOpaqueOp>(op.getLoc(), TypeRange{}, "TASSIGN",
+                                         ArrayAttr{}, ArrayAttr{},
+                                         ValueRange{*dst, addr});
+    rewriter.replaceOp(op, *dst);
     return success();
   }
 };
@@ -11306,6 +11400,8 @@ static void populatePTOToEmitCPatterns(RewritePatternSet &patterns,
   patterns.add<PTODeclareEventIdArrayToEmitC>(typeConverter, ctx);
   patterns.add<PTOEventIdArrayGetToEmitC>(typeConverter, ctx);
   patterns.add<PTOEventIdArraySetToEmitC>(typeConverter, ctx);
+  patterns.add<PTOTReshapeToEmitC>(typeConverter, ctx);
+  patterns.add<PTOBitcastToEmitC>(typeConverter, ctx);
   patterns.add<PTOTAllocToEmitC>(typeConverter, ctx, targetArch);
   patterns.add<PTOTPushToEmitC>(typeConverter, ctx, targetArch);
   patterns.add<PTOTPopToEmitC>(typeConverter, ctx, targetArch);

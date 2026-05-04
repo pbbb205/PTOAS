@@ -29,6 +29,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/DenseMap.h"
 
 #include <memory>
 #include <optional>
@@ -522,6 +523,20 @@ static Value getAllocValidOperand(TileBufType tileTy, Value operand,
   return Value();
 }
 
+static Attribute getAttr(ArrayRef<NamedAttribute> attrs, StringRef name) {
+  for (NamedAttribute attr : attrs) {
+    if (attr.getName().getValue() == name)
+      return attr.getValue();
+  }
+  return {};
+}
+
+static void copyMaterializedTileAttrs(ArrayRef<NamedAttribute> attrs,
+                                      Operation *to) {
+  if (Attribute attr = getAttr(attrs, kForceDynamicValidShapeAttrName))
+    to->setAttr(kForceDynamicValidShapeAttrName, attr);
+}
+
 static void updateResultTypesAfterMaterializingOperand(Operation *op,
                                                        unsigned operandNo,
                                                        Type tileTy) {
@@ -532,7 +547,8 @@ static void updateResultTypesAfterMaterializingOperand(Operation *op,
 }
 
 static Value materializeAnchorResult(Operation *anchor, Value anchoredValue,
-                                     OpBuilder &builder, MLIRContext *ctx) {
+                                     OpBuilder &builder, MLIRContext *ctx,
+                                     DenseMap<Value, Value> &tileHandles) {
   auto memTy = dyn_cast<MemRefType>(anchoredValue.getType());
   if (!memTy || !isLocalTileMemRef(memTy))
     return Value();
@@ -542,33 +558,55 @@ static Value materializeAnchorResult(Operation *anchor, Value anchoredValue,
     if (shouldMaterializeOperand(use.getOwner()))
       usesToRewrite.push_back(&use);
   }
-  if (usesToRewrite.empty())
-    return Value();
 
   TileHandleMetadata meta = getTileHandleMetadata(anchoredValue, ctx);
+  auto viewSemantics = dyn_cast_or_null<StringAttr>(
+      getAttr(meta.attrs, "pto.view_semantics"));
+  bool isTileView =
+      viewSemantics && (viewSemantics.getValue() == "treshape" ||
+                        viewSemantics.getValue() == "bitcast");
+  if (usesToRewrite.empty() && !isTileView)
+    return Value();
+
   for (OpOperand *use : usesToRewrite)
     inferConfigForMaterializedUse(use->getOwner(), use->getOperandNumber(),
                                   anchoredValue.getType(), meta, ctx);
   auto tileTy = buildTileTypeFromMemRef(memTy, meta, ctx);
 
   builder.setInsertionPointAfter(anchor);
-  Value addr = computeExplicitAddress(anchoredValue, builder, anchor->getLoc());
-  auto materialized = builder.create<AllocTileOp>(
-      anchor->getLoc(), tileTy, addr ? addr : Value(),
-      getAllocValidOperand(tileTy, meta.validRow, 0, builder, anchor->getLoc()),
-      getAllocValidOperand(tileTy, meta.validCol, 1, builder,
-                           anchor->getLoc()));
-  for (NamedAttribute attr : meta.attrs)
-    materialized->setAttr(attr.getName(), attr.getValue());
+  Value materialized;
+  Value sourceTile = meta.source ? tileHandles.lookup(meta.source) : Value();
+  if (sourceTile && viewSemantics &&
+      viewSemantics.getValue() == "treshape") {
+    materialized =
+        builder.create<TReshapeOp>(anchor->getLoc(), tileTy, sourceTile)
+            .getResult();
+  } else if (sourceTile && viewSemantics &&
+             viewSemantics.getValue() == "bitcast") {
+    materialized =
+        builder.create<BitcastOp>(anchor->getLoc(), tileTy, sourceTile)
+            .getResult();
+  } else {
+    Value addr = computeExplicitAddress(anchoredValue, builder, anchor->getLoc());
+    auto alloc = builder.create<AllocTileOp>(
+        anchor->getLoc(), tileTy, addr ? addr : Value(),
+        getAllocValidOperand(tileTy, meta.validRow, 0, builder,
+                             anchor->getLoc()),
+        getAllocValidOperand(tileTy, meta.validCol, 1, builder,
+                             anchor->getLoc()));
+    copyMaterializedTileAttrs(meta.attrs, alloc);
+    materialized = alloc.getResult();
+  }
 
   for (OpOperand *use : usesToRewrite) {
     Operation *owner = use->getOwner();
     unsigned operandNo = use->getOperandNumber();
-    use->set(materialized.getResult());
+    use->set(materialized);
     updateResultTypesAfterMaterializingOperand(owner, operandNo, tileTy);
   }
 
-  return materialized.getResult();
+  tileHandles[anchoredValue] = materialized;
+  return materialized;
 }
 
 struct PTOMaterializeTileHandlesPass
@@ -579,6 +617,7 @@ struct PTOMaterializeTileHandlesPass
     MLIRContext *ctx = module.getContext();
 
     OpBuilder builder(ctx);
+    DenseMap<Value, Value> tileHandles;
 
     SmallVector<Operation *, 32> anchors;
     module.walk([&](Operation *op) {
@@ -590,7 +629,8 @@ struct PTOMaterializeTileHandlesPass
     for (Operation *anchor : anchors) {
       if (anchor->getNumResults() != 1)
         continue;
-      materializeAnchorResult(anchor, anchor->getResult(0), builder, ctx);
+      materializeAnchorResult(anchor, anchor->getResult(0), builder, ctx,
+                              tileHandles);
     }
 
     SmallVector<std::pair<Operation *, unsigned>, 32> operandsToRewrite;
@@ -616,25 +656,35 @@ struct PTOMaterializeTileHandlesPass
       auto tileTy = buildTileTypeFromMemRef(memTy, meta, ctx);
 
       builder.setInsertionPoint(op);
+      Value materialized;
       Value addr = computeExplicitAddress(oldValue, builder, op->getLoc());
-      auto materialized = builder.create<AllocTileOp>(
+      auto alloc = builder.create<AllocTileOp>(
           op->getLoc(), tileTy, addr ? addr : Value(),
-          getAllocValidOperand(tileTy, meta.validRow, 0, builder, op->getLoc()),
+          getAllocValidOperand(tileTy, meta.validRow, 0, builder,
+                               op->getLoc()),
           getAllocValidOperand(tileTy, meta.validCol, 1, builder,
                                op->getLoc()));
-      for (NamedAttribute attr : meta.attrs)
-        materialized->setAttr(attr.getName(), attr.getValue());
-      op->setOperand(operandNo, materialized.getResult());
+      copyMaterializedTileAttrs(meta.attrs, alloc);
+      materialized = alloc.getResult();
+      tileHandles[oldValue] = materialized;
+      op->setOperand(operandNo, materialized);
       updateResultTypesAfterMaterializingOperand(op, operandNo, tileTy);
     }
 
-    SmallVector<Operation *, 16> deadBinds;
-    module.walk([&](BindTileOp op) {
-      if (op->use_empty())
-        deadBinds.push_back(op);
-    });
-    for (Operation *op : deadBinds)
-      op->erase();
+    bool erasedBind = true;
+    while (erasedBind) {
+      erasedBind = false;
+      SmallVector<Operation *, 16> deadBinds;
+      module.walk([&](BindTileOp op) {
+        if (op.getResult().use_empty())
+          deadBinds.push_back(op);
+      });
+      for (Operation *op : deadBinds) {
+        op->erase();
+        erasedBind = true;
+      }
+    }
+
   }
 };
 
