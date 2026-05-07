@@ -1,0 +1,32 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @fixpipe_cc_gm_ub_kernel_mix_aiv(%a_gm: !pto.ptr<f16, gm>,
+                                             %b_gm: !pto.ptr<f16, gm>,
+                                             %gm_out: !pto.ptr<f32, gm>,
+                                             %ub_roundtrip_out: !pto.ptr<f32, gm>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+    %c0_i64 = arith.constant 0 : i64
+    %c8_i64 = arith.constant 8 : i64
+    %c128_i64 = arith.constant 128 : i64
+
+    %ub_out = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, ub>
+    %subblock = pto.get_subblock_idx
+    %is_subblock0 = arith.cmpi eq, %subblock, %c0_i64 : i64
+
+    scf.if %is_subblock0 {
+      pto.sync.wait <PIPE_MTE3>, 1
+      pto.dma_store %ub_out, %ub_roundtrip_out, %c128_i64
+        nburst(%c8_i64, %c128_i64, %c128_i64)
+        : !pto.ptr<f32, ub>, !pto.ptr<f32, gm>, i64, i64, i64, i64
+    }
+    pto.barrier #pto.pipe<PIPE_ALL>
+    return
+  }
+}

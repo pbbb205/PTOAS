@@ -1,0 +1,72 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// -----------------------------------------------------------------------------
+// case: micro-op/cube-matmul/fixpipe-cc-gm-ub
+// family: cube-matmul
+// target_ops: pto.acc_store_gm, pto.acc_store_ub, pto.sync.set
+// scenarios: fixpipe, cc-to-gm, cc-to-ub, split-compile
+// -----------------------------------------------------------------------------
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @fixpipe_cc_gm_ub_kernel_mix_aic(%a_gm: !pto.ptr<f16, gm>,
+                                             %b_gm: !pto.ptr<f16, gm>,
+                                             %gm_out: !pto.ptr<f32, gm>,
+                                             %ub_roundtrip_out: !pto.ptr<f32, gm>)
+      attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %c0_i64 = arith.constant 0 : i64
+    %c1_i64 = arith.constant 1 : i64
+    %c16_i64 = arith.constant 16 : i64
+    %c32_i64 = arith.constant 32 : i64
+
+    %l1_a = pto.castptr %c0_i64 : i64 -> !pto.ptr<f16, mat>
+    %l1_b = pto.castptr %c0_i64 : i64 -> !pto.ptr<f16, mat>
+    %ub_out = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, ub>
+    %l0a = pto.castptr %c0_i64 : i64 -> !pto.ptr<f16, left>
+    %l0b = pto.castptr %c0_i64 : i64 -> !pto.ptr<f16, right>
+    %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, acc>
+
+    pto.cube_load %a_gm, %l1_a, %c16_i64
+      nburst(%c1_i64, %c0_i64, %c0_i64)
+      : !pto.ptr<f16, gm>, !pto.ptr<f16, mat>, i64, i64, i64, i64
+    pto.cube_load %b_gm, %l1_b, %c16_i64
+      nburst(%c1_i64, %c0_i64, %c0_i64)
+      : !pto.ptr<f16, gm>, !pto.ptr<f16, mat>, i64, i64, i64, i64
+
+    pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
+    pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
+
+    pto.left_load %l1_a, %l0a, %c16_i64, %c16_i64
+      : !pto.ptr<f16, mat>, !pto.ptr<f16, left>, i64, i64
+    pto.right_load %l1_b, %l0b, %c16_i64, %c16_i64
+      : !pto.ptr<f16, mat>, !pto.ptr<f16, right>, i64, i64
+    pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
+    pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
+
+    pto.mad %l0a, %l0b, %l0c, %c16_i64, %c16_i64, %c16_i64
+      : !pto.ptr<f16, left>, !pto.ptr<f16, right>, !pto.ptr<f32, acc>, i64, i64, i64
+
+    pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
+    pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
+
+    pto.acc_store_gm %l0c, %gm_out, %c16_i64, %c16_i64, %c16_i64, %c16_i64,
+      %c0_i64, %c0_i64, %c0_i64, %c0_i64, %c0_i64, nz2nd
+      : !pto.ptr<f32, acc>, !pto.ptr<f32, gm>, i64, i64, i64, i64, i64, i64,
+        i64, i64, i64, nz2nd
+
+    pto.acc_store_ub %l0c, %ub_out, %c16_i64, %c16_i64, %c16_i64, %c32_i64,
+      %c0_i64, %c0_i64, %c0_i64, %c0_i64, %c1_i64, nz2nd
+      loop3(%c1_i64, %c0_i64, %c32_i64)
+      : !pto.ptr<f32, acc>, !pto.ptr<f32, ub>, i64, i64, i64, i64, i64, i64,
+        i64, i64, i64, nz2nd, loop3 i64, i64, i64
+
+    pto.sync.set <PIPE_FIX>, 1
+    pto.sync.set <PIPE_FIX>, 17
+    return
+  }
+}

@@ -22,7 +22,7 @@ PTOAS_FLAGS="${PTOAS_FLAGS:---pto-arch a5}"
 VPTO_FLAGS="${VPTO_FLAGS:---pto-backend=vpto --vpto-emit-hivm-llvm}"
 AICORE_ARCH="${AICORE_ARCH:-dav-c310-vec}"
 CUBE_AICORE_ARCH="${CUBE_AICORE_ARCH:-dav-c310-cube}"
-CUBE_CASES="${CUBE_CASES:-mad_bias mad_mx mad_f16f16f32 mad_f32f32f32 mad_bf16bf16f32 cube-bridge-matmul cube-bridge-store-nz2dn-nchw cube-bridge-store-nz2dn-ncdhw cube-load-frac-layouts cbuf-ubuf-roundtrip-mixed}"
+CUBE_CASES="${CUBE_CASES:-mad_bias mad_mx mad_f16f16f32 mad_f32f32f32 mad_bf16bf16f32 cube-bridge-matmul cube-bridge-store-nz2dn-nchw cube-bridge-store-nz2dn-ncdhw cube-load-frac-layouts cbuf-ubuf-roundtrip-mixed fixpipe-cc-gm-ub}"
 GENERIC_AICORE_ARCH="${GENERIC_AICORE_ARCH:-dav-c310}"
 GENERIC_CASES="${GENERIC_CASES:-}"
 # set he HOST_RUNNER to "ssh root@localhost" if must change user to root to access the device 
