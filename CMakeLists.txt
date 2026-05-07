@@ -150,6 +150,15 @@ if(BUILD_TESTING)
     set_tests_properties(tilelang_dsl_unittest PROPERTIES
       ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/python:$ENV{PYTHONPATH}"
     )
+    add_test(
+      NAME pto_python_precision_mode_bindings
+      COMMAND "${Python3_EXECUTABLE}"
+              "${CMAKE_CURRENT_SOURCE_DIR}/test/python/precision_mode_bindings.py"
+    )
+    set_tests_properties(pto_python_precision_mode_bindings PROPERTIES
+      ENVIRONMENT
+        "PYTHONPATH=${MLIR_PYTHON_PACKAGE_DIR}:${CMAKE_BINARY_DIR}/python:$ENV{PYTHONPATH};LD_LIBRARY_PATH=${LLVM_BUILD_LIBRARY_DIR}:$ENV{LD_LIBRARY_PATH}"
+    )
   endif()
   add_subdirectory(tools/ptobc/tests)
 endif()

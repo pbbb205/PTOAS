@@ -25,6 +25,8 @@
 #include "mlir-c/BuiltinAttributes.h"
 #include "mlir-c/Support.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include <stdexcept>
+#include <string>
 namespace py = pybind11;
 using namespace mlir::python::adaptors;
 
@@ -54,6 +56,38 @@ static MlirContext inferContextFromElementType(MlirContext context,
   if (mlirTypeIsNull(elementType))
     throw py::value_error("context is required when element_type is null");
   return mlirTypeGetContext(elementType);
+}
+
+static int32_t enumValueFromPy(py::object value, const char *attrName,
+                               const char *enumName) {
+  if (py::isinstance<py::int_>(value))
+    return value.cast<int32_t>();
+  if (py::hasattr(value, "value"))
+    return value.attr("value").cast<int32_t>();
+  throw std::runtime_error(std::string(attrName) + ".get expects int or " +
+                           enumName + " enum");
+}
+
+static void bindPTOEnumAttr(pybind11::module &m, const char *attrName,
+                            const char *enumName,
+                            bool (*isA)(MlirAttribute),
+                            MlirAttribute (*get)(MlirContext, int32_t),
+                            int32_t (*getValue)(MlirAttribute)) {
+  mlir_attribute_subclass(m, attrName, isA)
+      .def_classmethod(
+          "get",
+          [attrName, enumName, get](py::object cls, py::object value,
+                                    MlirContext ctx) -> py::object {
+            int32_t v = enumValueFromPy(value, attrName, enumName);
+            MlirAttribute a = get(ctx, v);
+            if (mlirAttributeIsNull(a))
+              return py::none();
+            return cls.attr("__call__")(a);
+          },
+          py::arg("cls"), py::arg("value"), py::arg("context") = py::none())
+      .def_property_readonly("value", [getValue](MlirAttribute self) {
+        return getValue(self);
+      });
 }
 
 static py::list shapeToPyList(const int64_t *data, intptr_t n) {
@@ -125,6 +159,38 @@ static void bindPTOModule(pybind11::module &m) {
     .value("TRUNC", mlir::pto::RoundMode::TRUNC)
     .value("ODD", mlir::pto::RoundMode::ODD)
     .value("CAST_RINT", mlir::pto::RoundMode::CAST_RINT);
+
+    py::enum_<mlir::pto::DivPrecision>(m, "DivPrecision")
+    .value("Default", mlir::pto::DivPrecision::Default)
+    .value("HighPrecision", mlir::pto::DivPrecision::HighPrecision);
+
+    py::enum_<mlir::pto::ExpPrecision>(m, "ExpPrecision")
+    .value("Default", mlir::pto::ExpPrecision::Default)
+    .value("HighPrecision", mlir::pto::ExpPrecision::HighPrecision);
+
+    py::enum_<mlir::pto::LogPrecision>(m, "LogPrecision")
+    .value("Default", mlir::pto::LogPrecision::Default)
+    .value("HighPrecision", mlir::pto::LogPrecision::HighPrecision);
+
+    py::enum_<mlir::pto::RecipPrecision>(m, "RecipPrecision")
+    .value("Default", mlir::pto::RecipPrecision::Default)
+    .value("HighPrecision", mlir::pto::RecipPrecision::HighPrecision);
+
+    py::enum_<mlir::pto::RemPrecision>(m, "RemPrecision")
+    .value("Default", mlir::pto::RemPrecision::Default)
+    .value("HighPrecision", mlir::pto::RemPrecision::HighPrecision);
+
+    py::enum_<mlir::pto::RsqrtPrecision>(m, "RsqrtPrecision")
+    .value("Default", mlir::pto::RsqrtPrecision::Default)
+    .value("HighPrecision", mlir::pto::RsqrtPrecision::HighPrecision);
+
+    py::enum_<mlir::pto::SqrtPrecision>(m, "SqrtPrecision")
+    .value("Default", mlir::pto::SqrtPrecision::Default)
+    .value("HighPrecision", mlir::pto::SqrtPrecision::HighPrecision);
+
+    py::enum_<mlir::pto::FmodPrecision>(m, "FmodPrecision")
+    .value("Default", mlir::pto::FmodPrecision::Default)
+    .value("HighPrecision", mlir::pto::FmodPrecision::HighPrecision);
 
     py::enum_<mlir::pto::SaturationMode>(m, "SaturationMode")
     .value("ON", mlir::pto::SaturationMode::ON)
@@ -415,6 +481,39 @@ static void bindPTOModule(pybind11::module &m) {
         [](MlirAttribute self) -> int32_t {
         return mlirPTORoundModeAttrGetValue(self);
         });
+
+    bindPTOEnumAttr(m, "DivPrecisionAttr", "DivPrecision",
+                    mlirPTOAttrIsADivPrecisionAttr,
+                    mlirPTODivPrecisionAttrGet,
+                    mlirPTODivPrecisionAttrGetValue);
+    bindPTOEnumAttr(m, "ExpPrecisionAttr", "ExpPrecision",
+                    mlirPTOAttrIsAExpPrecisionAttr,
+                    mlirPTOExpPrecisionAttrGet,
+                    mlirPTOExpPrecisionAttrGetValue);
+    bindPTOEnumAttr(m, "LogPrecisionAttr", "LogPrecision",
+                    mlirPTOAttrIsALogPrecisionAttr,
+                    mlirPTOLogPrecisionAttrGet,
+                    mlirPTOLogPrecisionAttrGetValue);
+    bindPTOEnumAttr(m, "RecipPrecisionAttr", "RecipPrecision",
+                    mlirPTOAttrIsARecipPrecisionAttr,
+                    mlirPTORecipPrecisionAttrGet,
+                    mlirPTORecipPrecisionAttrGetValue);
+    bindPTOEnumAttr(m, "RemPrecisionAttr", "RemPrecision",
+                    mlirPTOAttrIsARemPrecisionAttr,
+                    mlirPTORemPrecisionAttrGet,
+                    mlirPTORemPrecisionAttrGetValue);
+    bindPTOEnumAttr(m, "RsqrtPrecisionAttr", "RsqrtPrecision",
+                    mlirPTOAttrIsARsqrtPrecisionAttr,
+                    mlirPTORsqrtPrecisionAttrGet,
+                    mlirPTORsqrtPrecisionAttrGetValue);
+    bindPTOEnumAttr(m, "SqrtPrecisionAttr", "SqrtPrecision",
+                    mlirPTOAttrIsASqrtPrecisionAttr,
+                    mlirPTOSqrtPrecisionAttrGet,
+                    mlirPTOSqrtPrecisionAttrGetValue);
+    bindPTOEnumAttr(m, "FmodPrecisionAttr", "FmodPrecision",
+                    mlirPTOAttrIsAFmodPrecisionAttr,
+                    mlirPTOFmodPrecisionAttrGet,
+                    mlirPTOFmodPrecisionAttrGetValue);
 
     mlir_attribute_subclass(
         m, "SaturationModeAttr",

@@ -384,6 +384,33 @@ int32_t mlirPTORoundModeAttrGetValue(MlirAttribute attr) {
   return static_cast<int32_t>(a.getValue());
 }
 
+#define DEFINE_PTO_ENUM_ATTR_CAPI(NAME, ATTR, ENUM)                            \
+  MlirAttribute mlirPTO##NAME##AttrGet(MlirContext ctx, int32_t value) {       \
+    auto *c = unwrap(ctx);                                                     \
+    auto mode = static_cast<mlir::pto::ENUM>(value);                           \
+    return wrap(mlir::pto::ATTR::get(c, mode));                                \
+  }                                                                            \
+                                                                               \
+  bool mlirPTOAttrIsA##NAME##Attr(MlirAttribute attr) {                        \
+    return mlir::isa<mlir::pto::ATTR>(unwrap(attr));                           \
+  }                                                                            \
+                                                                               \
+  int32_t mlirPTO##NAME##AttrGetValue(MlirAttribute attr) {                    \
+    auto a = mlir::cast<mlir::pto::ATTR>(unwrap(attr));                        \
+    return static_cast<int32_t>(a.getValue());                                 \
+  }
+
+DEFINE_PTO_ENUM_ATTR_CAPI(DivPrecision, DivPrecisionAttr, DivPrecision)
+DEFINE_PTO_ENUM_ATTR_CAPI(ExpPrecision, ExpPrecisionAttr, ExpPrecision)
+DEFINE_PTO_ENUM_ATTR_CAPI(LogPrecision, LogPrecisionAttr, LogPrecision)
+DEFINE_PTO_ENUM_ATTR_CAPI(RecipPrecision, RecipPrecisionAttr, RecipPrecision)
+DEFINE_PTO_ENUM_ATTR_CAPI(RemPrecision, RemPrecisionAttr, RemPrecision)
+DEFINE_PTO_ENUM_ATTR_CAPI(RsqrtPrecision, RsqrtPrecisionAttr, RsqrtPrecision)
+DEFINE_PTO_ENUM_ATTR_CAPI(SqrtPrecision, SqrtPrecisionAttr, SqrtPrecision)
+DEFINE_PTO_ENUM_ATTR_CAPI(FmodPrecision, FmodPrecisionAttr, FmodPrecision)
+
+#undef DEFINE_PTO_ENUM_ATTR_CAPI
+
 MlirAttribute mlirPTOSaturationModeAttrGet(MlirContext ctx, int32_t value) {
   auto *c = unwrap(ctx);
   auto mode = static_cast<mlir::pto::SaturationMode>(value);

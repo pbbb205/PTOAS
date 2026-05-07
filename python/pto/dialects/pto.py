@@ -94,10 +94,14 @@ LogPrecision = _pto_mod.LogPrecision
 LogPrecisionAttr = _pto_mod.LogPrecisionAttr
 RecipPrecision = _pto_mod.RecipPrecision
 RecipPrecisionAttr = _pto_mod.RecipPrecisionAttr
+RemPrecision = _pto_mod.RemPrecision
+RemPrecisionAttr = _pto_mod.RemPrecisionAttr
 RsqrtPrecision = _pto_mod.RsqrtPrecision
 RsqrtPrecisionAttr = _pto_mod.RsqrtPrecisionAttr
 SqrtPrecision = _pto_mod.SqrtPrecision
 SqrtPrecisionAttr = _pto_mod.SqrtPrecisionAttr
+FmodPrecision = _pto_mod.FmodPrecision
+FmodPrecisionAttr = _pto_mod.FmodPrecisionAttr
 SaturationMode = _pto_mod.SaturationMode
 SaturationModeAttr = _pto_mod.SaturationModeAttr
 CmpMode = _pto_mod.CmpMode
@@ -226,10 +230,14 @@ __all__ = [
     "LogPrecisionAttr",
     "RecipPrecision",
     "RecipPrecisionAttr",
+    "RemPrecision",
+    "RemPrecisionAttr",
     "RsqrtPrecision",
     "RsqrtPrecisionAttr",
     "SqrtPrecision",
     "SqrtPrecisionAttr",
+    "FmodPrecision",
+    "FmodPrecisionAttr",
     "SaturationMode",
     "SaturationModeAttr",
     "CmpMode",
