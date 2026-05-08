@@ -5353,9 +5353,9 @@ mlir::LogicalResult mlir::pto::TMaxOp::verify() {
 mlir::LogicalResult mlir::pto::TMaxSOp::verify() {
   return verifyArithmeticScalarTileOpWithArchDispatch(
       getOperation(), getSrc().getType(), getDst().getType(), getScalar().getType(),
-      /*allowInt8OnA5=*/true, /*allowBf16OnA5=*/false,
+      /*allowInt8OnA5=*/true, /*allowBf16OnA5=*/true,
       "expects A2/A3 tmaxs element type to be i32/i16/f16/f32",
-      "expects A5 tmaxs element type to be i32/i16/i8/f16/f32",
+      "expects A5 tmaxs element type to be i32/i16/i8/f16/bf16/f32",
       /*requireValidRowsEqualOnA2A3=*/true,
       /*requireValidRowsEqualOnA5=*/true);
 }
@@ -8199,12 +8199,12 @@ mlir::LogicalResult mlir::pto::TSelOp::verify() {
     if (failed(srcElem))
       return failure();
     Type elem = *srcElem;
-    bool ok = elem.isF16() || elem.isF32();
+    bool ok = elem.isF16() || elem.isBF16() || elem.isF32();
     if (auto it = dyn_cast<IntegerType>(elem))
       ok = it.getWidth() == 16 || it.getWidth() == 32;
     if (!ok)
       return emitOpError(
-          "expects A2/A3 tsel src0, src1, and dst element type to be i16/i32/f16/f32");
+          "expects A2/A3 tsel src0, src1, and dst element type to be i16/i32/f16/bf16/f32");
     return success();
   };
 
@@ -8213,12 +8213,12 @@ mlir::LogicalResult mlir::pto::TSelOp::verify() {
     if (failed(srcElem))
       return failure();
     Type elem = *srcElem;
-    bool ok = elem.isF16() || elem.isF32();
+    bool ok = elem.isF16() || elem.isBF16() || elem.isF32();
     if (auto it = dyn_cast<IntegerType>(elem))
       ok = it.getWidth() == 8 || it.getWidth() == 16 || it.getWidth() == 32;
     if (!ok)
       return emitOpError(
-          "expects A5 tsel src0, src1, and dst element type to be i8/i16/i32/f16/f32");
+          "expects A5 tsel src0, src1, and dst element type to be i8/i16/i32/f16/bf16/f32");
     return success();
   };
 
