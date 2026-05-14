@@ -8,18 +8,49 @@
 """
 MLIR path bootstrap and context factory.
 
-Adds the ptoas install directory to sys.path so that the mlir package is
-importable regardless of how the ptodsl package itself was installed.
+Discovers local LLVM MLIR Python bindings plus PTO Python dialect artifacts so
+that ``ptodsl`` can import ``mlir`` / ``mlir.dialects.pto`` directly from a
+developer workspace without requiring the caller to pre-seed ``PYTHONPATH``.
 """
 
 import os
 import sys
+from pathlib import Path
 
-_INSTALL = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "..", "install", "mlir")
-)
-if os.path.isdir(_INSTALL) and _INSTALL not in sys.path:
-    sys.path.insert(0, _INSTALL)
+
+def _candidate_python_roots() -> list[Path]:
+    here = Path(__file__).resolve()
+    repo_root = here.parents[2]
+    workspace_root = repo_root.parent
+    env_roots = []
+    for env_name in ("MLIR_PYTHON_ROOT", "PTO_PYTHON_ROOT"):
+        raw = os.environ.get(env_name)
+        if raw:
+            env_roots.append(Path(raw))
+
+    return [
+        *env_roots,
+        repo_root / "build" / "python",
+        repo_root / "install",
+        workspace_root / "llvm-project" / "build-shared" / "tools" / "mlir" / "python_packages" / "mlir_core",
+    ]
+
+
+def _bootstrap_python_paths() -> None:
+    added = set()
+    for root in _candidate_python_roots():
+        if not root or not root.is_dir():
+            continue
+        if not (root / "mlir").exists():
+            continue
+        root_text = str(root)
+        if root_text in added or root_text in sys.path:
+            continue
+        sys.path.insert(0, root_text)
+        added.add(root_text)
+
+
+_bootstrap_python_paths()
 
 from mlir.dialects import pto as _pto_dialect  # noqa: E402
 from mlir.ir import Context, Location           # noqa: E402

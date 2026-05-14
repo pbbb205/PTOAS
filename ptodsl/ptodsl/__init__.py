@@ -7,6 +7,14 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 """ptodsl – PTO MLIR DSL package."""
 
-from . import pto, scalar  # noqa: F401
+from importlib import import_module
 
-__all__ = ["pto", "scalar"]
+__all__ = ["pto", "scalar", "vpto"]
+
+
+def __getattr__(name):
+    if name in {"pto", "scalar", "vpto"}:
+        module = import_module(f".{name}", __name__)
+        globals()[name] = module
+        return module
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
