@@ -7646,7 +7646,7 @@ static std::string saturationModeTok(mlir::pto::SaturationModeAttr attr) {
   case SM::ON:  return "SaturationMode::ON";
   case SM::OFF: return "SaturationMode::OFF";
   }
-  return "SaturationMode::ON";
+  return "SaturationMode::OFF";
 }
 struct PTOCvtToEmitC : public OpConversionPattern<pto::TCvtOp> {
   using OpConversionPattern<pto::TCvtOp>::OpConversionPattern;
@@ -7658,7 +7658,6 @@ struct PTOCvtToEmitC : public OpConversionPattern<pto::TCvtOp> {
 
     Value src = peelUnrealized(adaptor.getSrc());
     Value dst = peelUnrealized(adaptor.getDst());
-    Value tmp = adaptor.getTmp() ? peelUnrealized(adaptor.getTmp()) : Value{};
 
     pto::RoundModeAttr rmAttr = op.getRmodeAttr();
     std::string rmTok = rmAttr ? roundModeTok(rmAttr)
@@ -7667,17 +7666,14 @@ struct PTOCvtToEmitC : public OpConversionPattern<pto::TCvtOp> {
     Value rmodeVal = rewriter.create<emitc::ConstantOp>(
         loc, rmodeTy, emitc::OpaqueAttr::get(ctx, rmTok));
 
-    SmallVector<Value, 5> operands{dst, src};
-    if (tmp)
-      operands.push_back(tmp);
-    operands.push_back(rmodeVal);
+    auto satModeTy = emitc::OpaqueType::get(ctx, "SaturationMode");
+    auto satAttr = op.getSatModeAttr();
+    std::string satTok = satAttr ? saturationModeTok(satAttr)
+                                 : std::string("SaturationMode::OFF");
+    Value satModeVal = rewriter.create<emitc::ConstantOp>(
+        loc, satModeTy, emitc::OpaqueAttr::get(ctx, satTok));
 
-    if (auto satAttr = op.getSatModeAttr()) {
-      auto satModeTy = emitc::OpaqueType::get(ctx, "SaturationMode");
-      Value satModeVal = rewriter.create<emitc::ConstantOp>(
-          loc, satModeTy, emitc::OpaqueAttr::get(ctx, saturationModeTok(satAttr)));
-      operands.push_back(satModeVal);
-    }
+    SmallVector<Value, 4> operands{dst, src, rmodeVal, satModeVal};
 
     rewriter.create<emitc::CallOpaqueOp>(
         loc, TypeRange{}, "TCVT",

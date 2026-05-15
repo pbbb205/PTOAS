@@ -7,7 +7,7 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 
 """
-Elementwise type conversion: f32 -> i16 using pto.tcvt with tmp tile and
+Elementwise type conversion: f32 -> i16 using pto.tcvt with
 explicit saturation mode.
 
 Kernel signature:
@@ -98,10 +98,9 @@ def build():
 
                 tb_src = pto.AllocTileOp(tile_buf_f32).result
                 tb_dst = pto.AllocTileOp(tile_buf_i16).result
-                tb_tmp = pto.AllocTileOp(tile_buf_f32).result
 
                 pto.TLoadOp(None, sv_src, tb_src)
-                pto.TCvtOp(tb_src, tb_dst, tmp=tb_tmp, rmode=rmode_attr, sat_mode=sat_attr)
+                pto.TCvtOp(tb_src, tb_dst, rmode=rmode_attr, sat_mode=sat_attr)
                 pto.TStoreOp(None, tb_dst, sv_dst)
 
                 func.ReturnOp([])

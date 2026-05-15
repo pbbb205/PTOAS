@@ -7392,12 +7392,12 @@ Rounding modes for type conversion (`pto.tcvt`) operations.
 
 ##### `pto.tcvt` - Elementwise Type Conversion
 
-**Summary:** Converts each element to a new type with a specified rounding mode.
+**Summary:** Converts each element to a new type with a specified rounding mode and optional saturation mode.
 
 **Semantics:**
 
 ```
-dst[i, j] = cast(src[i, j], rmode)
+dst[i, j] = saturate(cast(src[i, j], rmode), satmode)
 ```
 
 **Arguments:**
@@ -7407,12 +7407,14 @@ dst[i, j] = cast(src[i, j], rmode)
 | `src` | `pto.tile_buf` | Source tile |
 | `dst` | `pto.tile_buf` | Destination tile (different element type) |
 | `rmode` | `RoundModeAttr` (default: `CAST_RINT`) | Rounding mode |
+| `satmode` | `SaturationModeAttr` (default: `OFF`) | Saturation mode |
 
 **Results:** None. Writes into `dst` via DPS pattern.
 
 **Constraints & Verification:**
 
 - `dst` and `src` must be compatible in shape/valid region as required by the implementation.
+- `satmode = ON` requests destination-range clamping after rounding; `OFF` preserves the target's non-saturating conversion path.
 - **A2/A3 and A5 notes:**
   - The current implementation does not add extra compile-time or runtime checks for the type pair; unsupported conversions are target-defined.
 
@@ -7423,7 +7425,7 @@ dst[i, j] = cast(src[i, j], rmode)
 **Basic Example:**
 
 ```mlir
-pto.tcvt ins(%src {rmode = #pto<round_mode FLOOR>} : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+pto.tcvt ins(%src {rmode = #pto<round_mode FLOOR>, satmode = #pto<saturation_mode ON>} : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
          outs(%dst : !pto.tile_buf<loc=vec, dtype=f16, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
 ```
 

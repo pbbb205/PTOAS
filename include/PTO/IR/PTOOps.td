@@ -3569,14 +3569,13 @@ def TCvtOp : PTO_TOp<"tcvt", [
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
-  let summary = "Elementwise type conversion with optional tmp tile and saturation mode (tilebuf, DPS)";
+  let summary = "Elementwise type conversion with optional saturation mode (tilebuf, DPS)";
 
   let arguments = (ins
     PTODpsType:$src,
     PTODpsType:$dst,
-    Optional<PTODpsType>:$tmp,
     DefaultValuedAttr<PTO_RoundModeAttr, "::mlir::pto::RoundMode::CAST_RINT">:$rmode,
-    OptionalAttr<PTO_SaturationModeAttr>:$sat_mode
+    DefaultValuedAttr<PTO_SaturationModeAttr, "::mlir::pto::SaturationMode::OFF">:$sat_mode
   );
 
   let results = (outs);

@@ -405,16 +405,12 @@ process_one_dir() {
     # these A5 repro/control samples, but ptobc v0 currently rejects this
     # form with "operand count mismatch for op: pto.alloc_tile".
     #
-    # tcvt.py intentionally exercises the new pto.tcvt(tmp, sat_mode) form for
-    # sample/board coverage. ptobc v0 still assumes the legacy 2-operand shape
-    # and currently fails with "operand count mismatch for op: pto.tcvt".
-    # Keep the sample in runop coverage, but bypass the bytecode roundtrip until
-    # ptobc learns the expanded operand layout.
+    # tcvt.py exercises explicit sat_mode coverage. Keep it in the generic
+    # roundtrip path once ptobc v0 understands the current tcvt schema.
     if [[ "$base" == "test_tmov_col_major_16x1_align_a5" || \
           "$base" == "test_tmov_row_major_1x16_control_a5" || \
           "$base" == "decode_projection_incore_0" || \
-          "$base" == "rmsnorm_incore_0" || \
-          "$base" == "tcvt" ]]; then
+          "$base" == "rmsnorm_incore_0" ]]; then
       sample_use_ptobc_roundtrip=0
     fi
     if [[ $sample_use_ptobc_roundtrip -eq 1 ]]; then

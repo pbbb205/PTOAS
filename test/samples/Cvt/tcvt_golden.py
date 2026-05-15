@@ -8,7 +8,7 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 
 """
-Golden generator for the tcvt sample (f32 -> i16 with tmp tile and sat_mode=ON).
+Golden generator for the tcvt sample (f32 -> i16 with sat_mode=ON).
 
 The input range intentionally stays inside int16 bounds so saturation mode is
 still exercised in lowering without making the numeric golden depend on

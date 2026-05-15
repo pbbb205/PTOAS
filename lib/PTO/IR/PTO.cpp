@@ -4688,8 +4688,6 @@ llvm::LogicalResult mlir::pto::TCvtOp::verify() {
   if (failed(verifyTileBufCommon(*this, srcTy, "src")) ||
       failed(verifyTileBufCommon(*this, dstTy, "dst")))
     return failure();
-  if (getTmp() && failed(verifyTileBufCommon(*this, getTmp().getType(), "tmp")))
-    return failure();
   if (getShapeVec(srcTy) != getShapeVec(dstTy))
     return emitOpError("expects src and dst to have compatible shapes");
   if (failed(verifyTileBufSameValidShape(*this, srcTy, dstTy, "src", "dst")))
@@ -6556,39 +6554,43 @@ LogicalResult MGatherOp::verify() {
 
 void mlir::pto::TCvtOp::print(OpAsmPrinter &p) {
   p << " ins(" << getSrc();
-  if (getTmp())
-    p << ", " << getTmp();
-  p.printOptionalAttrDict((*this)->getAttrs());
+  Builder builder(getContext());
+  NamedAttrList attrs;
+  for (auto attr : (*this)->getAttrs()) {
+    if (attr.getName() == "sat_mode") {
+      attrs.set(builder.getStringAttr("satmode"), attr.getValue());
+      continue;
+    }
+    attrs.set(attr.getName(), attr.getValue());
+  }
+  p.printOptionalAttrDict(attrs.getAttrs());
   p << " : " << getSrc().getType();
-  if (getTmp())
-    p << ", " << getTmp().getType();
   p << ") outs(" << getDst() << " : " << getDst().getType() << ")";
 }
 
 ParseResult mlir::pto::TCvtOp::parse(OpAsmParser &parser, OperationState &result) {
-  OpAsmParser::UnresolvedOperand src, tmp, dst;
-  Type srcTy, tmpTy, dstTy;
-  bool hasTmp = false;
+  OpAsmParser::UnresolvedOperand src, dst;
+  Type srcTy, dstTy;
 
   if (parser.parseKeyword("ins") || parser.parseLParen() || parser.parseOperand(src))
     return failure();
-  if (succeeded(parser.parseOptionalComma())) {
-    if (parser.parseOperand(tmp))
-      return failure();
-    hasTmp = true;
+  NamedAttrList attrs;
+  if (parser.parseOptionalAttrDict(attrs) || parser.parseColonType(srcTy))
+    return failure();
+  if (auto satmode = attrs.get("satmode")) {
+    attrs.erase("satmode");
+    if (attrs.get("sat_mode"))
+      return parser.emitError(parser.getCurrentLocation(),
+                              "cannot specify both satmode and sat_mode");
+    attrs.set("sat_mode", satmode);
   }
-  if (parser.parseOptionalAttrDict(result.attributes) || parser.parseColonType(srcTy))
-    return failure();
-  if (hasTmp && (parser.parseComma() || parser.parseType(tmpTy)))
-    return failure();
+  result.attributes = attrs;
   if (parser.parseRParen() || parser.parseKeyword("outs") || parser.parseLParen() ||
       parser.parseOperand(dst) || parser.parseColonType(dstTy) || parser.parseRParen())
     return failure();
 
   if (parser.resolveOperand(src, srcTy, result.operands) ||
       parser.resolveOperand(dst, dstTy, result.operands))
-    return failure();
-  if (hasTmp && parser.resolveOperand(tmp, tmpTy, result.operands))
     return failure();
   return success();
 }
@@ -10339,9 +10341,6 @@ void TColSumOp::getEffects(
 void TCvtOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   PTO_ADD_READ(getSrcMutable());
-  auto tmp = getTmpMutable();
-  if (!tmp.empty())
-    PTO_ADD_WRITE(tmp[0]);
   PTO_ADD_WRITE(getDstMutable());
 }
 void TRandomOp::getEffects(
