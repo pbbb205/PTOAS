@@ -37,7 +37,10 @@ public:
       syncIR_(syncIR), 
       buffer2MemInfoMap_(buffer2MemInfoMap),
       memAnalyzer_(memDepAnalyzer),
-      mode_(syncAnalysisMode) { };
+      mode_(syncAnalysisMode) {
+    (void)memAnalyzer_;
+    (void)mode_;
+  };
  
   // 核心入口：执行 IR 分析和转换
   void Build();
@@ -58,8 +61,8 @@ private:
   // 核心数据结构 (定义在 SyncCommon.h 中)
   SyncIRs &syncIR_;
   Buffer2MemInfoMap &buffer2MemInfoMap_;
-  [[maybe_unused]] MemoryDependentAnalyzer &memAnalyzer_;
-  [[maybe_unused]] SyncAnalysisMode mode_;
+  MemoryDependentAnalyzer &memAnalyzer_;
+  SyncAnalysisMode mode_;
  
   // --- 递归遍历逻辑 ---
   void RecursionIR(Region *region);
