@@ -784,7 +784,7 @@ static Value materializeAddressAsPointer(ConversionPatternRewriter &rewriter,
   auto *ctx = rewriter.getContext();
   std::string ptrTyStr =
       std::string(addrSpaceQualifier(as)) + " " + elemTok.str() + "*";
-  auto ptrTy = getEmitCPointerType(ctx, ptrTyStr);
+  auto ptrTy = getEmitCPointerType(ctx, addrSpaceQualifier(as), elemTok);
   if (isSetFFTsPointerLikeType(addr.getType())) {
     if (addr.getType() == ptrTy)
       return addr;

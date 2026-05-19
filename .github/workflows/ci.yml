@@ -223,11 +223,14 @@ jobs:
           CI_EVENT_NAME: ${{ github.event_name }}
           WORKFLOW_SOC_VERSION: ${{ github.event.inputs.soc_version || 'Ascend910' }}
           PTOAS_BIN: ${{ env.PTO_BUILD_DIR }}/tools/ptoas/ptoas
+          PTOBC_BIN: ${{ env.PTO_BUILD_DIR }}/tools/ptobc/ptobc
+          PTO_BUILD_DIR: ${{ env.PTO_BUILD_DIR }}
           PYTHON_BIN: /usr/bin/python3
           MLIR_PYTHON_ROOT: ${{ env.MLIR_PYTHONPATH }}
           PTO_PYTHON_ROOT: ${{ env.PTO_INSTALL_DIR }}/
         run: |
           set -euo pipefail
+          export PATH="${PTO_INSTALL_DIR}/bin:${PATH}"
           export PYTHONPATH="${MLIR_PYTHON_ROOT}:${PTO_PYTHON_ROOT}:${PYTHONPATH:-}"
           export LD_LIBRARY_PATH="${LLVM_DIR}/lib:${PTO_INSTALL_DIR}/lib:${LD_LIBRARY_PATH:-}"
           export PTOAS_OUT_DIR="${PAYLOAD_DIR}/test/samples"

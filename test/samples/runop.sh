@@ -17,6 +17,7 @@ PTOAS_BIN="${PTOAS_BIN:-}"
 PTOBC_BIN="${PTOBC_BIN:-}"
 PYTHON_BIN="${PYTHON_BIN:-}"
 PTOAS_OUT_DIR="${PTOAS_OUT_DIR:-}"
+PTO_BUILD_DIR="${PTO_BUILD_DIR:-}"
 PTOAS_ENABLE_INSERT_SYNC="${PTOAS_ENABLE_INSERT_SYNC:-1}"
 PTOAS_FLAGS="${PTOAS_FLAGS:-}"
 PTO_PTO_DIRS="${PTO_PTO_DIRS:-Sync Qwen3DecodeA3 Qwen3DecodeA5 CommSync}"
@@ -34,6 +35,7 @@ Env:
   PTOBC_BIN   # path to ptobc executable (optional)
   PYTHON_BIN  # python executable to run samples (optional)
   PTOAS_OUT_DIR  # where generated *.mlir/*.cpp go (optional; defaults to a temp dir)
+  PTO_BUILD_DIR  # build directory root that contains tools/ptoas and tools/ptobc (optional)
   PTOAS_FLAGS  # extra flags passed to ptoas (e.g. --enable-insert-sync)
   PTOAS_ENABLE_INSERT_SYNC  # 1 to append --enable-insert-sync to PTOAS_FLAGS (default: 1)
   PTO_PTO_DIRS  # space-separated dirs to run .pto directly (default: Sync Qwen3DecodeA3 Qwen3DecodeA5)
@@ -68,6 +70,12 @@ resolve_ptoas_bin() {
   # - out-of-tree build in repo: PTOAS/build/tools/ptoas/ptoas
   # - legacy layout: build/bin/ptoas
   local cand
+  if [[ -n "${PTO_BUILD_DIR}" ]]; then
+    cand="${PTO_BUILD_DIR}/tools/ptoas/ptoas"
+    [[ -x "$cand" ]] && { echo "$cand"; return 0; }
+    cand="${PTO_BUILD_DIR}/bin/ptoas"
+    [[ -x "$cand" ]] && { echo "$cand"; return 0; }
+  fi
   cand="${BASE_DIR}/../../build/tools/ptoas/ptoas"
   [[ -x "$cand" ]] && { echo "$cand"; return 0; }
   cand="${BASE_DIR}/../../../../build/bin/ptoas"
@@ -100,6 +108,12 @@ resolve_ptobc_bin() {
   fi
 
   local cand
+  if [[ -n "${PTO_BUILD_DIR}" ]]; then
+    cand="${PTO_BUILD_DIR}/tools/ptobc/ptobc"
+    [[ -x "$cand" ]] && { echo "$cand"; return 0; }
+    cand="${PTO_BUILD_DIR}/bin/ptobc"
+    [[ -x "$cand" ]] && { echo "$cand"; return 0; }
+  fi
   cand="${BASE_DIR}/../../build/tools/ptobc/ptobc"
   [[ -x "$cand" ]] && { echo "$cand"; return 0; }
   cand="${BASE_DIR}/../../build/bin/ptobc"

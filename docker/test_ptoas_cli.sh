@@ -13,13 +13,14 @@
 #
 # Required environment variables:
 #   PTO_SOURCE_DIR  - Path to PTO source directory
+#   PTO_BUILD_DIR   - Path to PTO build directory
 #   LLVM_BUILD_DIR  - Path to LLVM build directory
 #   PTO_INSTALL_DIR - Path to PTO install directory
 
 set -e
 
 # Validate required environment variables
-for var in PTO_SOURCE_DIR LLVM_BUILD_DIR PTO_INSTALL_DIR; do
+for var in PTO_SOURCE_DIR PTO_BUILD_DIR LLVM_BUILD_DIR PTO_INSTALL_DIR; do
   if [ -z "${!var}" ]; then
     echo "Error: $var environment variable is not set" >&2
     exit 1
@@ -27,7 +28,7 @@ for var in PTO_SOURCE_DIR LLVM_BUILD_DIR PTO_INSTALL_DIR; do
 done
 
 # Setup environment
-export PATH="${PTO_SOURCE_DIR}/build/tools/ptoas:${PATH}"
+export PATH="${PTO_BUILD_DIR}/tools/ptoas:${PATH}"
 export PYTHONPATH="${LLVM_BUILD_DIR}/tools/mlir/python_packages/mlir_core:${PTO_INSTALL_DIR}:${PYTHONPATH}"
 export LD_LIBRARY_PATH="${LLVM_BUILD_DIR}/lib:${PTO_INSTALL_DIR}/lib:${LD_LIBRARY_PATH}"
 export DYLD_LIBRARY_PATH="${LLVM_BUILD_DIR}/lib:${PTO_INSTALL_DIR}/lib:${DYLD_LIBRARY_PATH}"
