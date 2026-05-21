@@ -1,0 +1,27 @@
+// RUN: ptoas --pto-arch=a5 %s -o - 2>&1 | FileCheck %s
+
+module {
+  func.func @bias_tile_subview_emitc_pointer_type()
+      attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %c64 = arith.constant 64 : index
+
+    %bias = memref.alloc() : memref<1x64xf32, #pto.address_space<bias>>
+    %bias_view = pto.bind_tile %bias, %c1, %c64
+      {config = #pto.tile_buf_config<blayout=0 : i32, slayout=0 : i32, s_fractal_size=512, pad=0 : i32>}
+      : memref<1x64xf32, #pto.address_space<bias>> -> memref<1x64xf32, #pto.address_space<bias>>
+    %bias_sub = memref.subview %bias_view[0, 32] [1, 32] [1, 1]
+      : memref<1x64xf32, #pto.address_space<bias>>
+      to memref<1x32xf32, strided<[64, 1], offset: 32>, #pto.address_space<bias>>
+    call @consume_bias(%bias_sub) : (memref<1x32xf32, strided<[64, 1], offset: 32>, #pto.address_space<bias>>) -> ()
+    return
+  }
+
+  func.func private @consume_bias(%arg0: memref<1x32xf32, strided<[64, 1], offset: 32>, #pto.address_space<bias>>)
+}
+
+// CHECK-LABEL: AICORE void bias_tile_subview_emitc_pointer_type()
+// CHECK: __gm__ float* {{v[0-9]+}} = reinterpret_cast<__gm__ float*>({{v[0-9]+}});
+// CHECK: __gm__ float* {{v[0-9]+}} = {{v[0-9]+}} + ({{v[0-9]+}} + {{v[0-9]+}} * {{v[0-9]+}} + {{v[0-9]+}} * {{v[0-9]+}});
+// CHECK-NOT: __gm__ float**
