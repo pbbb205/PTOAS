@@ -27,7 +27,6 @@ from ._tracing import current_runtime, current_session
 
 
 class KernelRole(str, Enum):
-    UKERNEL = "ukernel"
     CUBE = "cube"
     SIMD = "simd"
     SIMT = "simt"
@@ -123,10 +122,9 @@ def _find_transient_simd_escape(value):
 def _validate_subkernel_placement(role: KernelRole, outer_frame, *, inline: bool = False) -> None:
     if outer_frame is None:
         return
-    if role == KernelRole.UKERNEL or outer_frame.role != KernelRole.UKERNEL.value:
-        if inline:
-            raise illegal_inline_subkernel_placement_error(role.value, outer_frame.role)
-        raise illegal_subkernel_placement_error(role.value, outer_frame.role)
+    if inline:
+        raise illegal_inline_subkernel_placement_error(role.value, outer_frame.role)
+    raise illegal_subkernel_placement_error(role.value, outer_frame.role)
 
 
 class _SubkernelSurface:
@@ -184,10 +182,6 @@ def _decorate_subkernel(role: KernelRole, fn=None, *, name: str | None = None, t
     return _subkernel_decorator(role, name=name, target=target)
 
 
-def ukernel(fn=None, *, name: str | None = None, target: str = "a5"):
-    return _decorate_subkernel(KernelRole.UKERNEL, fn, name=name, target=target)
-
-
 def cube(fn=None, *, name: str | None = None, target: str = "a5"):
     return _decorate_subkernel(KernelRole.CUBE, fn, name=name, target=target)
 
@@ -204,7 +198,6 @@ __all__ = [
     "KernelRole",
     "SubkernelSpec",
     "SubkernelTemplate",
-    "ukernel",
     "cube",
     "simd",
     "simt",

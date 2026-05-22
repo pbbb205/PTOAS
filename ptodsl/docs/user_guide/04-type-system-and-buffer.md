@@ -197,7 +197,7 @@ def kernel(
 | `element_type` | `Type` | Element dtype (e.g., `pto.f32`) |
 | `strides` | `tuple[int, ...]` | Stride of each dimension, in elements |
 
-Strides support non-contiguous tensors. Pass `strides=A.strides` from the source tensor for the default row-major layout, or supply explicit strides for sub-views. Use `tv.as_ptr()` to obtain a typed GM pointer for use with MTE Ops in a ukernel.
+Strides support non-contiguous tensors. Pass `strides=A.strides` from the source tensor for the default row-major layout, or supply explicit strides for sub-views. Use `tv.as_ptr()` to obtain a typed GM pointer for use with MTE Ops in explicit-mode orchestration.
 
 ## 4.6 PartitionTensorView
 
@@ -208,7 +208,7 @@ Strides support non-contiguous tensors. Pass `strides=A.strides` from the source
 part = pto.partition_view(tv, offsets=[row_offset, 0], sizes=[BLOCK, dim])
 ```
 
-The result is a `PartitionTensorView` — a lightweight descriptor, not a data buffer. It carries the partition's shape, strides, and element type (inherited from the source TensorView). Use `part.as_ptr()` to obtain a typed GM pointer for MTE Ops in a ukernel.
+The result is a `PartitionTensorView` — a lightweight descriptor, not a data buffer. It carries the partition's shape, strides, and element type (inherited from the source TensorView). Use `part.as_ptr()` to obtain a typed GM pointer for MTE Ops in explicit-mode orchestration.
 
 ## 4.7 Tile
 

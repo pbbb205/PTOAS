@@ -9,6 +9,9 @@
 
 from __future__ import annotations
 
+import inspect
+
+from ._diagnostics import invalid_jit_mode_error
 from ._kernel_compilation import CompiledKernelHandle, KernelCompiler
 from ._kernel_signature import parse_jit_kernel_signature
 from ._tracing import (
@@ -20,7 +23,28 @@ from ._tracing import (
 from mlir.ir import InsertionPoint
 
 
-_MODULE_ATTRS = ("pto.target_arch", "pto.kernel_kind")
+_MODULE_ATTRS = ("pto.target_arch", "pto.kernel_kind", "pto.mode")
+
+
+def _normalize_mode(mode: str, *, fn=None) -> str:
+    if mode not in {"auto", "explicit"}:
+        source_file = None
+        source_line = None
+        function_name = None
+        if fn is not None:
+            function_name = fn.__name__
+            try:
+                source_file = inspect.getsourcefile(fn) or inspect.getfile(fn)
+            except (OSError, TypeError):
+                source_file = None
+            source_line = getattr(getattr(fn, "__code__", None), "co_firstlineno", None)
+        raise invalid_jit_mode_error(
+            mode,
+            function_name=function_name,
+            source_file=source_file,
+            source_line=source_line,
+        )
+    return mode
 
 
 def _module_attr_map(module):
@@ -32,8 +56,9 @@ def merge_jit_modules(*kernels: KernelHandle):
     """
     Merge multiple ``@pto.jit`` flat-module kernels into one MLIR module.
 
-    Each handle must have been compiled with the same ``target`` and
-    ``kernel_kind`` module attributes.  Function order follows *kernels*.
+    Each handle must have been compiled with the same ``target``,
+    ``kernel_kind``, and ``mode`` module attributes. Function order follows
+    *kernels*.
     """
     if not kernels:
         raise ValueError("merge_jit_modules() requires at least one kernel handle")
@@ -62,6 +87,7 @@ def jit(
     *,
     target: str = "a5",
     kernel_kind: str = "vector",
+    mode: str = "auto",
     func_attr: str = None,
 ):
     """
@@ -72,6 +98,7 @@ def jit(
     name:        IR function name (defaults to the Python function name).
     target:      Target architecture string, e.g. ``"a5"``.
     kernel_kind: ``"vector"`` or ``"cube"`` – sets ``pto.kernel_kind``.
+    mode:        ``"auto"`` or ``"explicit"`` – sets ``pto.mode``.
     func_attr:   Optional function attribute.  Pass ``"pto.aicore"`` to
                  select the flat-module structure with the aicore attribute.
 
@@ -86,6 +113,12 @@ def jit(
     def decorator(fn):
         fn_name = name or fn.__name__
         kernel_signature = parse_jit_kernel_signature(fn)
+        normalized_mode = _normalize_mode(mode, fn=fn)
+        source_file = None
+        try:
+            source_file = inspect.getsourcefile(fn) or inspect.getfile(fn)
+        except (OSError, TypeError):
+            source_file = None
         module_style = (
             ModuleStyle.FLAT_AICORE
             if func_attr == "pto.aicore"
@@ -97,7 +130,10 @@ def jit(
                 function_name=fn_name,
                 target_arch=target,
                 kernel_kind=kernel_kind,
+                mode=normalized_mode,
                 module_style=module_style,
+                source_file=source_file,
+                source_line=getattr(fn.__code__, "co_firstlineno", None),
             ),
             kernel_signature,
             fn,

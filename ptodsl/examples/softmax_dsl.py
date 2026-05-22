@@ -11,7 +11,7 @@ Online softmax update kernel – DSL-style builder.
 
 Generates the same IR as
   test/tilelang_st/npu/a5/src/st/testcase/softmax/softmax.pto
-using the ``@pto.jit`` decorator and the ``pto.*`` namespace.
+using the ``@pto.jit(mode="explicit")`` decorator and the ``pto.*`` namespace.
 
 The Python maps almost line-for-line to the target MLIR:
 
@@ -47,6 +47,7 @@ s = scalar  # arith shorthand alias
     kernel_kind="vector",
     target="a5",
     func_attr="pto.aicore",
+    mode="explicit",
 )
 def online_softmax_update_kernel_2d(
     arg0: pto.ptr(pto.float32, "gm"),

@@ -30,7 +30,10 @@ class KernelModuleSpec:
     function_name: str
     target_arch: str
     kernel_kind: str
+    mode: str = "auto"
     module_style: ModuleStyle = ModuleStyle.NESTED
+    source_file: str | None = None
+    source_line: int | None = None
 
 
 def _kernel_kind_attr(kernel_kind: str):
@@ -41,6 +44,7 @@ def _build_flat_aicore_module(spec: KernelModuleSpec, arg_types):
     module = Module.create()
     module.operation.attributes["pto.target_arch"] = StringAttr.get(spec.target_arch)
     module.operation.attributes["pto.kernel_kind"] = _kernel_kind_attr(spec.kernel_kind)
+    module.operation.attributes["pto.mode"] = StringAttr.get(spec.mode)
     fn_ty = func.FunctionType.get(arg_types, [])
     with InsertionPoint(module.body):
         ir_fn = func.FuncOp(spec.function_name, fn_ty)
@@ -51,11 +55,13 @@ def _build_flat_aicore_module(spec: KernelModuleSpec, arg_types):
 def _build_nested_module(spec: KernelModuleSpec, arg_types):
     outer = Module.create()
     outer.operation.attributes["pto.target_arch"] = StringAttr.get(spec.target_arch)
+    outer.operation.attributes["pto.mode"] = StringAttr.get(spec.mode)
 
     with InsertionPoint(outer.body):
         inner_op = Operation.create("builtin.module", regions=1)
         inner_op.attributes["pto.target_arch"] = StringAttr.get(spec.target_arch)
         inner_op.attributes["pto.kernel_kind"] = _kernel_kind_attr(spec.kernel_kind)
+        inner_op.attributes["pto.mode"] = StringAttr.get(spec.mode)
         inner_body = inner_op.regions[0].blocks.append()
 
         with InsertionPoint(inner_body):

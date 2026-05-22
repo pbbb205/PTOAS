@@ -35,8 +35,18 @@ def expect_parse_roundtrip_and_verify(text: str, label: str) -> None:
 
 
 def load_flash_attention_demo():
-    demo_path = REPO_ROOT / "ptodsl" / "demos" / "flash_attention_sketch.py"
-    expect(demo_path.is_file(), f"canonical flash attention demo is missing: {demo_path}")
+    demo_candidates = [
+        REPO_ROOT / "ptodsl" / "examples" / "flash_attention_sketch.py",
+        REPO_ROOT / "ptodsl" / "demos" / "flash_attention_sketch.py",
+    ]
+    for demo_path in demo_candidates:
+        if demo_path.is_file():
+            break
+    else:
+        raise AssertionError(
+            "canonical flash attention demo is missing: "
+            + ", ".join(str(path) for path in demo_candidates)
+        )
 
     spec = spec_from_file_location("ptodsl_flash_attention_demo", demo_path)
     expect(spec is not None and spec.loader is not None, f"unable to create import spec for {demo_path}")
@@ -54,6 +64,7 @@ def main() -> None:
     wrapper_text = demo.emit_flash_attention_mlir(head_dim=128, causal=False, block_q=128, block_kv=128)
     expect_parse_roundtrip_and_verify(wrapper_text, "flash attention wrapper-emitted MLIR")
     expect("func.func @flash_attention_kernel" in wrapper_text, "wrapper compile should emit the flash_attention_kernel entry")
+    expect('pto.mode = "explicit"' in wrapper_text, "flash attention wrapper compile should carry explicit mode metadata")
     expect("func.func @materialize_tile_bounds" in wrapper_text, "wrapper compile should emit the SIMT helper function")
     expect("pto.store_vfsimt_info" in wrapper_text, "wrapper compile should materialize SIMT caller metadata setup")
     expect("pto.barrier <PIPE_ALL>" in wrapper_text, "demo phase boundaries should lower to pipe_barrier(Pipe.ALL)")
@@ -80,6 +91,7 @@ def main() -> None:
     specialized_text = compiled.mlir_text()
     expect_parse_roundtrip_and_verify(specialized_text, "flash attention specialized MLIR")
     expect("func.func @flash_attention_kernel" in specialized_text, "direct compile should emit the flash_attention_kernel entry")
+    expect('pto.mode = "explicit"' in specialized_text, "direct compile should carry explicit mode metadata")
     expect("!pto.tile_buf<mat, 64x128xf32" in specialized_text, "BLOCK_Q=64 specialization should change the physical Q tile shape")
     expect("func.call @materialize_tile_bounds" in specialized_text, "direct compile should still route SIMT helpers through func.call")
 

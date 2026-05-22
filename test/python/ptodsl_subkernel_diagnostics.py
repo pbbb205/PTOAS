@@ -33,14 +33,26 @@ def expect_raises(callback, exc_type, *message_fragments: str) -> None:
 
 
 def define_bad_subkernel_signature_probe():
-    @pto.ukernel
+    @pto.simd
     def bad_tensor_formal(A: pto.tensor_spec(rank=2, dtype=pto.f32)):
         pto.pipe_barrier(pto.Pipe.ALL)
 
     return bad_tensor_formal
 
 
-@pto.ukernel
+def define_removed_ukernel_surface_probe():
+    return pto.ukernel
+
+
+def define_invalid_jit_mode_probe():
+    @pto.jit(target="a5", mode="hybrid")
+    def bad_mode_probe():
+        pass
+
+    return bad_mode_probe
+
+
+@pto.simd
 def host_tensor_operand_probe(tensor):
     pto.pipe_barrier(pto.Pipe.ALL)
 
@@ -88,27 +100,42 @@ def simd_value_escape_entry(*, TRACE_TOKEN: pto.constexpr = 0):
 
 def main() -> None:
     expect_raises(
+        define_removed_ukernel_surface_probe,
+        AttributeError,
+        "pto.ukernel has been removed from the PTODSL public surface",
+        '@pto.jit(mode="explicit")',
+        "@pto.simd/@pto.simt/@pto.cube",
+    )
+    expect_raises(
+        define_invalid_jit_mode_probe,
+        ValueError,
+        "unsupported PTODSL jit mode 'hybrid'",
+        "bad_mode_probe",
+        __file__,
+        "expected 'auto' or 'explicit'",
+    )
+    expect_raises(
         define_bad_subkernel_signature_probe,
         TypeError,
-        "@pto.ukernel parameter 'A' cannot be annotated with pto.tensor_spec(...)",
+        "@pto.simd parameter 'A' cannot be annotated with pto.tensor_spec(...)",
         "@pto.jit positional parameters",
     )
     expect_raises(
         host_tensor_into_subkernel_probe.compile,
         TypeError,
-        "@pto.ukernel parameter 'tensor' uses a host tensor value",
+        "@pto.simd parameter 'tensor' uses a host tensor value",
         "host tensors only belong at the @pto.jit boundary",
     )
     expect_raises(
         nested_simt_from_simd_entry.compile,
         RuntimeError,
-        "@pto.simt helper materialization is only supported from the top-level @pto.jit body or inside @pto.ukernel",
+        "@pto.simt helper materialization is only supported from the top-level @pto.jit body",
         "inside @pto.simd",
     )
     expect_raises(
         nested_inline_simt_from_simd_entry.compile,
         RuntimeError,
-        "inline pto.simt() may only be used from the top-level @pto.jit body or inside @pto.ukernel",
+        "inline pto.simt() may only be used from the top-level @pto.jit body",
         "inside @pto.simd",
     )
     expect_raises(

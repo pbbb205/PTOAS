@@ -1,6 +1,6 @@
 # 7. Data Movement Operations
 
-This chapter covers every operation that moves data between memory spaces in PTODSL — tile-level transfers, DMA micro-instructions, vector loads and stores, and cube data movement. Operations are organized by abstraction level: tile ops (L1), DMA ops (L2), vector memory ops (L3 SIMD), and cube memory ops (L3 cube).
+This chapter covers every operation that moves data between memory spaces in PTODSL — tile-level transfers, DMA micro-instructions, vector loads and stores, and cube data movement. Operations are organized by abstraction level: tile ops for auto mode, DMA orchestration for explicit mode, vector memory ops on the SIMD unit, and cube memory ops on the Cube unit.
 
 ## 7.1 Tile-level movement: tile.load and tile.store
 
@@ -52,11 +52,12 @@ pto.tile.store(o_tile, o_part)
 
 ---
 
-Both `tile.load` and `tile.store` operate at **tile granularity** — they are the idiomatic choice inside `@pto.jit` loops. When you need finer control over DMA scheduling, drop down to the micro-instruction level.
+Both `tile.load` and `tile.store` operate at **tile granularity** — they are the idiomatic choice inside `@pto.jit` loops. When you need finer control over DMA scheduling, switch to
+`mode="explicit"` and use the DMA micro-instructions covered in the next section.
 
-## 7.2 DMA micro-instructions (ukernel)
+## 7.2 DMA micro-instructions (explicit mode)
 
-Inside `@pto.ukernel`, data movement between memory spaces is expressed with grouped DMA instructions on typed pointers. There are four operations covering the four data-movement directions:
+Inside explicit-mode orchestration, data movement between memory spaces is expressed with grouped DMA instructions on typed pointers. There are four operations covering the four data-movement directions:
 
 | Operation | Direction | Stride unit | Padding |
 |-----------|-----------|-------------|---------|
@@ -250,11 +251,11 @@ For `mte_ub_ub` and `mte_ub_l1`, the parameters are in **32-byte units**. Each b
 
 **UB address alignment**: For all four operations, every UB address (source and destination) must be 32-byte aligned. The `pad(...)` on `mte_gm_ub` ensures each UB row is padded to the 32B-aligned boundary of `dst_stride`, so subsequent rows stay aligned.
 
-### 7.2.6 Typical ukernel DMA pattern
+### 7.2.6 Typical explicit-mode DMA pattern
 
-<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"data_movement.ukernel_dma","symbol":"data_movement_ukernel_dma_probe","compile":{"ROWS":8,"COLS":16}} -->
+<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"data_movement.explicit_dma","symbol":"data_movement_explicit_dma_probe","compile":{"ROWS":8,"COLS":16}} -->
 ```python
-@pto.ukernel
+# Inside a @pto.jit(mode="explicit") body:
 def process_block(k_part, v_part, k_tile, v_tile, o_tile, o_part,
                   rows: pto.i32, cols: pto.i32):
     # Stage K and V blocks from GM to UB

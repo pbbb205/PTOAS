@@ -172,13 +172,18 @@ block_num = pto.get_block_num()
 
 This lets you map different data slices to different blocks — for example, one block per (batch, head) pair in flash attention.
 
-## 2.5 Dropping down to micro-instructions
+## 2.5 Adding sub-kernels and explicit orchestration
 
-The examples above used Tile Ops (`tile.load` / `tile.store` here, and arithmetic Tile Ops in later chapters), which operate on entire tiles at once. When you need finer control — for instance, writing a custom softmax or an activation that maps directly to vector hardware — you can drop down to the micro-instruction level. This involves three layers working together:
+The examples above used Tile Ops (`tile.load` / `tile.store` here, and
+arithmetic Tile Ops in later chapters), which operate on entire tiles at once.
+When you need finer control — for instance, writing a custom softmax or an
+activation that maps directly to vector hardware — you can keep the same
+`@pto.jit` entry and add sub-kernels. If you also need micro-instruction control,
+switch that kernel to `mode="explicit"`:
 
 <!-- ptodsl-doc-test: {"mode":"compile","symbol":"vec_add_micro","compile":{"BLOCK":128}} -->
 ```python
-# L3: hardware-bound SIMD kernel — vector instructions on individual rows.
+# SIMD sub-kernel — vector instructions on individual rows.
 @pto.simd
 def add_rows(a_tile: pto.Tile, b_tile: pto.Tile, o_tile: pto.Tile,
              rows: pto.index, cols: pto.index):
@@ -196,30 +201,8 @@ def add_rows(a_tile: pto.Tile, b_tile: pto.Tile, o_tile: pto.Tile,
             pto.vsts(o_vec, o_tile[r, c:], mask)
             col_loop.update(remained=remained)
 
-
-# L2: ukernel — DMA staging, then dispatch the SIMD kernel.
-@pto.ukernel
-def add_block(a_part: pto.PartitionTensorView,
-              b_part: pto.PartitionTensorView,
-              o_part: pto.PartitionTensorView,
-              a_tile: pto.Tile, b_tile: pto.Tile, o_tile: pto.Tile,
-              rows: pto.index, cols: pto.index):
-    row_bytes = cols * pto.bytewidth(pto.f32)
-    pto.mte_load(a_part.as_ptr(), a_tile.as_ptr(), 0, row_bytes,
-                 nburst=(rows, 0, 0))
-    pto.mte_load(b_part.as_ptr(), b_tile.as_ptr(), 0, row_bytes,
-                 nburst=(rows, 0, 0))
-    pto.pipe_barrier(pto.Pipe.ALL)
-
-    add_rows(a_tile, b_tile, o_tile, rows, cols)
-    pto.pipe_barrier(pto.Pipe.ALL)
-
-    pto.mte_store(o_tile.as_ptr(), o_part.as_ptr(), row_bytes,
-                  nburst=(rows, 0, 0))
-
-
-# L1: JIT entry — tile allocation, partitioning, launch.
-@pto.jit(target="a5")
+# Single kernel entry in explicit mode — micro-instruction staging plus SIMD sub-kernel.
+@pto.jit(target="a5", mode="explicit")
 def vec_add_micro(
     A: pto.tensor_spec(rank=1, dtype=pto.f32),
     B: pto.tensor_spec(rank=1, dtype=pto.f32),
@@ -243,13 +226,34 @@ def vec_add_micro(
         a_part = pto.partition_view(a_view, offsets=[offset], sizes=[this_block])
         b_part = pto.partition_view(b_view, offsets=[offset], sizes=[this_block])
         o_part = pto.partition_view(o_view, offsets=[offset], sizes=[this_block])
-        add_block(a_part, b_part, o_part, a_tile, b_tile, o_tile, 1, this_block)
+        row_bytes = this_block * pto.bytewidth(pto.f32)
+        pto.mte_load(a_part.as_ptr(), a_tile.as_ptr(), 0, row_bytes,
+                     nburst=(1, 0, 0))
+        pto.mte_load(b_part.as_ptr(), b_tile.as_ptr(), 0, row_bytes,
+                     nburst=(1, 0, 0))
+        pto.pipe_barrier(pto.Pipe.ALL)
+        add_rows(a_tile, b_tile, o_tile, 1, this_block)
+        pto.pipe_barrier(pto.Pipe.ALL)
+        pto.mte_store(o_tile.as_ptr(), o_part.as_ptr(), row_bytes,
+                      nburst=(1, 0, 0))
 ```
 
-- **L1 `@pto.jit`**: allocates tiles, partitions the GM views, and loops over blocks — the same tile-level orchestration as Section 2.2, but now calling a ukernel instead of Tile Ops.
+- **`@pto.jit(mode="explicit")`**: allocates tiles, partitions the GM views,
+  loops over blocks, and directly authors the micro-instruction schedule for
+  each block.
 
-- **L2 `@pto.ukernel`**: stages data with ptr-based `mte_load`, inserts explicit `pipe_barrier` phase boundaries, dispatches the SIMD kernel, synchronizes again, then writes back with `mte_store`. The ukernel owns the hardware-level sequencing.
+- **`@pto.simd` sub-kernel**: the top-level kernel calls a SIMD sub-kernel
+  for the row-wise vector work while keeping instruction staging in the
+  explicit entry body.
 
-- **L3 `@pto.simd`**: the outer `pto.for_` iterates over rows, the inner `pto.for_` iterates over column chunks of the hardware vector width (`elements_per_vreg`). Each iteration loads a vector-width slice into a `vreg`, does the addition under a mask (for tail elements), and stores the result back. Both loops are recorded as structured control flow IR — the compiler decides whether to keep them or unroll them.
+- **Inside `@pto.simd`**: the outer `pto.for_` iterates over rows, the inner
+  `pto.for_` iterates over column chunks of the hardware vector width
+  (`elements_per_vreg`). Each iteration loads a vector-width slice into a
+  `vreg`, does the addition under a mask (for tail elements), and stores the
+  result back. Both loops are recorded as structured control flow IR — the
+  compiler decides whether to keep them or unroll them.
 
-Chapter 3 covers the full decorator family; Chapters 7–10 cover each operation family in detail.
+The same pattern also has an `auto` counterpart: keep `@pto.jit` in its
+default mode and replace the explicit `mte_*` sequence with `tile.load` /
+`tile.store`. Chapter 3 covers the full entry model; Chapters 7–10 cover each
+operation family in detail.

@@ -234,7 +234,7 @@ m_next = scalar.max(m_prev, row_max)
 l_scaled = l_prev * scalar.exp(m_prev - m_next)
 ```
 
-These are the scalar-path counterparts of the vector math operations covered in Chapter 8. Use them inside `@pto.simt` kernels and in `@pto.ukernel` orchestration code where you need to compute a loop bound or a scalar coefficient from runtime data.
+These are the scalar-path counterparts of the vector math operations covered in Chapter 8. Use them inside `@pto.simt` kernels and in explicit-mode orchestration code where you need to compute a loop bound or a scalar coefficient from runtime data.
 
 ## 6.4 Pointer operations
 

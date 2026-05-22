@@ -47,26 +47,27 @@ The Ascend NPU is organized around three compute units and a shared on-chip buff
 - **SIMD** executes row-wise vector instructions directly on UB-resident data.
 - **SIMT** is a scalar-programmable processor group that executes scalar instructions across many work-items in parallel. It is well-suited for per-element control logic, tile boundary metadata, and pointwise blends.
 
-PTODSL gives you direct access to all three units and explicit control over data movement, without abstracting away the hardware boundaries.
+PTODSL gives you direct access to all three units and the data-movement
+surfaces around them, without abstracting away the hardware boundaries.
 
-## 1.2 Abstraction hierarchy
+## 1.2 Authoring model
 
-PTODSL organizes kernel code into three layers, each building on the one below it:
+PTODSL's public kernel model is **one entry point, two modes**:
 
 ```
 Python Wrapper              L0  user-facing wrapper (NumPy, torch-npu, pure Python)
-  └─ @pto.jit                     L1  compile + cache + launch
-       ├─ Tile Ops                     tile-level: tile.load, tile.store, tile.add, ...
-       └─ @pto.ukernel                 L2  micro-instruction orchestration
-            ├─ MTE Ops                 mte_load / mte_store / copy_gm_to_ubuf / ...
-            ├─ @pto.cube               matrix products (mad, mte_l1_l0a, mte_l0c_ub, ...)
-            ├─ @pto.simd               row-wise vector math (vlds, vadd, vexp, vsts, ...)
-            └─ @pto.simt               scalar-like compute (lds, sts, pointwise blends, ...)
+  └─ @pto.jit(mode="auto")         tile-first authoring, compiler-managed staging
+  └─ @pto.jit(mode="explicit")     micro-instruction authoring, user-managed staging
+       ├─ Tile Ops                 tile.load, tile.store, tile.add, ...
+       ├─ MTE Ops                  mte_load / mte_store / mte_gm_ub / ...
+       ├─ @pto.cube                matrix products (mad, mte_l1_l0a, mte_l0c_ub, ...)
+       ├─ @pto.simd                row-wise vector math (vlds, vadd, vexp, vsts, ...)
+       └─ @pto.simt                scalar-like compute (lds, sts, pointwise blends, ...)
 ```
 
-### L0 — Python wrapper
+### Python wrapper
 
-The outermost layer is plain Python. It handles ergonomic runtime concerns: allocating output tensors, extracting shapes and strides from framework tensors, compiling the JIT kernel, and launching it. Because L0 is just Python, you can freely mix in NumPy, torch-npu, or any other Python framework for pre- and post-processing, data preparation, or composing multiple kernel launches. This layer knows nothing about NPU internals — it is just a convenience function that most end users will call.
+The outermost layer is plain Python. It handles ergonomic runtime concerns: allocating output tensors, extracting shapes and strides from framework tensors, compiling the JIT kernel, and launching it. Because the wrapper is just Python, you can freely mix in NumPy, torch-npu, or any other Python framework for pre- and post-processing, data preparation, or composing multiple kernel launches. It knows nothing about NPU internals — it is just a convenience function that most end users will call.
 
 <!-- ptodsl-doc-pending: host-side compile-and-launch wrapper is documented but not covered by compile-only docs contract -->
 ```python
@@ -80,7 +81,7 @@ def flash_attention(Q, K, V, *, O=None, causal=False):
     return O
 ```
 
-### L1 — `@pto.jit`
+### `@pto.jit` — the kernel entry
 
 Decorating a function with `@pto.jit` marks it as a launchable PTO kernel. This decoration means:
 
@@ -110,22 +111,28 @@ def flash_attention_kernel(
     return
 ```
 
-L1 is the primary layer for expressing **tile-level semantics**. Inside `@pto.jit`, you allocate tile buffers (`alloc_tile`), move data between GM and UB at block granularity (`tile.load`, `tile.store`), and perform tile-level compute (`tile.add`, `tile.exp`, `tile.rowsum`, etc.). When the built-in Tile Ops are not sufficient, you can drop down to `@pto.ukernel` to write custom tile-level semantics with micro-instructions.
+`@pto.jit` is the only host-visible kernel entry. Its `mode` selects the
+programming model:
+
+- `mode="auto"` (the default) is **tile-centric**. You allocate tiles, partition
+  GM views, use Tile Ops (`tile.load`, `tile.store`, `tile.add`, ...), and call
+  compute sub-kernels. The compiler manages staging and scheduling around the
+  tile abstraction.
+- `mode="explicit"` is **tile + micro-instruction**. You keep the same tile
+  surface from `auto`, but also gain access to the full micro-instruction
+  set — MTE ops (`mte_load`, `mte_store`, ...), explicit synchronization,
+  and direct pointer manipulation — so you can reach below the tile abstraction
+  and control individual instructions when needed.
+
+In both modes, `@pto.jit` is where you allocate tiles (`alloc_tile`) and use
+Tile Ops. The difference is that `explicit` additionally opens up the
+micro-instruction surface — MTE ops, explicit sync, and pointer-level
+control — so you can mix tile operations with hand-authored instructions in
+the same kernel.
 
 The SPMD launch contract is also owned here: the runtime grid (e.g., `batch * heads` blocks) is declared at the call site, and block/subblock indices are queried via `pto.get_block_idx()` and friends.
 
-### L2 — `@pto.ukernel`
-
-`@pto.ukernel` (short for *micro-instruction kernel*) is the entry point for expressing **PTO micro-instruction semantics**. Where L1 works with tile buffers as opaque wholes, L2 gives you direct control over individual MTE, vector, and scalar instructions. This layer is intended for users who pursue peak performance and need precise control over low-level hardware details — instruction ordering, DMA scheduling, per-byte data placement, and synchronization.
-
-Inside a ukernel, you write instructions targeting the three hardware units, and orchestrate data movement between them via **MTE Ops**:
-
-- **MTE Ops** (`mte_load`, `mte_store`, `copy_gm_to_ubuf`, etc.) move data between GM and UB, or between UB regions, at the DMA engine level.
-- **`@pto.cube`**, **`@pto.simd`**, and **`@pto.simt`** sub-kernels execute the actual compute on their respective hardware units.
-
-The ukernel manages the execution sandwich for one block: staging data with MTE Ops, issuing synchronization barriers, dispatching sub-kernels, and managing loop-carried state between invocations.
-
-### L3 — `@pto.cube` / `@pto.simd` / `@pto.simt`
+### Sub-kernels — `@pto.cube` / `@pto.simd` / `@pto.simt`
 
 These are hardware-bound compute sub-kernels, each mapped to a specific NPU compute unit:
 
@@ -135,7 +142,9 @@ These are hardware-bound compute sub-kernels, each mapped to a specific NPU comp
 
 - **`@pto.simt`** is a scalar-programmable processor group that executes scalar instructions across many work-items in parallel. Typical operations: `lds`, `sts`, scalar arithmetic and comparison. Well-suited for per-element tile walks, boundary metadata, and pointwise blends.
 
-L3 sub-kernels can be invoked in two ways: as named decorated functions (`@pto.cube` / `@pto.simd` / `@pto.simt`) — reusable and callable from `@pto.ukernel` or directly from `@pto.jit` — or inline as context managers (`with pto.cube():` / `with pto.simd():` / `with pto.simt():`) for quick prototyping. When called directly from `@pto.jit`, you stage data with `tile.load`/`tile.store` instead of `mte_load`/`mte_store`; PTOAS handles the synchronization between Tile Ops and L3 compute automatically.
+Each can be invoked as a named decorated function (`@pto.cube` /
+`@pto.simd` / `@pto.simt`) or inline as a context manager
+(`with pto.cube():`, `with pto.simd():`, `with pto.simt():`).
 
 The boundary contract is strict: vreg values do not escape a simd kernel, cube-local state does not leak into UB, and data crosses layer boundaries only through UB-backed tiles or typed UB pointers.
 
@@ -159,17 +168,27 @@ Chapter 5 (Control Flow) and Chapter 6 (Scalar & Pointer Operations) cover this 
 
 ## 1.4 A worked example
 
-The flash attention kernel from Section 1.2 is not just an architectural diagram — it is a complete, runnable design sketch distributed with PTODSL (`examplesflash_attention_sketch.py`). Here is how the layers map to actual code:
+The flash attention kernel from Section 1.2 is not just an architectural diagram — it is a complete, runnable design sketch distributed with PTODSL (`examples/flash_attention_sketch.py`). Here is how the layers map to actual code:
 
-**L1 (`@pto.jit`)** allocates tiles for the Q block, KV block, online-softmax state (m/l/o ping-pong tiles), and cube-local scratch. It loops over Q blocks (outer `pto.for_`) and KV blocks (inner `pto.for_` with carry state), calling `kv_block_process` for each KV block and using `tile.load`/`tile.store` at the GM boundary.
+**Top-level `@pto.jit` schedule** allocates tiles for the Q block, KV block,
+online-softmax state (m/l/o ping-pong tiles), and cube-local scratch. It loops
+over Q blocks (outer `pto.for_`) and KV blocks (inner `pto.for_` with carry
+state), and uses `tile.load`/`tile.store` at the GM boundary.
 
-**L2 (`@pto.ukernel`)** stages the current K and V blocks with `mte_load`, issues `pipe_barrier(Pipe.ALL)` at phase boundaries, then sequences four sub-kernel calls: `qk_matmul` (cube), `online_softmax_rows` (simd), `pv_matmul` (cube), `blend_output_rows` (simt).
+**`mode="explicit"` orchestration path** stages the current K and V blocks with
+`mte_load`, issues `pipe_barrier(Pipe.ALL)` at phase boundaries, then
+sequences four sub-kernel calls: `qk_matmul` (cube),
+`online_softmax_rows` (simd), `pv_matmul` (cube), `blend_output_rows` (simt).
 
-**L3a (`@pto.cube`)** performs `mte_l1_l0a` / `mte_l1_l0b` / `mad` / `mte_l0c_ub` for both QK^T and P@V products.
+**`@pto.cube`** performs `mte_l1_l0a` / `mte_l1_l0b` / `mad` /
+`mte_l0c_ub` for both QK^T and P@V products.
 
-**L3b (`@pto.simd`)** implements the online softmax update: per-row max, exp, sum, and alpha/beta computation using vector ops (`vlds`, `vcgmax`, `vexp`, `vcgadd`, `vsts`).
+**`@pto.simd`** implements the online softmax update: per-row max, exp, sum,
+and alpha/beta computation using vector ops (`vlds`, `vcgmax`, `vexp`,
+`vcgadd`, `vsts`).
 
-**L3c (`@pto.simt`)** blends the old and new output accumulators with per-element `lds`/`sts` and scalar arithmetic.
+**`@pto.simt`** blends the old and new output accumulators with per-element
+`lds`/`sts` and scalar arithmetic.
 
 Chapter 11 walks through this example in full detail.
 
@@ -189,7 +208,7 @@ Chapter 11 walks through this example in full detail.
 |---------|-------|
 | 1 | Introduction (this chapter) |
 | 2 | Quick Start — a minimal working kernel |
-| 3 | Kernel entry points: `@pto.jit`, `@pto.ukernel`, `@pto.cube`, `@pto.simd`, `@pto.simt` |
+| 3 | Kernel entry and sub-kernels: `@pto.jit(mode=...)`, `@pto.cube`, `@pto.simd`, `@pto.simt` |
 | 4 | Type system and buffer management: scalars, tiles, views, allocation |
 | 5 | Control flow: trace-time Python vs device-side `pto.for_` / `pto.if_` |
 | 6 | Scalar and pointer operations |

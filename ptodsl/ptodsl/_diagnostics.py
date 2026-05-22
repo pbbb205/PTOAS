@@ -14,6 +14,20 @@ class PTODSLTracingMisuseError(TypeError):
     """Raised when authored Python misuses PTODSL runtime values during tracing."""
 
 
+def _format_source_context(function_name: str | None, source_file: str | None, source_line: int | None) -> str:
+    details = []
+    if function_name:
+        details.append(f"kernel {function_name!r}")
+    if source_file is not None:
+        location = source_file
+        if source_line is not None:
+            location = f"{location}:{source_line}"
+        details.append(location)
+    if not details:
+        return ""
+    return f" ({', '.join(details)})"
+
+
 def native_python_control_flow_error(usage: str) -> PTODSLTracingMisuseError:
     """Return one actionable diagnostic for native Python control-flow misuse."""
     return PTODSLTracingMisuseError(
@@ -51,18 +65,13 @@ def subkernel_signature_boundary_error(role: str, name: str) -> TypeError:
 
 def illegal_subkernel_placement_error(role: str, outer_role: str | None) -> RuntimeError:
     """Return one diagnostic for a subkernel call placed outside the supported layer graph."""
-    if role == "ukernel":
-        return RuntimeError(
-            "@pto.ukernel may only be called from the top-level @pto.jit body; "
-            f"nested invocation inside @pto.{outer_role} is not part of the PTODSL layer contract."
-        )
     if role == "simt":
         return RuntimeError(
-            "@pto.simt helper materialization is only supported from the top-level @pto.jit body "
-            f"or inside @pto.ukernel; it cannot be materialized inside @pto.{outer_role}."
+            "@pto.simt helper materialization is only supported from the top-level @pto.jit body; "
+            f"it cannot be materialized inside @pto.{outer_role}."
         )
     return RuntimeError(
-        f"@pto.{role} may only be called from the top-level @pto.jit body or inside @pto.ukernel; "
+        f"@pto.{role} may only be called from the top-level @pto.jit body; "
         f"nested invocation inside @pto.{outer_role} is not part of the PTODSL layer contract."
     )
 
@@ -70,7 +79,7 @@ def illegal_subkernel_placement_error(role: str, outer_role: str | None) -> Runt
 def illegal_inline_subkernel_placement_error(role: str, outer_role: str | None) -> RuntimeError:
     """Return one diagnostic for an inline subkernel scope placed outside the supported layer graph."""
     return RuntimeError(
-        f"inline pto.{role}() may only be used from the top-level @pto.jit body or inside @pto.ukernel; "
+        f"inline pto.{role}() may only be used from the top-level @pto.jit body; "
         f"nested use inside @pto.{outer_role} is not part of the PTODSL layer contract."
     )
 
@@ -95,12 +104,65 @@ def tile_row_alignment_error(*, shape, dtype, row_bytes: int, required_alignment
     )
 
 
+def explicit_mode_required_error(surface: str, current_mode: str | None) -> RuntimeError:
+    """Return one diagnostic for explicit-only surfaces used outside explicit mode."""
+    observed_mode = "unknown" if current_mode is None else current_mode
+    return RuntimeError(
+        f"{surface} is an auto-mode contract violation: it is only available in "
+        f'@pto.jit(mode="explicit"); current kernel mode is {observed_mode!r}. '
+        "Move the kernel to explicit mode before authoring this surface."
+    )
+
+
+def explicit_mode_required_with_context_error(surface: str, module_spec) -> RuntimeError:
+    """Return one diagnostic for explicit-only surfaces used outside explicit mode with source context."""
+    observed_mode = getattr(module_spec, "mode", None)
+    context = _format_source_context(
+        getattr(module_spec, "function_name", None),
+        getattr(module_spec, "source_file", None),
+        getattr(module_spec, "source_line", None),
+    )
+    observed_mode = "unknown" if observed_mode is None else observed_mode
+    return RuntimeError(
+        f"{surface} is an auto-mode contract violation{context}: it is only available in "
+        f'@pto.jit(mode="explicit"); current kernel mode is {observed_mode!r}. '
+        "Move the kernel to explicit mode before authoring this surface."
+    )
+
+
+def invalid_jit_mode_error(
+    mode: str,
+    *,
+    function_name: str | None = None,
+    source_file: str | None = None,
+    source_line: int | None = None,
+) -> ValueError:
+    """Return one diagnostic for unsupported ``@pto.jit(mode=...)`` values."""
+    context = _format_source_context(function_name, source_file, source_line)
+    return ValueError(
+        f"unsupported PTODSL jit mode {mode!r}{context}; expected 'auto' or 'explicit'"
+    )
+
+
+def removed_ukernel_surface_error() -> AttributeError:
+    """Return one diagnostic for the removed ``pto.ukernel`` public surface."""
+    return AttributeError(
+        'pto.ukernel has been removed from the PTODSL public surface. '
+        'Use @pto.jit(mode="explicit") for explicit DMA orchestration, and call or inline '
+        "@pto.simd/@pto.simt/@pto.cube directly from that kernel."
+    )
+
+
 __all__ = [
     "PTODSLTracingMisuseError",
+    "explicit_mode_required_error",
+    "explicit_mode_required_with_context_error",
     "host_tensor_metadata_error",
     "illegal_inline_subkernel_placement_error",
     "illegal_subkernel_placement_error",
+    "invalid_jit_mode_error",
     "native_python_control_flow_error",
+    "removed_ukernel_surface_error",
     "simd_value_escape_error",
     "subkernel_host_tensor_boundary_error",
     "subkernel_signature_boundary_error",

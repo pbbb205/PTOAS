@@ -159,8 +159,9 @@ mod = MyKernel.mlir_module()   # returns mlir.ir.Module
 `pto.aicore` function attribute (softmax style).  Without it, a nested
 double-module is emitted (TADD style).
 
-Additional layered kernel decorators are also exported on the public surface:
-`@pto.ukernel`, `@pto.cube`, `@pto.simd`, and `@pto.simt`.
+Additional layered kernel entry modes and shared compute decorators are also
+exported on the public surface: `@pto.jit(mode="auto")`,
+`@pto.jit(mode="explicit")`, `@pto.cube`, `@pto.simd`, and `@pto.simt`.
 
 ### Type descriptors (lazy – safe to use in annotations)
 

@@ -20,6 +20,8 @@ All user-facing symbols live here.  Low-level MLIR bindings are accessed
 internally as ``_pto`` (``from mlir.dialects import pto as _pto``).
 """
 
+from ._diagnostics import removed_ukernel_surface_error
+
 # ── Types ─────────────────────────────────────────────────────────────────────
 from ._types import (           # noqa: F401
     float32, float16, bf16,
@@ -110,7 +112,7 @@ from ._control_flow import (    # noqa: F401
 
 # ── Decorator ─────────────────────────────────────────────────────────────────
 from ._jit import jit, KernelHandle, merge_jit_modules      # noqa: F401
-from ._subkernels import ukernel, cube, simd, simt     # noqa: F401
+from ._subkernels import cube, simd, simt     # noqa: F401
 
 # ── Shorthand dtype aliases ───────────────────────────────────────────────────
 f32 = float32
@@ -123,3 +125,9 @@ i64 = int64
 mask_b8 = mask_type("b8")
 mask_b16 = mask_type("b16")
 mask_b32 = mask_type("b32")
+
+
+def __getattr__(name):
+    if name == "ukernel":
+        raise removed_ukernel_surface_error()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -44,7 +44,7 @@ def mat_add(A, B, O, *, BLOCK_M: pto.constexpr = 64, BLOCK_N: pto.constexpr = 12
 - `partition_view` takes 2D offsets and sizes.
 - `BLOCK_M` and `BLOCK_N` are `constexpr` — the compiler specializes the kernel per tile shape.
 
-The L0 wrapper follows the same pattern as Chapter 2:
+The Python wrapper follows the same pattern as Chapter 2:
 
 <!-- ptodsl-doc-pending: host-side wrapper behavior is outside the current compile-only docs contract -->
 ```python
@@ -156,7 +156,7 @@ def vec_add_with_tail(
 
 This example demonstrates a complete GEMM kernel: `C = A @ B` where A is `[M, K]` and B is `[K, N]`. It uses `@pto.jit` for tile allocation and loop scheduling, and `@pto.cube` for the actual matrix multiply.
 
-### 12.3.1 L3: Cube sub-kernel
+### 12.3.1 Cube sub-kernel
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"gemm.cube_helper","symbol":"gemm_tile_probe","compile":{"BLOCK_M":64,"BLOCK_K":64,"BLOCK_N":64}} -->
 ```python
@@ -175,11 +175,11 @@ def gemm_tile(a_mat: pto.Tile, b_mat: pto.Tile, o_tile: pto.Tile,
 
 The cube sub-kernel consumes MAT staging tiles plus cube-local scratch buffers. The four-step sequence — stage left operand, stage right operand, multiply, writeback — is the canonical cube compute pattern.
 
-### 12.3.2 L1: Tile orchestration
+### 12.3.2 Tile orchestration
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"gemm.jit_kernel","symbol":"gemm","compile":{"BLOCK_M":64,"BLOCK_K":64,"BLOCK_N":64}} -->
 ```python
-@pto.jit(target="a5")
+@pto.jit(target="a5", mode="explicit")
 def gemm(
     A: pto.tensor_spec(rank=2, dtype=pto.f32),
     B: pto.tensor_spec(rank=2, dtype=pto.f32),
@@ -243,10 +243,10 @@ def gemm(
 - **Triply nested loops**: M, N, and K dimensions are all blocked. The K loop accumulates partial results into `o_tile`.
 - **Accumulation**: `o_tile.fill(0.0)` resets the accumulator before the K loop. Each K-block calls `gemm_tile` which writes its partial product back to `o_tile`. The Cube unit accumulates implicitly via `mad` — each K-block's partial result is added to the running total in `o_acc`.
 - **MAT staging + cube-local scratch**: `a_mat` and `b_mat` are explicit MAT tiles that satisfy the `mte_l1_l0a` / `mte_l1_l0b` source contract. `a_l0a`, `b_l0b`, and `o_acc` are cube-local scratch (`LEFT`, `RIGHT`, `ACC`).
-- **Direct L3 call**: `gemm_tile` is called directly from `@pto.jit` — no ukernel needed. The compiler handles sync between `tile.load` and the Cube sub-kernel.
+- **Direct sub-kernel call**: `gemm_tile` is called directly from `@pto.jit` — no separate orchestration layer needed. The compiler handles sync between `tile.load` and the Cube sub-kernel.
 - **Cube sub-kernel reuse**: the same `gemm_tile` function is called for every K-block — the named decorator form enables reuse.
 
-### 12.3.3 L0 wrapper
+### 12.3.3 Python wrapper
 
 <!-- ptodsl-doc-pending: host-side wrapper uses pto.empty(...) allocation behavior that is outside the current compile-only docs contract -->
 ```python
@@ -260,9 +260,9 @@ def gemm_wrapper(A, B, O=None, stream=None):
 
 This pattern extends directly to batch-GEMM: pass a grid of `batch` and use `pto.get_block_idx()` to select the per-batch slice from `A` and `B`.
 
-### 12.3.4 Comparison with ukernel path
+### 12.3.4 Comparison with explicit-mode orchestration
 
-For reference, the same GEMM could be written using `@pto.ukernel` for explicit MTE control. The ukernel would replace the inner `tile.load`/`tile.store` calls with `mte_load`/`mte_store` and add `mem_bar` synchronization between DMA and compute. The direct-call path used above is recommended for most users — the ukernel path is for cases that need hand-tuned DMA scheduling.
+For reference, the same GEMM could be written in `mode="explicit"` when the kernel needs micro-instruction control. The direct-call path used above is recommended for most users; explicit mode is for cases that need hand-authored instruction scheduling and ordering.
 
 ## 12.4 Online normalization with loop-carried state
 
@@ -362,7 +362,7 @@ def online_layernorm(
 
 ## 12.5 Design guidelines
 
-**Start simple, refine later.** Begin with `@pto.jit` + Tile Ops. If Tile Ops don't cover the computation (e.g., custom softmax, specialized activation), add an L3 sub-kernel. If you need explicit DMA scheduling or inter-pipeline sync, drop to `@pto.ukernel`.
+**Start simple, refine later.** Begin with `@pto.jit` + Tile Ops. If Tile Ops don't cover the computation (e.g., custom softmax, specialized activation), add a sub-kernel. If you need micro-instruction-level control, switch the kernel to `mode="explicit"`.
 
 **Choose the right entry for each piece:**
 
@@ -373,7 +373,7 @@ def online_layernorm(
 | Custom row-wise vector math | `@pto.simd` |
 | Custom per-element logic | `@pto.simt` |
 | Matrix multiply | `@pto.cube` |
-| Explicit DMA + sync ordering | `@pto.ukernel` |
-| Inline L3 for quick prototyping | `with pto.simd():` etc. |
+| Micro-instruction-level control | `mode="explicit"` |
+| Inline compute for quick prototyping | `with pto.simd():` etc. |
 
-**Respect boundary contracts.** Vregs don't cross `@pto.simd` boundaries. Cube-local state doesn't leak into UB. Tile Ops and MTE Ops live at different abstraction levels — keep them in their respective layers.
+**Respect boundary contracts.** Vregs don't cross `@pto.simd` boundaries. Cube-local state doesn't leak into UB. Tile Ops and MTE Ops belong to different programming models — use Tile Ops in `mode="auto"`, and micro-instructions in `mode="explicit"`.

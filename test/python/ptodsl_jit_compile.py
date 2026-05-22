@@ -72,6 +72,25 @@ def host_vec_copy(
     pto.tile.store(o_tile, out)
 
 
+@pto.jit(target="a5", mode="explicit")
+def host_vec_copy_explicit(
+    A: pto.tensor_spec(rank=2, dtype=pto.f32),
+    O: pto.tensor_spec(rank=2, dtype=pto.f32),
+    *,
+    BLOCK: pto.constexpr = 128,
+):
+    rows = A.shape[0]
+    cols = A.shape[1]
+    a_view = pto.make_tensor_view(A, shape=A.shape, strides=A.strides)
+    o_view = pto.make_tensor_view(O, shape=O.shape, strides=O.strides)
+    a_tile = pto.alloc_tile(shape=[1, BLOCK], dtype=pto.f32)
+    o_tile = pto.alloc_tile(shape=[1, BLOCK], dtype=pto.f32)
+    part = pto.partition_view(a_view, offsets=[0, 0], sizes=[rows, cols])
+    out = pto.partition_view(o_view, offsets=[0, 0], sizes=[rows, cols])
+    pto.tile.load(part, a_tile)
+    pto.tile.store(o_tile, out)
+
+
 @pto.jit(target="a5")
 def runtime_metadata_kernel(
     A: pto.tensor_spec(rank=2, dtype=pto.f32),
@@ -123,28 +142,29 @@ def top_level_cube_probe():
     SUBKERNEL_OBSERVATIONS.append((frame.role, frame.symbol_name, session.subkernel_stack_depth))
 
 
-@pto.ukernel
-def ukernel_probe():
+@pto.simd
+def top_level_simd_probe():
     session = current_session()
     frame = session.current_subkernel
     SUBKERNEL_OBSERVATIONS.append((frame.role, frame.symbol_name, session.subkernel_stack_depth))
-    nested_simd_probe()
 
 
 @pto.jit(target="a5")
 def shared_subkernel_lowering_probe(*, TRACE_TOKEN: pto.constexpr = 0):
     top_level_cube_probe()
-    ukernel_probe()
+    top_level_simd_probe()
     nested_simd_probe()
 
 
-@pto.ukernel
-def inline_subkernel_scope_ukernel(meta_ptr: pto.ptr(pto.i32, pto.MemorySpace.UB)):
+@pto.jit(target="a5", mode="explicit")
+def inline_subkernel_scope_probe(*, TRACE_TOKEN: pto.constexpr = 0):
     session = current_session()
+    meta_tile = pto.alloc_tile(shape=[1, 8], dtype=pto.i32, valid_shape=[1, 1])
+
     with pto.simt():
         frame = session.current_subkernel
         INLINE_SUBKERNEL_SCOPE_OBSERVATIONS.append((frame.role, frame.symbol_name, session.subkernel_stack_depth))
-        scalar.store(0, meta_ptr + 0)
+        scalar.store(0, meta_tile.as_ptr() + 0)
     with pto.simd():
         frame = session.current_subkernel
         INLINE_SUBKERNEL_SCOPE_OBSERVATIONS.append((frame.role, frame.symbol_name, session.subkernel_stack_depth))
@@ -153,12 +173,6 @@ def inline_subkernel_scope_ukernel(meta_ptr: pto.ptr(pto.i32, pto.MemorySpace.UB
         frame = session.current_subkernel
         INLINE_SUBKERNEL_SCOPE_OBSERVATIONS.append((frame.role, frame.symbol_name, session.subkernel_stack_depth))
         pto.pipe_barrier(pto.Pipe.ALL)
-
-
-@pto.jit(target="a5")
-def inline_subkernel_scope_probe(*, TRACE_TOKEN: pto.constexpr = 0):
-    meta_tile = pto.alloc_tile(shape=[1, 8], dtype=pto.i32, valid_shape=[1, 1])
-    inline_subkernel_scope_ukernel(meta_tile.as_ptr())
 
 
 @pto.simt
@@ -440,7 +454,7 @@ def public_cube_surface_probe(
     pto.mte_l0c_ub(acc_tile.as_ptr(), out_tile.as_ptr(), m, n, n, n, 0)
 
 
-@pto.jit(target="a5")
+@pto.jit(target="a5", mode="explicit")
 def public_surface_exports_probe(
     A: pto.tensor_spec(rank=2, dtype=pto.f32),
     O: pto.tensor_spec(rank=2, dtype=pto.f32),
@@ -709,7 +723,7 @@ def public_sync_surface_probe():
     pto.wait_intra_flag(pto.Pipe.V, dynamic_event)
 
 
-@pto.jit(target="a5")
+@pto.jit(target="a5", mode="explicit")
 def public_data_movement_surface_probe():
     zero_u64 = pto.const(0, dtype=pto.ui64)
     gm_src = pto.castptr(zero_u64, pto.ptr(pto.f16, "gm"))
@@ -759,6 +773,14 @@ def public_data_movement_surface_probe():
     _ = gather1
     _ = gatherb
     _ = blocked
+
+
+@pto.jit(target="a5")
+def auto_mode_explicit_surface_violation_probe():
+    zero_u64 = pto.const(0, dtype=pto.ui64)
+    gm_src = pto.castptr(zero_u64, pto.ptr(pto.f16, "gm"))
+    ub_dst = pto.castptr(zero_u64, pto.ptr(pto.f16, "ub"))
+    pto.mte_gm_ub(gm_src, ub_dst, 0, 256, nburst=(8, 256, 256))
 
 
 class _FakeTensor:
@@ -913,7 +935,6 @@ def main() -> None:
     runtime_metadata_kernel.verify()
     tile_surface_compute_probe.verify()
     shared_subkernel_lowering_probe.verify()
-    inline_subkernel_scope_probe.verify()
     simt_helper_lowering_probe.verify()
     carry_loop_lowering_probe.verify()
     branch_handle_then_only_probe.verify()
@@ -1089,11 +1110,37 @@ def main() -> None:
 
     default_text = default_compiled.mlir_text()
     block64_text = block64.mlir_text()
+    explicit_text = host_vec_copy_explicit.compile().mlir_text()
     expect_parse_roundtrip_and_verify(default_text, "default host_vec_copy specialization")
     expect_parse_roundtrip_and_verify(block64_text, "BLOCK=64 host_vec_copy specialization")
+    expect_parse_roundtrip_and_verify(explicit_text, "explicit host_vec_copy specialization")
     expect("!pto.tile_buf<vec, 1x128xf32>" in default_text, "default specialization MLIR missing BLOCK=128 tile")
     expect("!pto.tile_buf<vec, 1x64xf32>" in block64_text, "BLOCK=64 specialization MLIR missing specialized tile")
+    expect('pto.mode = "auto"' in default_text, "default specialization should carry auto mode module metadata")
+    expect('pto.mode = "explicit"' in explicit_text, "explicit specialization should carry explicit mode module metadata")
     expect("valid=?" not in default_text, "default alloc_tile() should keep full static valid-shape when valid_shape= is omitted")
+    auto_mode_violation = expect_raises(
+        RuntimeError,
+        auto_mode_explicit_surface_violation_probe.compile,
+        '@pto.jit(mode="explicit")',
+    )
+    expect(
+        "auto-mode contract violation" in str(auto_mode_violation),
+        "explicit-only surface use in auto mode should be diagnosed as an auto-mode contract violation",
+    )
+    expect(
+        "auto_mode_explicit_surface_violation_probe" in str(auto_mode_violation),
+        "auto-mode DMA violation should identify the authored kernel name",
+    )
+    expect(
+        __file__ in str(auto_mode_violation),
+        "auto-mode DMA violation should preserve the authored source file",
+    )
+    expect_raises(
+        ValueError,
+        lambda: pto.merge_jit_modules(host_vec_copy.compile(), host_vec_copy_explicit.compile()),
+        "compatible module attributes",
+    )
 
     runtime_metadata_text = runtime_metadata_kernel.compile().mlir_text()
     expect_parse_roundtrip_and_verify(runtime_metadata_text, "runtime metadata specialization")
@@ -1142,8 +1189,7 @@ def main() -> None:
     expect(
         SUBKERNEL_OBSERVATIONS == [
             ("cube", "top_level_cube_probe", 1),
-            ("ukernel", "ukernel_probe", 1),
-            ("simd", "nested_simd_probe", 2),
+            ("simd", "top_level_simd_probe", 1),
             ("simd", "nested_simd_probe", 1),
         ],
         f"unexpected shared subkernel lowering observations: {SUBKERNEL_OBSERVATIONS!r}",
@@ -1154,9 +1200,9 @@ def main() -> None:
     expect_parse_roundtrip_and_verify(inline_subkernel_scope_text, "inline subkernel scope specialization")
     expect(
         INLINE_SUBKERNEL_SCOPE_OBSERVATIONS == [
-            ("simt", "inline_simt", 2),
-            ("simd", "inline_simd", 2),
-            ("cube", "inline_cube", 2),
+            ("simt", "inline_simt", 1),
+            ("simd", "inline_simd", 1),
+            ("cube", "inline_cube", 1),
         ],
         f"unexpected inline subkernel scope observations: {INLINE_SUBKERNEL_SCOPE_OBSERVATIONS!r}",
     )

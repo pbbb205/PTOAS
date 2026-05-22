@@ -13,12 +13,12 @@ emission, inspection, and API review. The goal is to make the intended API
 layering explicit and keep the semantic contracts clean:
 
     emit_flash_attention_mlir(...) compile/inspect wrapper
-      └─ @pto.jit flash_attention_kernel
+      └─ flash_attention_kernel   (@pto.jit, mode="explicit")
            ├─ Tile Ops                 tile.load / tile.store at the GM↔UB boundary
-           └─ @pto.ukernel  one KV-block worth of MTE/sync orchestration
-                ├─ @pto.cube   matrix products (QK^T and P@V)
-                ├─ @pto.simd   row-wise online softmax
-                └─ @pto.simt   scalar metadata and output blending
+           ├─ explicit orchestration   mte_load / pipe_barrier / pointer sequencing
+           ├─ @pto.cube               matrix products (QK^T and P@V)
+           ├─ @pto.simd               row-wise online softmax
+           └─ @pto.simt               scalar metadata and output blending
 
 Design rules illustrated here:
 
@@ -28,25 +28,24 @@ Design rules illustrated here:
 2. The Python wrapper owns compile/inspection concerns such as selecting
    specialization knobs and returning the emitted MLIR text for review.
 3. ``@pto.jit`` also owns the top-level logical tiling, tile allocation, and
-   loop scheduling for one already-selected per-head 2D slice.  It should not
-   manually spell low-level DMA details for every micro step.
-4. ``ukernel`` owns the per-block execution sandwich: stage the current K/V
+   loop scheduling for one already-selected per-head 2D slice.  The per-block
+   DMA and barrier choreography is delegated to explicit orchestration.
+4. explicit mode owns the per-block execution sandwich: stage the current K/V
    block with explicit micro-instructions, synchronize, call hardware-bound
    sub-kernels, and manage scratch/state.
 5. ``@pto.jit`` may use tile ops such as ``tile.load`` / ``tile.store`` at the logical
-   scheduling boundary, but ``ukernel`` stays below that abstraction level.
-   Once execution enters ``ukernel``, GM<->UB movement is expressed with
-   MTE micro-instructions such as ``mte_load`` instead of tile ops.
+   scheduling boundary, but explicit mode can also express GM<->UB movement
+   directly. Once execution enters explicit orchestration, MTE micro-instructions
+   such as ``mte_load`` are used instead of tile ops where needed.
    ``mte_load`` / ``mte_store`` accept partitions and tiles directly,
    deriving strides and burst sizes from the type metadata.
 6. ``simd`` / ``simt`` / ``cube`` are hardware boundaries. They do not expose
    vreg values across the function boundary. Data crosses the boundary through
    UB-backed tiles or typed UB pointers only.
-7. L3 sub-kernels can also be called directly from ``@pto.jit`` (compiler
-   handles MTE + sync) or written inline as context managers
-   (``with pto.simd():`` etc.). This sketch uses the explicit
-   ``@pto.ukernel`` → L3 path for full micro-instruction control, but
-   simpler kernels can skip the ukernel layer.
+7. Named sub-kernels are reusable wherever their parameter contract is
+   satisfied. This sketch uses the explicit ``@pto.jit(mode="explicit")`` path
+   because it needs user-ordered DMA and phase barriers; smaller kernels can
+   stay in auto mode and rely on tile-atomic staging instead.
 8. Online-softmax state is made explicit with ping-pong tiles
    (``m_prev``/``m_next``, ``l_prev``/``l_next``, ``o_prev``/``o_next``).
    Hiding these dependencies with in-place aliases makes the algorithm harder
@@ -135,7 +134,7 @@ def emit_flash_attention_mlir(
     )
     return compiled.mlir_text()
 
-@pto.jit(target="a5")
+@pto.jit(target="a5", mode="explicit")
 def flash_attention_kernel(
     Q: pto.tensor_spec(rank=4, dtype=pto.f32),  # Python/framework tensor, logical [batch, seq_q, heads, dim]
     K: pto.tensor_spec(rank=4, dtype=pto.f32),  # Python/framework tensor, logical [batch, seq_k, heads, dim]
@@ -276,7 +275,8 @@ def flash_attention_kernel(
     pv_acc_tile = pto.alloc_tile(shape=[Br, D], dtype=pto.f32, memory_space=pto.MemorySpace.ACC, valid_shape=[full_br, dim])
 
     # SIMT metadata buffer.  A tiny raw-pointer island is acceptable at the
-    # ukernel boundary because this is scalar control data, not user-facing math.
+    # explicit-orchestration boundary because this is scalar control data, not
+    # user-facing math.
     meta_tile = pto.alloc_tile(shape=[1, 8], dtype=pto.i32, valid_shape=[1, 3])
     meta_ptr = meta_tile.as_ptr()
 
@@ -371,7 +371,7 @@ def flash_attention_kernel(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Level 3: hardware-bound sub-kernels
+# Hardware-bound sub-kernels
 # ═══════════════════════════════════════════════════════════════════════════════
 #
 # Boundary contract:
@@ -539,11 +539,10 @@ def materialize_tile_bounds(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Level 2: ukernel — one KV block worth of execution orchestration
+# Level 2: explicit orchestration — one KV block worth of execution
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@pto.ukernel
 def kv_block_process(
     q_mat: pto.Tile,                 # MAT, reused across inner KV loop
     k_part: pto.PartitionTensorView, # GM view for current K block
@@ -572,7 +571,7 @@ def kv_block_process(
     """
     Process one KV block against an already-loaded Q tile.
 
-    The ukernel owns:
+    The explicit-mode body owns:
     - staging the current K/V block into reusable UB scratch with explicit
       DMA-style micro-instructions,
     - synchronizing the hand-off between MTE, cube, simd, and simt stages,
@@ -663,7 +662,7 @@ def kv_block_process(
 # │                                                                            │
 # │   Key idea: current demo goal is compile/inspect, not runtime launch.     │
 # ├──────────────────────────────────────────────────────────────────────────┤
-# │ L1  @pto.jit         compile + cache + top-level orchestration            │
+# │ L1  @pto.jit(mode="explicit") flash_attention_kernel                      │
 # │                                                                            │
 # │   flash_attention_kernel.compile(...).mlir_text()                         │
 # │   TensorView metadata / alloc_tile / partition_view / tile.load / tile.store      │
@@ -672,15 +671,15 @@ def kv_block_process(
 # │   Key idea: one launchable entry owns both runtime binding and logical     │
 # │   tile scheduling.                                                         │
 # ├──────────────────────────────────────────────────────────────────────────┤
-# │ L2  @pto.ukernel     Per-block execution sandwich                         │
+# │ L2  explicit orchestration  Per-block execution sandwich                  │
 # │                                                                            │
-# │   explicit mte_load(part, tile) staging for current K/V block, mem_bar,   │
-# │   call cube/simd/simt sub-kernels,                                        │
+# │   explicit mte_load(part, tile) staging for current K/V block,           │
+# │   pipe_barrier, call cube/simd/simt sub-kernels,                          │
 # │   manage scratch/state hand-off                                            │
 # │                                                                            │
 # │   Key idea: one place owns the "how this block runs on hardware" story.   │
 # ├──────────────────────────────────────────────────────────────────────────┤
-# │ L3a @pto.cube       Matrix-product kernels                                 │
+# │ @pto.cube           Matrix-product kernels                                 │
 # │                                                                            │
 # │   qk_matmul: Q @ K^T                                                       │
 # │   pv_matmul: P @ V                                                         │
@@ -688,14 +687,14 @@ def kv_block_process(
 # │                                                                            │
 # │   Key idea: UB tiles are inputs/outputs; cube-local state is explicit.    │
 # ├──────────────────────────────────────────────────────────────────────────┤
-# │ L3b @pto.simd       Row-wise vector math                                   │
+# │ @pto.simd           Row-wise vector math                                   │
 # │                                                                            │
 # │   online_softmax_rows                                                      │
 # │   vreg stays local; persistent state is written back to UB tiles           │
 # │                                                                            │
 # │   Key idea: no cross-kernel vreg values, only UB-backed state.            │
 # ├──────────────────────────────────────────────────────────────────────────┤
-# │ L3c @pto.simt       Scalar metadata and pointwise blend                    │
+# │ @pto.simt           Scalar metadata and pointwise blend                    │
 # │                                                                            │
 # │   materialize_tile_bounds / blend_output_rows                              │
 # │                                                                            │
@@ -707,7 +706,7 @@ def kv_block_process(
 #   jit kernel alloc/schedule
 #          │
 #          ▼
-#   ukernel loads K/V block and sequences the pipeline
+#   explicit orchestration loads K/V block and sequences the pipeline
 #          │
 #          ├─ cube:  Q + K  ───────────────► S
 #          ├─ simd:  S + (m_prev, l_prev) ─► P, (m_next, l_next), alpha, beta

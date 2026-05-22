@@ -2,7 +2,7 @@
 
 Chapters 7 and 8 covered data movement and computation. This chapter covers the synchronization primitives that keep those operations correctly ordered across the NPU's concurrent hardware pipelines.
 
-The Ascend NPU executes work across multiple independent pipelines — MTE (DMA), Vector, and Cube — each with its own instruction stream. Synchronization operations coordinate these pipelines: a DMA must finish loading data before the vector unit starts computing on it; a matrix multiply must complete before the result is stored. Without explicit synchronization, pipelines race, and results are undefined.
+The Ascend NPU executes work across multiple independent pipelines — MTE (DMA), Vector, and Cube — each with its own instruction stream. Synchronization operations coordinate these pipelines: a DMA must finish loading data before the vector unit starts computing on it; a matrix multiply must complete before the result is stored. These operations are available in both `mode="auto"` and `mode="explicit"` when the kernel needs them. Without correct synchronization, pipelines race, and results are undefined.
 
 ## 10.1 Enum types for synchronization
 
@@ -127,13 +127,14 @@ pto.wait_flag(pto.Pipe.MTE2, pto.Pipe.V, event_id=0)
 pto.pipe_barrier(pto.Pipe.ALL)
 ```
 
-### Typical usage pattern
+### Typical explicit-mode usage pattern
 
-A common ukernel pattern interleaves DMA and compute with `set_flag` / `wait_flag` pairs:
+A common explicit-mode pattern interleaves DMA and compute with `set_flag` /
+`wait_flag` pairs:
 
-<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"sync_ops.flag_pattern_ukernel","symbol":"sync_ops_flag_pattern_ukernel_probe","compile":{"ROWS":8,"COLS":16}} -->
+<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"sync_ops.flag_pattern_explicit","symbol":"sync_ops_flag_pattern_explicit_probe","compile":{"ROWS":8,"COLS":16}} -->
 ```python
-@pto.ukernel
+# Inside a @pto.jit(mode="explicit") body:
 def gemm_block(
     q_tile: pto.Tile,
     k_part: pto.PartitionTensorView,
@@ -266,14 +267,14 @@ The most commonly used barrier types in practice:
 | Vector → scalar handoff | `BarrierType.VS_ALL` |
 | Scalar → vector handoff | `BarrierType.SV_ALL` |
 
-### Usage in ukernel blocks
+### Usage in explicit orchestration blocks
 
-In flash attention, phase boundaries use `pipe_barrier(Pipe.ALL)`, while
+In explicit-mode kernels, phase boundaries use `pipe_barrier(Pipe.ALL)`, while
 `mem_bar` remains the tool for narrower intra-pipeline ordering:
 
-<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"sync_ops.phase_barrier_ukernel","symbol":"sync_ops_phase_barrier_ukernel_probe","compile":{"ROWS":8,"COLS":16}} -->
+<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"sync_ops.phase_barrier_explicit","symbol":"sync_ops_phase_barrier_explicit_probe","compile":{"ROWS":8,"COLS":16}} -->
 ```python
-@pto.ukernel
+# Inside a @pto.jit(mode="explicit") body:
 def flash_attention_block(
     q_tile: pto.Tile,
     k_part: pto.PartitionTensorView,
@@ -418,21 +419,23 @@ pto.set_intra_flag(pto.Pipe.MTE3, 0)
 pto.wait_intra_flag(pto.Pipe.V, 0)
 ```
 
-## 10.6 Synchronization in the abstraction hierarchy
+## 10.6 Synchronization in the authoring model
 
-Where do sync operations belong in PTODSL's layered model?
+Where do sync operations belong in PTODSL's public entry model?
 
-| Layer | Sync responsibility |
-|-------|---------------------|
-| L1 `@pto.jit` | Tile ops require sync, but PTOAS **auto-inserts** `set_flag`/`wait_flag` pairs based on op-to-pipe mapping — the user does not write sync explicitly |
-| L2 `@pto.ukernel` | User writes micro-instructions directly and takes full responsibility for sync: `set_flag`/`wait_flag` between DMA and compute, `mem_bar` between compute phases, `pipe_barrier` at block boundaries |
-| L3 `@pto.cube` / `@pto.simd` | Cross-pipeline sync (`set_flag`/`wait_flag`) is managed by the calling ukernel. Sub-kernels may still use `mem_bar` for intra-pipeline ordering (e.g., store-then-load to the same UB region) |
+| Surface | Sync responsibility |
+|---------|---------------------|
+| `@pto.jit(mode="auto")` | Users can write sync explicitly when needed. PTOAS also provides an `--enable-insert-sync` option that auto-inserts `set_flag`/`wait_flag` pairs based on op-to-pipe mapping. |
+| `@pto.jit(mode="explicit")` | The compiler does not insert sync — the user is fully responsible. Place `set_flag`/`wait_flag` between MTE and compute, `mem_bar` between compute phases, `pipe_barrier` at phase boundaries. |
+| Shared `@pto.cube` / `@pto.simd` / `@pto.simt` helpers | Cross-pipeline ordering is provided by the surrounding `@pto.jit` schedule. Helpers may still use `mem_bar` for intra-pipeline ordering when UB addresses alias. |
 
-**Rule of thumb**: at L1, sync can be manual or auto-inserted (`--enable-insert-sync`). At L2, sync is always explicit.
+**Rule of thumb**: in `mode="auto"`, think in tiles and let the compiler handle
+orchestration. In `mode="explicit"`, think in micro-instructions and place the
+required sync yourself.
 
 ### Auto-sync at the tile level
 
-When writing `@pto.jit` code with tile ops (`tile.load`, `tile.store`, `tile.add`, etc.), each op carries a pipe assignment (e.g., `tile.load` → `PIPE_MTE2`, `tile.add` → `PIPE_V`). PTOAS's sync-insertion pass analyzes the op sequence, infers the necessary `set_flag`/`wait_flag` pairs from the pipe transitions, and injects them into the lowered code. The tile ops themselves still require synchronization — the difference is that the compiler, not the user, writes it.
+In auto mode, users can still write sync operations directly — `set_flag`/`wait_flag`, `pipe_barrier`, `mem_bar` are available in both modes. For convenience, PTOAS also provides an `--enable-insert-sync` pass: each tile op carries a pipe assignment (e.g., `tile.load` → `PIPE_MTE2`, `tile.add` → `PIPE_V`), and the pass analyzes the op sequence, infers the necessary `set_flag`/`wait_flag` pairs from pipe transitions, and injects them into the lowered code.
 
 ### Quick reference: which sync for which scenario
 

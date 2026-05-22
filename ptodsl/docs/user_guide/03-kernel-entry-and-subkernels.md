@@ -1,35 +1,35 @@
-# 3. Kernel Entry Points and Sub-Kernels
+# 3. Kernel Entry and Sub-Kernels
 
-PTODSL provides five decorators that mark functions as PTO kernels, plus three context managers for inline use. This chapter is a reference for each entry point — its role, parameter contract, and boundary constraints.
+PTODSL provides one host-visible kernel decorator (`@pto.jit`) and three
+compute-unit sub-kernel decorators (`@pto.cube`, `@pto.simd`, `@pto.simt`),
+plus matching context managers for inline use. This chapter covers the kernel
+entry, the two programming models, sub-kernel reference, parameter contracts,
+and boundary constraints.
 
-## 3.1 Decorator family overview
+## 3.1 `@pto.jit` — the only kernel entry
 
+Decorator overview:
+
+```text
+@pto.jit(mode="auto")       tile-first authoring, compiler-managed staging
+@pto.jit(mode="explicit")   micro-instruction authoring, user-managed staging
+@pto.cube                   Cube-unit matrix sub-kernel
+@pto.simd                   SIMD-unit vector sub-kernel
+@pto.simt                   SIMT-unit scalar sub-kernel
 ```
-@pto.jit          L1   Top-level JIT entry — compile, cache, launch
-@pto.ukernel      L2   Micro-instruction orchestration (MTE + sync)
-@pto.cube         L3   Matrix multiplication on the Cube unit
-@pto.simd         L3   Vector math on the SIMD unit
-@pto.simt         L3   Scalar compute on the SIMT unit
-```
-
-L3 sub-kernels can be invoked in two ways:
-
-1. **As decorated functions** (`@pto.cube` / `@pto.simd` / `@pto.simt`) — reusable, named sub-kernels that can be called from `@pto.ukernel` or directly from `@pto.jit`.
-2. **As context managers** (`with pto.cube():` / `with pto.simd():` / `with pto.simt():`) — inline L3 blocks for quick prototyping or one-off compute snippets inside `@pto.jit` or `@pto.ukernel`.
-
-Calling an L3 sub-kernel directly from `@pto.jit` skips the ukernel layer: you stage data with `tile.load`/`tile.store` instead of `mte_load`/`mte_store`, and PTOAS handles the synchronization between Tile Ops and L3 compute automatically. This is the recommended path for most users — drop down to `@pto.ukernel` only when you need explicit control over micro-instruction ordering and synchronization.
-
-## 3.2 `@pto.jit` — top-level JIT entry
 
 ### Role
 
-`@pto.jit` marks a function as a launchable PTO kernel. It owns compilation (tracing + lowering), caching, and runtime launch binding. This is the only decorator that can be invoked directly from the host — all other decorators define sub-kernels that are called from within `@pto.jit` or `@pto.ukernel`.
+`@pto.jit` marks a function as a launchable PTO kernel. It owns compilation
+(tracing + lowering), caching, and runtime launch binding. This is the only
+decorator that can be invoked directly from the host; the compute-unit
+decorators define sub-kernels that are called from within `@pto.jit`.
 
 ### Signature
 
 <!-- ptodsl-doc-test: {"mode":"compile","symbol":"kernel_name","compile":{"CONST_A":128,"CONST_B":64}} -->
 ```python
-@pto.jit(target="a5")
+@pto.jit(target="a5", mode="auto")
 def kernel_name(
     tensor_arg_1: pto.tensor_spec(rank=1, dtype=pto.f32),  # Python-native tensor (positional)
     tensor_arg_2: pto.tensor_spec(rank=1, dtype=pto.f32),  # Python-native tensor (positional)
@@ -41,9 +41,28 @@ def kernel_name(
     return
 ```
 
-**Positional parameters** are Python-native tensors — they arrive from NumPy, torch-npu, or any framework with `.shape` and `.strides`. Inside the body, wrap them with `make_tensor_view` to create GM descriptors.
+**Positional parameters** are Python-native tensors — they arrive from NumPy,
+torch-npu, or any framework with `.shape` and `.strides`. Inside the body, wrap
+them with `make_tensor_view` to create GM descriptors.
 
-**Keyword-only parameters** annotated with `pto.constexpr` are compile-time constants. They must be provided at `.compile()` time and cannot change between launches of the same compiled kernel. Use them for tile sizes, algorithmic knobs (e.g., `CAUSAL`), and other values that the compiler can specialize against.
+**Keyword-only parameters** annotated with `pto.constexpr` are compile-time
+constants. They must be provided at `.compile()` time and cannot change between
+launches of the same compiled kernel. Use them for tile sizes, algorithmic knobs
+(e.g., `CAUSAL`), and other values that the compiler can specialize against.
+
+### `mode`: auto vs explicit
+
+`mode` is a keyword on the decorator, not a function parameter. It selects the
+programming model:
+
+- `mode="auto"` (the default) is **tile-centric**. You write kernels in terms
+  of tiles and Tile Ops. The compiler manages staging, scheduling, and
+  synchronization around the tile abstraction.
+- `mode="explicit"` adds the full **micro-instruction** surface — MTE ops,
+  explicit synchronization, and direct pointer manipulation — on top of
+  everything available in `auto`.
+
+Section 3.2 covers the two models in detail.
 
 ### Compilation and launch
 
@@ -56,8 +75,13 @@ compiled = kernel_name.compile(CONST_A=128, CONST_B=64)
 compiled[grid, stream](tensor_1, tensor_2, ...)
 ```
 
-- `.compile(**constexprs)` — traces the kernel body with the given constexpr values, lowers the IR, and returns a compiled handle. Subsequent calls with the same specialization key (function identity, tensor ABI signature, constexpr values) hit the cache.
-- `compiled[grid, stream](args...)` — launches the compiled kernel. `grid` is the number of SPMD blocks (an integer); `stream` is the NPU stream (`None` for default).
+- `.compile(**constexprs)` — traces the kernel body with the given constexpr
+  values, lowers the IR, and returns a compiled handle. Subsequent calls with
+  the same specialization key (function identity, tensor ABI signature,
+  constexpr values) hit the cache.
+- `compiled[grid, stream](args...)` — launches the compiled kernel. `grid` is
+  the number of SPMD blocks (an integer); `stream` is the NPU stream (`None`
+  for default).
 
 ### SPMD built-ins
 
@@ -70,10 +94,10 @@ Available inside a `@pto.jit` body:
 | `pto.get_subblock_idx()` | `int` | Index of the current sub-block |
 | `pto.get_subblock_num()` | `int` | Total number of sub-blocks |
 
-### Typical body
+### Typical body (auto mode)
 
 ```python
-@pto.jit(target="a5")
+@pto.jit(target="a5", mode="auto")
 def my_kernel(
     A: pto.tensor_spec(rank=2, dtype=pto.f32),
     B: pto.tensor_spec(rank=2, dtype=pto.f32),
@@ -102,9 +126,14 @@ def my_kernel(
         pto.tile.store(o_tile, o_part)
 ```
 
-### Calling L3 sub-kernels directly
+### Custom sub-kernels
 
-When you call an L3 sub-kernel directly from `@pto.jit`, data movement is handled by Tile Ops (`tile.load`/`tile.store`) instead of MTE micro-instructions. PTOAS handles the synchronization between Tile Ops and L3 compute — the sub-kernel itself is unchanged:
+When Tile Ops don't cover the computation you need — a custom softmax, a
+specialized activation, per-element blending — you write a sub-kernel in
+`@pto.simd`, `@pto.simt`, or `@pto.cube` and call it directly from
+`@pto.jit`. In auto mode, data movement stays with Tile Ops
+(`tile.load`/`tile.store`) and PTOAS handles the synchronization between Tile
+Ops and the sub-kernel:
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"kernel_entry.direct_l3_call","symbol":"kernel_entry_direct_l3_call_probe","compile":{"BLOCK":128}} -->
 ```python
@@ -130,7 +159,7 @@ def add_rows(
             pto.vsts(o_vec, o_tile[r, c:], mask)
             col_loop.update(remained=remained)
 
-@pto.jit(target="a5")
+@pto.jit(target="a5", mode="auto")
 def my_kernel(
     A: pto.tensor_spec(rank=2, dtype=pto.f32),
     B: pto.tensor_spec(rank=2, dtype=pto.f32),
@@ -153,30 +182,57 @@ def my_kernel(
         b_part = pto.partition_view(b_view, offsets=[row, 0], sizes=[1, cols])
         o_part = pto.partition_view(o_view, offsets=[row, 0], sizes=[1, cols])
 
-        # Tile Ops stage data from GM to UB (replaces mte_load at L1)
         pto.tile.load(a_part, a_tile)
         pto.tile.load(b_part, b_tile)
 
-        # Direct L3 call — PTOAS handles sync between tile.load and compute
         add_rows(a_tile, b_tile, o_tile, 1, cols)
 
         pto.tile.store(o_tile, o_part)
 ```
 
-This is the recommended path for users who want hardware-unit compute without writing explicit MTE Ops and manual sync. Mixing direct L3 calls with Tile Ops and ukernel calls in the same `@pto.jit` body is supported — the compiler unifies the lowering.
+Sub-kernels are the mechanism for custom compute in PTODSL — when Tile Ops
+cover your needs, you don't need one; when they don't, a sub-kernel gives you
+direct access to the hardware unit. In auto mode, a sub-kernel's parameters
+are restricted to `Tile` and PTO scalar types — the compiler owns staging and
+sync. In explicit mode, sub-kernels may also accept `PartitionTensorView` and
+`pto.ptr` parameters, matching the richer type surface available there.
+Section 3.3 covers each sub-kernel decorator in detail.
 
-## 3.3 `@pto.ukernel` — micro-instruction orchestration
+## 3.2 Programming models: auto vs explicit
 
-### Role
+`@pto.jit` exposes a single entry with two programming models. The entry's
+host ABI, compilation flow, and launch mechanism are identical in both — the
+difference is what you can write inside the kernel body.
 
-`@pto.ukernel` (short for *micro-instruction kernel*) is the entry point for writing PTO micro-instructions directly. Unlike `@pto.jit` where you work with tile-level ops (`tile.load`, `tile.add`, etc.), a ukernel lets you write explicit MTE, SIMD, SIMT, and Cube instructions — staging data with `mte_load`, synchronizing with `mem_bar`, and dispatching L3 sub-kernels. This is an advanced programming mode for expert users who need precise control over instruction ordering and hardware-level data movement.
+### `mode="auto"` — tile-centric
 
-### Signature
+In auto mode you think in tiles. You allocate tiles, partition GM views, move
+data with `tile.load` and `tile.store`, compute with Tile Ops like
+`tile.add` and `tile.exp`, and call sub-kernels for hardware-specific compute.
+The compiler handles the lowering of tiles to micro-instructions: inferring
+staging, inserting synchronization between Tile Ops and sub-kernels, and
+managing tile-level scheduling.
 
-<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"kernel_entry.ukernel_signature","symbol":"kernel_entry_ukernel_signature_probe","compile":{"BLOCK":16}} -->
+Use auto mode for the majority of kernels. It gives you the full performance
+of the NPU without requiring you to reason about instruction-level ordering.
+
+### `mode="explicit"` — tile + micro-instruction
+
+Explicit mode extends auto mode with direct micro-instruction access. You keep
+everything available in auto — tiles, Tile Ops, sub-kernels — and additionally
+gain access to MTE ops, explicit synchronization, and pointer manipulation.
+When you need precise control over individual instructions and phase ordering,
+you can drop below the tile abstraction without leaving the `@pto.jit` entry.
+
+The richer type surface also applies to sub-kernels: in auto mode, a
+sub-kernel's parameters are restricted to `Tile` and PTO scalar types; in
+explicit mode they may also accept `PartitionTensorView` and `pto.ptr`,
+matching the types available in the enclosing orchestration code. Organize
+orchestration logic into helper functions that accept these types:
+
+<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"kernel_entry.explicit_signature","symbol":"kernel_entry_explicit_signature_probe","compile":{"BLOCK":16}} -->
 ```python
-@pto.ukernel
-def my_ukernel(
+def my_orchestration_helper(
     part: pto.PartitionTensorView,   # GM partition descriptors
     tile: pto.Tile,                  # UB tile buffers
     scratch: pto.Tile,               # cube-local scratch (LEFT, RIGHT, ...)
@@ -186,13 +242,12 @@ def my_ukernel(
     return
 ```
 
-Parameters are PTO-specific types — `Tile`, `PartitionTensorView`, `pto.ptr`, and PTO scalar types. Unlike `@pto.jit`, a ukernel does not accept Python-native tensors.
+**Typical pattern**: GM↔UB movement uses ptr-based `mte_load`/`mte_store`
+rather than `tile.load`/`tile.store`. The user places `pipe_barrier` at phase
+boundaries and explicitly sequences sub-kernel calls:
 
-### Typical body
-
-<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"kernel_entry.ukernel_body","symbol":"kernel_entry_ukernel_body_probe","compile":{"ROWS":8,"COLS":16}} -->
+<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"kernel_entry.explicit_body","symbol":"kernel_entry_explicit_body_probe","compile":{"ROWS":8,"COLS":16}} -->
 ```python
-@pto.ukernel
 def process_block(q_tile, k_part, v_part, k_tile, v_tile,
                   s_tile, o_tile, o_part, rows: pto.i32, cols: pto.i32):
     in_row_bytes = cols * pto.bytewidth(pto.f16)
@@ -219,15 +274,41 @@ def process_block(q_tile, k_part, v_part, k_tile, v_tile,
                   nburst=(rows, ub_row_stride, gm_row_stride))
 ```
 
-A ukernel stays below the tile-op boundary — GM↔UB movement is expressed with ptr-based `mte_load`/`mte_store` (MTE Ops) rather than `tile.load`/`tile.store`.
+Sub-kernel calls and inline sub-kernel scopes (`with pto.simd():`, etc.) work
+identically in both modes.
 
-## 3.4 `@pto.cube` — Cube unit sub-kernel
+### Choosing between modes
 
-### Role
+| | `mode="auto"` | `mode="explicit"` |
+|---|---|---|
+| Abstraction | Tiles | Tiles + micro-instructions |
+| Data movement | `tile.load` / `tile.store` | `mte_load` / `mte_store` (ptr-based) |
+| Sync | Compiler-managed | User-authored |
+| Use case | Most kernels | Hand-tuned instruction scheduling |
 
-`@pto.cube` marks a function that executes on the Cube unit (matrix multiplication engine). It consumes UB-resident tiles and explicit cube-local scratch buffers.
+Start with auto. Move to explicit when you need to control the exact sequence
+of micro-instructions — for example, to overlap DMA and compute with
+double-buffering, or to hand-optimize a phase boundary that the compiler
+doesn't fuse as aggressively as you need.
 
-### Signature
+## 3.3 Sub-kernels
+
+Sub-kernels are functions decorated with `@pto.cube`, `@pto.simd`, or
+`@pto.simt` that execute on a specific NPU compute unit. They can be invoked
+in two ways:
+
+1. **As decorated functions** — reusable, named sub-kernels called from
+   `@pto.jit`.
+2. **As context managers** (`with pto.cube():`, etc.) — inline blocks for
+   one-off snippets (see Section 3.4).
+
+### 3.3.1 `@pto.cube` — Cube unit
+
+**Role**: `@pto.cube` marks a function that executes on the Cube unit (matrix
+multiplication engine). It consumes UB-resident tiles and explicit cube-local
+scratch buffers.
+
+**Signature**:
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"kernel_entry.cube_signature","symbol":"kernel_entry_cube_signature_probe","compile":{"BLOCK_M":16,"BLOCK_K":16,"BLOCK_N":16}} -->
 ```python
@@ -242,9 +323,11 @@ def my_cube_kernel(
     return
 ```
 
-All parameters are `Tile` references. Tiles marked as cube-local must be allocated with the appropriate `memory_space` (e.g., `pto.MemorySpace.LEFT`, `pto.MemorySpace.ACC`).
+All parameters are `Tile` references. Tiles marked as cube-local must be
+allocated with the appropriate `memory_space` (e.g., `pto.MemorySpace.LEFT`,
+`pto.MemorySpace.ACC`).
 
-### Typical body
+**Typical body**:
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"data_movement.cube_helper","symbol":"data_movement_cube_helper_probe","compile":{"BLOCK_M":16,"BLOCK_K":16,"BLOCK_N":16}} -->
 ```python
@@ -267,20 +350,21 @@ def qk_matmul(
     pto.mte_l0c_ub(s_acc.as_ptr(), s_tile.as_ptr(), m, n, n, n, 0)
 ```
 
-Cube-local state (LEFT, RIGHT, ACC, BIAS) never leaks into UB — it is the caller's responsibility to allocate scratch buffers and pass them in explicitly.
+Cube-local state (LEFT, RIGHT, ACC, BIAS) never leaks into UB — it is the
+caller's responsibility to allocate scratch buffers and pass them in
+explicitly.
 
-**Invocation modes**: `@pto.cube` functions can be:
-- Called from `@pto.ukernel` (manual MTE + sync in the ukernel's hands).
-- Called directly from `@pto.jit` (compiler infers MTE + sync).
-- Used inline as a context manager: `with pto.cube():` (see Section 3.7).
+**Invocation modes**: can be called from `@pto.jit` in either mode, or used
+inline with `with pto.cube():` (Section 3.4).
 
-## 3.5 `@pto.simd` — SIMD unit sub-kernel
+### 3.3.2 `@pto.simd` — SIMD unit
 
-### Role
+**Role**: `@pto.simd` marks a function that executes on the SIMD unit (vector
+engine). It operates on vector registers (`vreg`) loaded from UB tiles and
+stores results back to UB tiles. Vector registers are local to the function
+and never cross its boundary.
 
-`@pto.simd` marks a function that executes on the SIMD unit (vector engine). It operates on vector registers (`vreg`) loaded from UB tiles and stores results back to UB tiles. Vector registers are local to the function and never cross its boundary.
-
-### Signature
+**Signature**:
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"kernel_entry.simd_signature","symbol":"kernel_entry_simd_signature_probe","compile":{"BLOCK":128}} -->
 ```python
@@ -294,9 +378,11 @@ def my_simd_kernel(
     return
 ```
 
-Parameters are UB `Tile` references and PTO scalar values (`pto.i32`, `pto.f32`, etc.). Scalar parameters may come from `lds` reads or compile-time constants.
+Parameters are UB `Tile` references and PTO scalar values (`pto.i32`,
+`pto.f32`, etc.). Scalar parameters may come from `lds` reads or compile-time
+constants.
 
-### Typical body
+**Typical body**:
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"kernel_entry.simd_body","symbol":"kernel_entry_simd_body_probe","compile":{"BLOCK":128}} -->
 ```python
@@ -318,20 +404,24 @@ def add_rows(a_tile: pto.Tile, b_tile: pto.Tile, o_tile: pto.Tile,
             col_loop.update(remained=remained)
 ```
 
-The boundary contract: `vreg` values (`a_vec`, `b_vec`, `o_vec`) are local to the function. The only way to persist data across a `@pto.simd` call is to write it back to a UB tile via `vsts` (or `psts`, etc.).
+The boundary contract: `vreg` values (`a_vec`, `b_vec`, `o_vec`) are local to
+the function. The only way to persist data across a `@pto.simd` call is to
+write it back to a UB tile via `vsts` (or `psts`, etc.).
 
-**Invocation modes**: `@pto.simd` functions can be:
-- Called from `@pto.ukernel` (manual MTE + sync in the ukernel's hands).
-- Called directly from `@pto.jit` (compiler infers MTE + sync).
-- Used inline as a context manager: `with pto.simd():` (see Section 3.7).
+**Invocation modes**: can be called from `@pto.jit` in either mode, or used
+inline with `with pto.simd():` (Section 3.4).
 
-## 3.6 `@pto.simt` — SIMT unit sub-kernel
+### 3.3.3 `@pto.simt` — SIMT unit
 
-### Role
+**Role**: `@pto.simt` marks a function that executes on the SIMT unit. SIMT
+(Single Instruction, Multiple Threads) is a programming model where you write
+instructions in scalar syntax, and the hardware executes them in parallel
+across many threads — analogous to how a GPU SM runs a CUDA kernel. Each
+instruction appears to operate on a single element (`lds`, `sts`, `a + b`),
+but the same instruction is issued across a large number of work-items
+simultaneously.
 
-`@pto.simt` marks a function that executes on the SIMT unit. SIMT (Single Instruction, Multiple Threads) is a programming model where you write instructions in scalar syntax, and the hardware executes them in parallel across many threads — analogous to how a GPU SM runs a CUDA kernel. Each instruction appears to operate on a single element (`lds`, `sts`, `a + b`), but the same instruction is issued across a large number of work-items simultaneously.
-
-### Signature
+**Signature**:
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"kernel_entry.simt_signature","symbol":"kernel_entry_simt_signature_probe","compile":{"BLOCK":8}} -->
 ```python
@@ -344,7 +434,7 @@ def my_simt_kernel(
     return
 ```
 
-### Typical body
+**Typical body**:
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"flash_attention.simt_blend","symbol":"flash_attention_simt_blend_probe","compile":{"BLOCK":8}} -->
 ```python
@@ -365,23 +455,26 @@ def blend_output_rows(
             scalar.store(o_next, o_next_tile[row, col])
 ```
 
-SIMT kernels read and write individual scalar elements from tiles. The unit executes the same scalar instruction across many work-items in parallel, making it efficient for per-element operations.
+SIMT kernels read and write individual scalar elements from tiles. The unit
+executes the same scalar instruction across many work-items in parallel, making
+it efficient for per-element operations.
 
-**Invocation modes**: `@pto.simt` functions can be:
-- Called from `@pto.ukernel` (manual MTE + sync in the ukernel's hands).
-- Called directly from `@pto.jit` (compiler infers MTE + sync).
-- Used inline as a context manager: `with pto.simt():` (see Section 3.7).
+**Invocation modes**: can be called from `@pto.jit` in either mode, or used
+inline with `with pto.simt():` (Section 3.4).
 
-## 3.7 Context manager syntax for L3 sub-kernels
+## 3.4 Inline context manager syntax
 
-In addition to the decorator form, each L3 sub-kernel unit provides a context manager: `with pto.cube():`, `with pto.simd():`, and `with pto.simt():`. These open an inline L3 block without requiring a separate named function — useful for quick prototyping, one-off compute snippets, or when the logic is too trivial to extract. The inline form is supported in top-level `@pto.jit` bodies and inside `@pto.ukernel`.
+In addition to the decorator form, each sub-kernel unit provides a context
+manager: `with pto.cube():`, `with pto.simd():`, and `with pto.simt():`. These
+open inline blocks without requiring a separate named function — useful for
+quick prototyping, one-off hardware-unit snippets, or code that is too small to
+extract. Inline scopes are supported in top-level `@pto.jit` bodies.
 
 ### Syntax
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"kernel_entry.inline_simd_scope","symbol":"kernel_entry_inline_simd_scope_probe","compile":{"BLOCK":128}} -->
 ```python
 with pto.simd():
-    # Direct L3 instructions — vreg ops, scalar loads/stores
     a_vec = pto.vlds(a_tile[r, c:])
     b_vec = pto.vlds(b_tile[r, c:])
     o_vec = pto.vadd(a_vec, b_vec, mask)
@@ -408,40 +501,48 @@ with pto.cube():
 
 ### Semantics
 
-- Inside the `with` block, instructions execute on the corresponding hardware unit.
-- `vreg` values created inside `with pto.simd():` are scoped to the block — they do not escape.
-- Cube-local scratch (`l0a`, `l0b`, `acc`) must be allocated by the caller before entering the block.
-- The context manager form is equivalent to defining an inline anonymous sub-kernel. The compiler treats it identically to a named `@pto.simd` / `@pto.cube` / `@pto.simt` function.
+- Inside the `with` block, instructions execute on the corresponding hardware
+  unit.
+- `vreg` values created inside `with pto.simd():` are scoped to the block —
+  they do not escape.
+- Cube-local scratch (`l0a`, `l0b`, `acc`) must be allocated by the caller
+  before entering the block.
+- The context manager form is equivalent to an inline anonymous sub-kernel. The
+  compiler treats it identically to a named `@pto.simd` / `@pto.cube` /
+  `@pto.simt` function.
 
 ### Comparison
 
 | | Decorator form | Context manager form |
 |---|---|---|
-| Reuse | Named, callable from multiple call sites | Inline, single-use |
+| Reuse | Named, callable from multiple sites | Inline, single-use |
 | Readability | Good for complex, multi-step logic | Good for short (3-10 line) snippets |
 | Testing | Can be unit-tested independently | Tested only through the enclosing kernel |
 | Cube-local args | Explicit parameters | Captured from enclosing scope |
 
-The two forms can be freely mixed in the same `@pto.jit` or `@pto.ukernel` body.
+The two forms can be freely mixed in the same `@pto.jit` body.
 
-## 3.8 Boundary contracts
+## 3.5 Boundary contracts
 
-Data crosses decorator boundaries only through UB-backed tiles or typed UB pointers:
+Data crosses decorator boundaries only through UB-backed tiles or typed UB
+pointers:
 
 | Boundary | Allowed |
 |----------|---------|
 | Host → `@pto.jit` | Python-native tensors |
-| `@pto.jit` → `@pto.ukernel` | `Tile`, `PartitionTensorView`, `pto.ptr`, PTO scalars |
-| `@pto.jit` → L3 sub-kernel (direct call) | `Tile`, PTO scalars (compiler handles MTE + sync) |
-| `@pto.jit` → `with pto.{cube,sid,sitm}:` | `Tile` captured from enclosing scope |
-| `@pto.ukernel` → L3 sub-kernel | `Tile`, PTO scalars |
-| L3 sub-kernel → L3 sub-kernel | Not allowed (go through UB tiles via the caller) |
+| `@pto.jit(mode="auto")` → sub-kernel | `Tile`, PTO scalars (compiler handles staging + sync) |
+| `@pto.jit(mode="explicit")` → sub-kernel | `Tile`, `PartitionTensorView`, `pto.ptr`, PTO scalars |
+| `@pto.jit` → `with pto.{cube,simd,simt}:` | `Tile` captured from enclosing scope |
+| Sub-kernel → sub-kernel | Not allowed (go through UB tiles via the caller) |
 | `@pto.simd` → caller | Only via `vsts`/`psts` to UB tiles; `vreg` cannot escape |
 | Cube-local → UB | Only via `mte_l0c_ub`; LEFT/RIGHT/ACC/BIAS are private |
 
-## 3.9 `pto.constexpr`
+## 3.6 `pto.constexpr`
 
-`pto.constexpr` marks a `@pto.jit` keyword-only parameter as a compile-time constant. The compiler specializes the kernel for each combination of constexpr values, and the compiled artifact is cached by specialization key together with the kernel's tensor ABI contract.
+`pto.constexpr` marks a `@pto.jit` keyword-only parameter as a compile-time
+constant. The compiler specializes the kernel for each combination of constexpr
+values, and the compiled artifact is cached by specialization key together with
+the kernel's tensor ABI contract.
 
 <!-- ptodsl-doc-test: {"mode":"compile","symbol":"kernel","compile":{}} -->
 ```python
@@ -458,9 +559,16 @@ def kernel(
 
 - Must appear as a keyword-only argument (after `*`).
 - Must have a default value.
-- Must be provided at `.compile()` time if the caller needs to override the default.
-- Cannot change between launches of the same compiled instance — compile a new variant for a different value.
+- Must be provided at `.compile()` time if the caller needs to override the
+  default.
+- Cannot change between launches of the same compiled instance — compile a new
+  variant for a different value.
 
-`pto.constexpr` parameters can be used anywhere in the kernel body where a Python value is expected: tile shapes, loop bounds that are known at compile time, dtype arguments, etc. They are evaluated at trace time, so `for i in range(BLOCK)` would unroll `BLOCK` times.
+`pto.constexpr` parameters can be used anywhere in the kernel body where a
+Python value is expected: tile shapes, loop bounds that are known at compile
+time, dtype arguments, etc. They are evaluated at trace time, so `for i in
+range(BLOCK)` would unroll `BLOCK` times.
 
-In contrast, values derived from runtime tensor shapes (e.g., `A.shape[0]`) are dynamic — they vary per launch and should be used with `pto.for_` to produce device-side loops.
+In contrast, values derived from runtime tensor shapes (e.g., `A.shape[0]`)
+are dynamic — they vary per launch and should be used with `pto.for_` to
+produce device-side loops.

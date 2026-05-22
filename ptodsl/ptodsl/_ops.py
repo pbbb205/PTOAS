@@ -22,8 +22,10 @@ Design rules:
 - ``partition_view`` infers the PartitionTensorViewType from the source type.
 """
 
+from functools import wraps
+
 from ._bootstrap import make_context  # noqa: F401 – ensure MLIR on sys.path
-from ._diagnostics import tile_row_alignment_error
+from ._diagnostics import explicit_mode_required_with_context_error, tile_row_alignment_error
 from ._host_tensors import resolve_tensor_data_entry
 from ._scalar_coercion import coerce_scalar_to_type, materialize_scalar_literal
 from ._runtime_scalar_ops import classify_runtime_scalar_type, emit_runtime_binary_op
@@ -127,6 +129,31 @@ def _validate_sync_pipe(pipe, *, context: str, allowed: tuple[str, ...]):
     if canonical not in allowed:
         expected = ", ".join(f"<{name}>" for name in allowed)
         raise ValueError(f"{context} expects pipe to be one of {expected}, got <{canonical}>")
+
+
+def _require_explicit_mode(surface: str):
+    try:
+        from ._tracing.active import current_session
+        session = current_session()
+    except Exception:
+        session = None
+    if session is None:
+        return
+    current_mode = getattr(session.module_spec, "mode", None)
+    if current_mode != "explicit":
+        raise explicit_mode_required_with_context_error(surface, session.module_spec)
+
+
+def _explicit_mode_only(surface: str):
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            _require_explicit_mode(surface)
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -2666,6 +2693,7 @@ def _require_pto_ptr_operand(value, *, context: str):
     return raw_value
 
 
+@_explicit_mode_only("pto.mte_load(...)")
 def mte_load(source, destination, l2_cache_ctl, len_burst, *, nburst, loops=None, pad=None):
     """
     Ptr-based GM->UB DMA wrapper aligned with the underlying ``pto.dma_load`` surface.
@@ -2704,6 +2732,7 @@ def mte_load(source, destination, l2_cache_ctl, len_burst, *, nburst, loops=None
     )
 
 
+@_explicit_mode_only("pto.mte_store(...)")
 def mte_store(source, destination, len_burst, *, nburst, loops=None):
     """Ptr-based UB->GM DMA wrapper aligned with the underlying ``pto.dma_store`` surface."""
     n_burst, nburst_src_stride, nburst_dst_stride = _normalize_dma_group(
@@ -2780,6 +2809,7 @@ def _normalize_dma_pad(pad, *, context: str):
     )
 
 
+@_explicit_mode_only("pto.mte_gm_ub(...)")
 def mte_gm_ub(source, destination, l2_cache_ctl, len_burst, *, nburst, loops=None, pad=None):
     """``pto.mte_gm_ub`` – grouped GM-to-UB DMA surface."""
     n_burst, nburst_src_stride, nburst_dst_stride = _normalize_dma_group(
@@ -2812,6 +2842,7 @@ def mte_gm_ub(source, destination, l2_cache_ctl, len_burst, *, nburst, loops=Non
     )
 
 
+@_explicit_mode_only("pto.mte_ub_gm(...)")
 def mte_ub_gm(source, destination, len_burst, *, nburst, loops=None):
     """``pto.mte_ub_gm`` – grouped UB-to-GM DMA surface."""
     n_burst, nburst_src_stride, nburst_dst_stride = _normalize_dma_group(
@@ -2836,6 +2867,7 @@ def mte_ub_gm(source, destination, len_burst, *, nburst, loops=None):
     )
 
 
+@_explicit_mode_only("pto.mte_ub_ub(...)")
 def mte_ub_ub(source, destination, len_burst, *, nburst):
     """``pto.mte_ub_ub`` – grouped UB-to-UB DMA surface."""
     n_burst, src_stride, dst_stride = _normalize_dma_group(
@@ -2853,6 +2885,7 @@ def mte_ub_ub(source, destination, len_burst, *, nburst):
     )
 
 
+@_explicit_mode_only("pto.mte_ub_l1(...)")
 def mte_ub_l1(source, destination, len_burst, *, nburst):
     """``pto.mte_ub_l1`` – grouped UB-to-L1 DMA surface."""
     n_burst, src_stride, dst_stride = _normalize_dma_group(
@@ -2876,6 +2909,7 @@ def mem_bar(barrier_type):
     _pto.MemBarOp(kind=_membar_attr(barrier_name))
 
 
+@_explicit_mode_only("pto.mte_l1_l0a(...)")
 def mte_l1_l0a(source, destination, m, k, *, transpose=False):
     """``pto.mte_l1_l0a`` – cube-side LEFT staging."""
     _pto.MteL1L0aOp(
@@ -2887,6 +2921,7 @@ def mte_l1_l0a(source, destination, m, k, *, transpose=False):
     )
 
 
+@_explicit_mode_only("pto.mte_l1_l0b(...)")
 def mte_l1_l0b(source, destination, k, n, *, transpose=False):
     """``pto.mte_l1_l0b`` – cube-side RIGHT staging."""
     _pto.MteL1L0bOp(
@@ -2898,6 +2933,7 @@ def mte_l1_l0b(source, destination, k, n, *, transpose=False):
     )
 
 
+@_explicit_mode_only("pto.mte_l0c_ub(...)")
 def mte_l0c_ub(source, destination, m, n, src_stride, dst_stride, sub_blockid=0, *, dst_mode="single"):
     """``pto.mte_l0c_ub`` – ACC to UB store."""
     _pto.MteL0cUbOp(

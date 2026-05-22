@@ -288,7 +288,10 @@ class _TraceBuilder(TracingRuntime):
                 function_name=descriptor.name,
                 target_arch=descriptor.target,
                 kernel_kind="vector",
+                mode="auto",
                 module_style=ModuleStyle.NESTED,
+                source_file=inspect.getsourcefile(descriptor.py_fn) or inspect.getfile(descriptor.py_fn),
+                source_line=getattr(descriptor.py_fn.__code__, "co_firstlineno", None),
             )
         )
         self.descriptor = descriptor
