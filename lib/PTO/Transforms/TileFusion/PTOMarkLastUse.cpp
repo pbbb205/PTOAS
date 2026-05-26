@@ -13,6 +13,7 @@
 #include "mlir/IR/Block.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/Interfaces/CallInterfaces.h"
 #include "mlir/Pass/Pass.h"
 
 #include "llvm/ADT/DenseMap.h"
@@ -111,10 +112,9 @@ collectGroupSpansInBlock(Block &block, SmallVectorImpl<GroupSpan> &spans) {
     auto [it, inserted] =
         spanIndexByGroupId.try_emplace(current.groupId, spans.size());
     if (!inserted) {
-      current.members.front().op->emitError(
-          "expected one contiguous span per pto.fusion.group_id within a basic "
-          "block");
-      return failure();
+      spans[it->second].members.clear();
+      current = GroupSpan();
+      return success();
     }
 
     spans.push_back(std::move(current));
@@ -132,6 +132,12 @@ collectGroupSpansInBlock(Block &block, SmallVectorImpl<GroupSpan> &spans) {
     std::optional<int64_t> groupId =
         getRequiredI64Attr(&op, kFusionGroupIdAttr);
     if (!groupId) {
+      if (!current.members.empty()) {
+        // Non-fusion ops between fusion group members are tolerated (e.g.
+        // alloc_tile). Only flush when the next fusion op belongs to a
+        // different group.
+        continue;
+      }
       if (failed(flush()))
         return failure();
       continue;
@@ -187,15 +193,42 @@ static bool isSpanLocalLastUseCandidate(Value value, Operation *currentOp,
 static bool hasLaterUseAfterSpan(Value value, Operation *spanEnd, Block *block) {
   for (OpOperand &use : value.getUses()) {
     Operation *user = use.getOwner();
-    if (user->getBlock() == block)
-      return spanEnd->isBeforeInBlock(user);
+    if (user->getBlock() != block)
+      return true;
+    if (spanEnd->isBeforeInBlock(user))
+      return true;
+  }
+  return false;
+}
+
+static bool isHardSpanBarrier(Operation *op) {
+  if (op->hasTrait<OpTrait::IsTerminator>() || !op->getRegions().empty())
     return true;
+  if (isa<CallOpInterface>(op))
+    return true;
+  return false;
+}
+
+static bool hasHardBarrierInSpan(const GroupSpan &span) {
+  if (span.members.size() < 2)
+    return false;
+  for (size_t i = 0; i + 1 < span.members.size(); ++i) {
+    Operation *cur = span.members[i].op;
+    Operation *next = span.members[i + 1].op;
+    for (Operation *cursor = cur->getNextNode(); cursor && cursor != next;
+         cursor = cursor->getNextNode()) {
+      if (isHardSpanBarrier(cursor))
+        return true;
+    }
   }
   return false;
 }
 
 static void markGroupSpanLastUse(const GroupSpan &span) {
   if (span.members.empty())
+    return;
+
+  if (hasHardBarrierInSpan(span))
     return;
 
   Block &block = *span.block;
@@ -215,6 +248,7 @@ static void markGroupSpanLastUse(const GroupSpan &span) {
         lastUseMask.push_back(0);
         continue;
       }
+      // isSpanLocalLastUseCandidate的检查范围大于hasLaterUseAfterSpan
       bool blockedByLaterSpanUse =
           !isSpanLocalLastUseCandidate(operand->get(), &op, &block);
       bool blockedByLaterPostSpanUse =

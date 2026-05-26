@@ -7,9 +7,11 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 // Guards OpScheduling against moving planned fusion members across an unrelated
-// region boundary.
+// region boundary. When a HardBoundary prevents contiguous fusion group
+// formation, the group is silently skipped without last-use annotation and
+// compilation proceeds normally.
 //
-// RUN: not ptoas --pto-arch=a5 --pto-level=level2 --enable-op-fusion --emit-pto-ir %s --mlir-print-ir-after=pto-op-scheduling -o /dev/null 2>&1 | FileCheck %s
+// RUN: ptoas --pto-arch=a5 --pto-level=level2 --enable-op-fusion --emit-pto-ir %s --mlir-print-ir-after=pto-mark-last-use -o /dev/null 2>&1 | FileCheck %s
 
 module {
   func.func @op_scheduling_negative_region(
@@ -35,12 +37,16 @@ module {
   }
 }
 
-// CHECK: // -----// IR Dump After OpScheduling (pto-op-scheduling) //----- //
+// CHECK: // -----// IR Dump After PTOMarkLastUse (pto-mark-last-use) //----- //
 // CHECK-LABEL: func.func @op_scheduling_negative_region(
-// CHECK: pto.trowexpandmul{{.*}}outs(%[[DST0:[0-9]+]]
-// CHECK-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 0 : i64}
-// CHECK-NEXT: scf.if %arg0 {
-// CHECK: pto.tadd ins(%arg2, %arg3
-// CHECK: pto.trowexpandmul ins(%[[DST0]], %arg5
-// CHECK-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 1 : i64}
-// CHECK: error: expected one contiguous span per pto.fusion.group_id within a basic block
+// CHECK: pto.trowexpandmul
+// CHECK-NOT: pto.fusion.group_id
+// CHECK-NOT: pto.last_use
+// CHECK: scf.if
+// CHECK-NOT: pto.fusion.group_id
+// CHECK-NOT: pto.last_use
+// CHECK: pto.trowexpandmul
+// CHECK-NOT: pto.fusion.group_id
+// CHECK-NOT: pto.last_use
+// CHECK: return
+// CHECK-NOT: error:

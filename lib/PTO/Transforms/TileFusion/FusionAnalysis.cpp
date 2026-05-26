@@ -44,7 +44,12 @@ static SmallVector<int64_t, 4> getValidShapeVec(Type type) {
 
 static SmallVector<int64_t, 4> getValidShapeVec(Value value) {
   SmallVector<int64_t, 4> validShape = getValidShapeVec(value.getType());
-  if (auto bind = value.getDefiningOp<pto::BindTileOp>()) {
+  if (auto alloc = value.getDefiningOp<pto::AllocTileOp>()) {
+    if (validShape.size() >= 1 && alloc.getValidRow())
+      validShape[0] = getConstantIndexOrDynamic(alloc.getValidRow());
+    if (validShape.size() >= 2 && alloc.getValidCol())
+      validShape[1] = getConstantIndexOrDynamic(alloc.getValidCol());
+  } else if (auto bind = value.getDefiningOp<pto::BindTileOp>()) {
     if (validShape.size() >= 1 && bind.getValidRow())
       validShape[0] = getConstantIndexOrDynamic(bind.getValidRow());
     if (validShape.size() >= 2 && bind.getValidCol())

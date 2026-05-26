@@ -82,6 +82,32 @@ static bool isProvenIterationDomain(
              .info.proof == pto::IterationDomainProof::Proven;
 }
 
+static bool hasHardBoundaryBetween(const pto::FusionComputeNode &a,
+                                   const pto::FusionComputeNode &b) {
+  const pto::FusionComputeNode &earlier =
+      a.blockOrder < b.blockOrder ? a : b;
+  const pto::FusionComputeNode &later =
+      a.blockOrder < b.blockOrder ? b : a;
+
+  Operation *cursor = earlier.op->getNextNode();
+  while (cursor && cursor != later.op) {
+    if (cursor->hasTrait<OpTrait::IsTerminator>() ||
+        !cursor->getRegions().empty() || isa<CallOpInterface>(cursor))
+      return true;
+    cursor = cursor->getNextNode();
+  }
+  return false;
+}
+
+static bool hasHardBoundaryToGroup(
+    ArrayRef<const pto::FusionComputeNode *> group,
+    const pto::FusionComputeNode &candidate) {
+  for (const pto::FusionComputeNode *member : group)
+    if (hasHardBoundaryBetween(*member, candidate))
+      return true;
+  return false;
+}
+
 static bool dependsOnPreviousNode(
     const pto::FusionBlockAnalysis &blockAnalysis,
     const pto::FusionComputeNode &previous,
@@ -347,6 +373,9 @@ public:
 
     if (currentGroup.front()->iterationDomainClass !=
         candidate.iterationDomainClass)
+      return decision;
+
+    if (hasHardBoundaryToGroup(currentGroup, candidate))
       return decision;
 
     const unsigned connectionCount =

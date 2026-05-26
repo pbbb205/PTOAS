@@ -98,26 +98,18 @@ static SchedulingBarrierKind classifySchedulingBarrier(Operation *op) {
   return SchedulingBarrierKind::Movable;
 }
 
-static bool hasDependencyOnLocalBoundary(Operation *movingOp,
-                                         Operation *boundaryOp) {
-  FailureOr<pto::FusionOpSemantics> movingSemanticsOr =
-      pto::getFusionOpSemantics(movingOp);
-  FailureOr<pto::FusionOpSemantics> boundarySemanticsOr =
-      pto::getFusionOpSemantics(boundaryOp);
-  if (failed(movingSemanticsOr) || failed(boundarySemanticsOr))
+static bool hasTileDependency(Operation *opA, Operation *opB) {
+  FailureOr<pto::FusionOpSemantics> aSemOr = pto::getFusionOpSemantics(opA);
+  FailureOr<pto::FusionOpSemantics> bSemOr = pto::getFusionOpSemantics(opB);
+  if (failed(aSemOr) || failed(bSemOr))
     return true;
 
-  const pto::FusionOpSemantics &movingSemantics = *movingSemanticsOr;
-  const pto::FusionOpSemantics &boundarySemantics = *boundarySemanticsOr;
+  const pto::FusionOpSemantics &a = *aSemOr;
+  const pto::FusionOpSemantics &b = *bSemOr;
 
-  return sharesAnyValue(boundarySemantics.tileOutputs,
-                        movingSemantics.tileInputs) ||
-         sharesAnyValue(boundarySemantics.tileOutputs,
-                        movingSemantics.tileOutputs) ||
-         sharesAnyValue(movingSemantics.tileOutputs,
-                        boundarySemantics.tileInputs) ||
-         sharesAnyValue(movingSemantics.tileOutputs,
-                        boundarySemantics.tileOutputs);
+  return sharesAnyValue(a.tileOutputs, b.tileInputs) ||
+         sharesAnyValue(b.tileOutputs, a.tileInputs) ||
+         sharesAnyValue(a.tileOutputs, b.tileOutputs);
 }
 
 static bool crossesOperandDefinition(Operation *movingOp, Operation *candidate) {
@@ -135,9 +127,8 @@ static bool canMoveEarlierAcross(Operation *movingOp, Operation *candidate) {
 
   switch (classifySchedulingBarrier(candidate)) {
   case SchedulingBarrierKind::Movable:
-    return true;
   case SchedulingBarrierKind::LocalBoundary:
-    return !hasDependencyOnLocalBoundary(movingOp, candidate);
+    return !hasTileDependency(movingOp, candidate);
   case SchedulingBarrierKind::HardBoundary:
     return false;
   }
@@ -151,23 +142,10 @@ static bool canMoveLaterAcross(Operation *movingOp, Operation *candidate) {
       return false;
   }
 
-  FailureOr<pto::FusionOpSemantics> movingSemanticsOr =
-      pto::getFusionOpSemantics(movingOp);
-  FailureOr<pto::FusionOpSemantics> candidateSemanticsOr =
-      pto::getFusionOpSemantics(candidate);
-  if (succeeded(movingSemanticsOr) && succeeded(candidateSemanticsOr)) {
-    if (sharesAnyValue(movingSemanticsOr->tileOutputs,
-                       candidateSemanticsOr->tileInputs) ||
-        sharesAnyValue(movingSemanticsOr->tileOutputs,
-                       candidateSemanticsOr->tileOutputs))
-      return false;
-  }
-
   switch (classifySchedulingBarrier(candidate)) {
   case SchedulingBarrierKind::Movable:
-    return true;
   case SchedulingBarrierKind::LocalBoundary:
-    return !hasDependencyOnLocalBoundary(movingOp, candidate);
+    return !hasTileDependency(movingOp, candidate);
   case SchedulingBarrierKind::HardBoundary:
     return false;
   }
@@ -260,6 +238,29 @@ collectScheduledGroups(Block &block, SmallVectorImpl<ScheduledGroup> &groups) {
   return success();
 }
 
+static bool canPrefixMoveLaterAcross(
+    ArrayRef<GroupMember> members, Operation *placement, Operation *barrier) {
+  for (const GroupMember &prevMember : members) {
+    if (!canMoveLaterAcross(prevMember.op, barrier))
+      return false;
+    if (prevMember.op == placement)
+      break;
+  }
+  return true;
+}
+
+static void movePrefixPastBarrier(ArrayRef<GroupMember> members,
+                                  Operation *placement,
+                                  Operation *barrier) {
+  Operation *anchor = barrier;
+  for (const GroupMember &prevMember : members) {
+    prevMember.op->moveAfter(anchor);
+    anchor = prevMember.op;
+    if (prevMember.op == placement)
+      break;
+  }
+}
+
 static void scheduleGroup(ScheduledGroup &group) {
   if (group.members.size() < 2)
     return;
@@ -278,7 +279,10 @@ static void scheduleGroup(ScheduledGroup &group) {
           !canMoveLaterAcross(placement, blockingOp))
         break;
 
-      placement->moveAfter(blockingOp);
+      if (!canPrefixMoveLaterAcross(group.members, placement, blockingOp))
+        break;
+
+      movePrefixPastBarrier(group.members, placement, blockingOp);
     }
     placement = op;
   }

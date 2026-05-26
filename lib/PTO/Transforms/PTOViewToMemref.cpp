@@ -2792,7 +2792,7 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TDivOp>(
+        replaceOpWithClonedAttrs<pto::TDivOp>(rewriter,
             op,
             TypeRange{},
             src0,
@@ -2848,16 +2848,13 @@ struct PTOViewToMemrefPass
           signalPassFailure();
           return;
         }
-        auto attrs = op->getAttrs();
-        auto newOp = rewriter.create<pto::TDivSOp>(
-            op.getLoc(),
+        replaceOpWithClonedAttrs<pto::TDivSOp>(rewriter,
+            op,
             TypeRange{},
             src,
             scale,
             dst,
             op.getPrecisionTypeAttr());
-        newOp->setAttrs(attrs);
-        rewriter.replaceOp(op, newOp->getResults());
       }
 
       DefaultInlineVector<mlir::pto::TExpandsOp> expandsops;
@@ -3216,7 +3213,7 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TMaxOp>(
+        replaceOpWithClonedAttrs<pto::TMaxOp>(rewriter,
             op,
             TypeRange{},
             src0,
@@ -3244,7 +3241,7 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TMaxSOp>(
+        replaceOpWithClonedAttrs<pto::TMaxSOp>(rewriter,
             op,
             TypeRange{},
             src,
@@ -3272,7 +3269,7 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TMinOp>(
+        replaceOpWithClonedAttrs<pto::TMinOp>(rewriter,
             op,
             TypeRange{},
             src0,
@@ -3300,7 +3297,7 @@ struct PTOViewToMemrefPass
           return;
         }
 
-        rewriter.replaceOpWithNewOp<pto::TMinSOp>(
+        replaceOpWithClonedAttrs<pto::TMinSOp>(rewriter,
             op,
             TypeRange{},
             src,

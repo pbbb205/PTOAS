@@ -9912,33 +9912,12 @@ struct PTORowExpandExpdifToEmitC
   }
 };
 
-//===----------------------------------------------------------------------===//
-// PTOConvert.cpp  (add lowering + patterns.add for TROWEXPANDDIV DPS/memref op)
-//===----------------------------------------------------------------------===//
-// Helper: replace or erase based on whether op has results.
-static void replaceOrEraseWithOpaqueCall(Operation *op,
-                                        StringRef callee,
-                                        ArrayRef<Value> args,
-                                        ConversionPatternRewriter &rewriter) {
-  TypeRange resultTypes = op->getResultTypes();
-  std::string calleeStorage;
-  StringRef effectiveCallee =
-      getLastUseAwareCallee(op, callee, calleeStorage);
-  auto call = rewriter.create<emitc::CallOpaqueOp>(
-      op->getLoc(), resultTypes, effectiveCallee, ArrayAttr{}, ArrayAttr{},
-      ValueRange(args));
-  if (resultTypes.empty())
-    rewriter.eraseOp(op);
-  else
-    rewriter.replaceOp(op, call.getResults());
-}
-
 static void replaceOrEraseWithOpaqueCallAndReturnDst(Operation *op, Value dst,
                                                      StringRef callee,
                                                      ArrayRef<Value> args,
                                                      ArrayAttr templateArgs,
                                                      ConversionPatternRewriter &rewriter) {
-  createLastUseAwareOpaqueCall(rewriter, op, TypeRange{}, callee, args, templateArgs);
+  createLastUseAwareOpaqueCall(rewriter, op, TypeRange{}, callee, args, ArrayAttr{}, templateArgs);
   if (op->getNumResults() == 1)
     rewriter.replaceOp(op, dst);
   else

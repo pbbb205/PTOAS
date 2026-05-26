@@ -7,14 +7,14 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 // Guards OpScheduling against moving planned fusion members across an SSA
-// definition consumed by a later group member.
+// definition consumed by a later group member. When a HardBoundary prevents
+// contiguous fusion group formation, the group is silently skipped without
+// last-use annotation and compilation proceeds normally.
 //
-// RUN: not ptoas --pto-arch=a5 --pto-level=level2 --enable-op-fusion --emit-pto-ir %s --mlir-print-ir-after=pto-op-scheduling -o /dev/null 2>&1 | FileCheck %s
+// RUN: ptoas --pto-arch=a5 --pto-level=level2 --enable-op-fusion --emit-pto-ir %s --mlir-print-ir-after=pto-mark-last-use -o /dev/null 2>&1 | FileCheck %s
 
 module {
-  func.func private @produce_row(
-      !pto.tile_buf<vec, 32x32xf32>)
-      -> !pto.tile_buf<vec, 32x1xf32>
+  func.func private @produce_scalar() -> f32
 
   func.func @op_scheduling_negative_ssa(
       %full0: !pto.tile_buf<vec, 32x32xf32>,
@@ -23,17 +23,22 @@ module {
     %tmp1 = pto.alloc_tile : !pto.tile_buf<vec, 32x32xf32>
 
     pto.trowexpandmul ins(%full0, %row0 : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x1xf32>) outs(%tmp0 : !pto.tile_buf<vec, 32x32xf32>)
-    %rowTmp = func.call @produce_row(%tmp0) : (!pto.tile_buf<vec, 32x32xf32>) -> !pto.tile_buf<vec, 32x1xf32>
-    pto.trowexpandmul ins(%tmp0, %rowTmp : !pto.tile_buf<vec, 32x32xf32>, !pto.tile_buf<vec, 32x1xf32>) outs(%tmp1 : !pto.tile_buf<vec, 32x32xf32>)
+    %scalar = func.call @produce_scalar() : () -> f32
+    pto.tadds ins(%tmp0, %scalar : !pto.tile_buf<vec, 32x32xf32>, f32) outs(%tmp1 : !pto.tile_buf<vec, 32x32xf32>)
     return
   }
 }
 
-// CHECK: // -----// IR Dump After OpScheduling (pto-op-scheduling) //----- //
+// CHECK: // -----// IR Dump After PTOMarkLastUse (pto-mark-last-use) //----- //
 // CHECK-LABEL: func.func @op_scheduling_negative_ssa(
-// CHECK: pto.trowexpandmul{{.*}}outs(%[[DST0:[0-9]+]]
-// CHECK-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 0 : i64}
-// CHECK-NEXT: %[[ROW:[0-9]+]] = call @produce_row(%[[DST0]])
-// CHECK-NEXT: pto.trowexpandmul ins(%[[DST0]], %[[ROW]]
-// CHECK-SAME: {pto.fusion.group_id = 0 : i64, pto.fusion.order = 1 : i64}
-// CHECK: error: expected one contiguous span per pto.fusion.group_id within a basic block
+// CHECK: pto.trowexpandmul
+// CHECK-NOT: pto.fusion.group_id
+// CHECK-NOT: pto.last_use
+// CHECK: call @produce_scalar
+// CHECK-NOT: pto.fusion.group_id
+// CHECK-NOT: pto.last_use
+// CHECK: pto.tadds
+// CHECK-NOT: pto.fusion.group_id
+// CHECK-NOT: pto.last_use
+// CHECK: return
+// CHECK-NOT: error:
