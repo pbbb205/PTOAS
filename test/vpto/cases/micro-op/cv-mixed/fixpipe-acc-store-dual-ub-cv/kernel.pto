@@ -22,7 +22,7 @@ module attributes {pto.target_arch = "a5"} {
                                                  %out_split_m1_gm: !pto.ptr<f32, gm>,
                                                  %out_split_n0_gm: !pto.ptr<f32, gm>,
                                                  %out_split_n1_gm: !pto.ptr<f32, gm>)
-      attributes {pto.aicore} {
+      attributes {pto.kernel} {
     %c0_i64 = arith.constant 0 : i64
     %c1_i64 = arith.constant 1 : i64
     %c2_i64 = arith.constant 2 : i64

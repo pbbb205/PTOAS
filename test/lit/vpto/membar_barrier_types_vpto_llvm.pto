@@ -9,7 +9,7 @@
 // RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto %s -o %t --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
 
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
-  func.func @membar_all_documented_kinds() attributes {pto.aicore} {
+  func.func @membar_all_documented_kinds() attributes {pto.kernel} {
     pto.vecscope {
       pto.mem_bar "VV_ALL"
       pto.mem_bar "VST_VLD"

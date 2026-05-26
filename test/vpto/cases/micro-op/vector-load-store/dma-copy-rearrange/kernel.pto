@@ -10,7 +10,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
                                        %arg2: i64,
                                        %arg3: i64,
                                        %arg4: i64,
-                                       %arg5: i64) attributes {pto.aicore} {
+                                       %arg5: i64) attributes {pto.kernel} {
     %false = arith.constant false
     %c0_i64 = arith.constant 0 : i64
     %c1_i64 = arith.constant 1 : i64

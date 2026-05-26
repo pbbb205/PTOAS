@@ -191,7 +191,7 @@ def PTOWrapFunctionsInSections : Pass<"pto-wrap-functions-in-sections", "func::F
 def VPTOSplitCVModule : Pass<"vpto-split-cv-module", "ModuleOp"> {
   let summary = "Split a VPTO module with cube/vector sections into kernel modules";
   let description = [{
-    Rewrites a single-module VPTO input where one `pto.aicore` function
+    Rewrites a single-module VPTO input where one `pto.kernel` function
     contains `pto.section.cube` / `pto.section.vector` regions into the
     normalized fatobj input form with one child module per kernel kind.
 

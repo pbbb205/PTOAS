@@ -17,7 +17,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   // TMrgsortSingle<float, 1, 256, 1, 256, 64>
   // cols=256 float elements = 128 structures
   // block_len=64 float elements = 32 structures/block
-  func.func @TMRGSORT_f32_single_1x256_b64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.aicore} {
+  func.func @TMRGSORT_f32_single_1x256_b64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c64   = arith.constant 64   : i32   // block_len (float elements)
@@ -62,7 +62,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   // kGCols=320 (global memory), kTCols=256 (effective tile region)
   // cols=256 float elements = 128 structures
   // block_len=64 float elements = 32 structures/block
-  func.func @TMRGSORT_f32_single_1x320_b64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.aicore} {
+  func.func @TMRGSORT_f32_single_1x320_b64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c64   = arith.constant 64   : i32   // block_len (float elements)
@@ -107,7 +107,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   // TMrgsortSingle<float, 1, 512, 1, 512, 64>
   // cols=512 float elements = 256 structures
   // block_len=64 float elements = 32 structures/block
-  func.func @TMRGSORT_f32_single_1x512_b64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.aicore} {
+  func.func @TMRGSORT_f32_single_1x512_b64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c64   = arith.constant 64   : i32   // block_len (float elements)
@@ -152,7 +152,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   // kGCols=640 (global memory), kTCols=512 (effective tile region)
   // cols=512 float elements = 256 structures
   // block_len=64 float elements = 32 structures/block
-  func.func @TMRGSORT_f32_single_1x640_b64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.aicore} {
+  func.func @TMRGSORT_f32_single_1x640_b64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c64   = arith.constant 64   : i32   // block_len (float elements)
@@ -200,7 +200,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   //   kGCols*2=512, kTCols*2=512, blockLen*2=128 (in half elements)
   // cols=512 half elements = 128 structures
   // block_len=128 half elements = 32 structures/block
-  func.func @TMRGSORT_f16_single_1x256_b64(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>) attributes {pto.aicore} {
+  func.func @TMRGSORT_f16_single_1x256_b64(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c128  = arith.constant 128  : i32   // block_len * TYPE_COEF (half elements)
@@ -245,7 +245,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   // TYPE_COEF=2: kGCols*2=640, kTCols*2=512, blockLen*2=128 (kernel internal)
   // cols=512 half elements = 128 structures
   // block_len=128 half elements = 32 structures/block
-  func.func @TMRGSORT_f16_single_1x320_b64(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>) attributes {pto.aicore} {
+  func.func @TMRGSORT_f16_single_1x320_b64(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c128  = arith.constant 128  : i32   // block_len * TYPE_COEF (half elements)
@@ -290,7 +290,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   // TMrgsortSingle<uint16_t, 1, 512, 1, 512, 64>
   // TYPE_COEF=2: kGCols*2=1024, kTCols*2=1024, blockLen*2=128
   // cols=1024 half elements = 256 structures (at tile limit), repeat_times=2
-  func.func @TMRGSORT_f16_single_1x512_b64(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>) attributes {pto.aicore} {
+  func.func @TMRGSORT_f16_single_1x512_b64(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c128  = arith.constant 128  : i32   // block_len * TYPE_COEF
@@ -334,7 +334,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   // TMrgsortSingle<uint16_t, 1, 1024, 1, 1024, 256>
   // TYPE_COEF=2: kGCols*2=2048, kTCols*2=2048, blockLen*2=512
   // cols=2048 half elements = 512 structures, repeat_times=1 (larger block)
-  func.func @TMRGSORT_f16_single_1x1024_b256(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>) attributes {pto.aicore} {
+  func.func @TMRGSORT_f16_single_1x1024_b256(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c512  = arith.constant 512  : i32   // block_len * TYPE_COEF (256*2)
@@ -376,7 +376,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 
   // Format2: 2-list merge sort (f32_2list_b64_basic)
   func.func @TMRGSORT_f32_2list_b64_basic(%src0_ptr: !pto.ptr<f32>, %src1_ptr: !pto.ptr<f32>, 
-                                          %dst_ptr: !pto.ptr<f32>, %ex_ptr: !pto.ptr<i16>) attributes {pto.aicore} {
+                                          %dst_ptr: !pto.ptr<f32>, %ex_ptr: !pto.ptr<i16>) attributes {pto.kernel} {
     %c0   = arith.constant 0   : index
     %c1   = arith.constant 1   : index
     %c256 = arith.constant 256 : index
@@ -439,7 +439,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 
   // Format2: 2-list merge sort (f16_2list_b64_basic)
   func.func @TMRGSORT_f16_2list_b64_basic(%src0_ptr: !pto.ptr<f16>, %src1_ptr: !pto.ptr<f16>,
-                                          %dst_ptr: !pto.ptr<f16>, %ex_ptr: !pto.ptr<i16>) attributes {pto.aicore} {
+                                          %dst_ptr: !pto.ptr<f16>, %ex_ptr: !pto.ptr<i16>) attributes {pto.kernel} {
     %c0   = arith.constant 0   : index
     %c1   = arith.constant 1   : index
     %c256 = arith.constant 256 : index
@@ -505,7 +505,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   // kGCols_=64 (elements) → 32 structures per input
   // TOPK=128 (elements) → 64 structures output
   func.func @TMRGSORT_f32_2list_exhausted(%src0_ptr: !pto.ptr<f32>, %src1_ptr: !pto.ptr<f32>, 
-                                          %dst_ptr: !pto.ptr<f32>, %ex_ptr: !pto.ptr<i16>) attributes {pto.aicore} {
+                                          %dst_ptr: !pto.ptr<f32>, %ex_ptr: !pto.ptr<i16>) attributes {pto.kernel} {
     %c0   = arith.constant 0   : index
     %c1   = arith.constant 1   : index
     %c64  = arith.constant 64  : index  // kGCols (elements per input)
@@ -572,7 +572,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   // dst:  256 f32 elements = 128 structures
   func.func @TMRGSORT_f32_3list_b64_basic(%src0_ptr: !pto.ptr<f32>, %src1_ptr: !pto.ptr<f32>,
                                           %src2_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, 
-                                          %ex_ptr: !pto.ptr<i16>) attributes {pto.aicore} {
+                                          %ex_ptr: !pto.ptr<i16>) attributes {pto.kernel} {
     %c0   = arith.constant 0   : index
     %c1   = arith.constant 1   : index
     %c128 = arith.constant 128 : index
@@ -651,7 +651,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   // dst: 512 f32 elements = 256 structures (topk=256)
   func.func @TMRGSORT_f32_4list_b32_basic(%src0_ptr: !pto.ptr<f32>, %src1_ptr: !pto.ptr<f32>,
                                           %src2_ptr: !pto.ptr<f32>, %src3_ptr: !pto.ptr<f32>,
-                                          %dst_ptr: !pto.ptr<f32>, %ex_ptr: !pto.ptr<i16>) attributes {pto.aicore} {
+                                          %dst_ptr: !pto.ptr<f32>, %ex_ptr: !pto.ptr<i16>) attributes {pto.kernel} {
     %c0   = arith.constant 0   : index
     %c1   = arith.constant 1   : index
     %c128 = arith.constant 128 : index
@@ -745,7 +745,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   // dst:  1024 f16 elements = 256 structures
   func.func @TMRGSORT_f16_4list_b64_basic(%src0_ptr: !pto.ptr<f16>, %src1_ptr: !pto.ptr<f16>,
                                           %src2_ptr: !pto.ptr<f16>, %src3_ptr: !pto.ptr<f16>,
-                                          %dst_ptr: !pto.ptr<f16>, %ex_ptr: !pto.ptr<i16>) attributes {pto.aicore} {
+                                          %dst_ptr: !pto.ptr<f16>, %ex_ptr: !pto.ptr<i16>) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c256  = arith.constant 256  : index
@@ -837,7 +837,7 @@ pto.tstore ins(%dst_tile : !pto.tile_buf<vec, 1x1024xf16>)
   // dst: 1024 f16 elements = 256 structures (topk=256)
   func.func @TMRGSORT_f16_4list_basic(%src0_ptr: !pto.ptr<f16>, %src1_ptr: !pto.ptr<f16>,
                                       %src2_ptr: !pto.ptr<f16>, %src3_ptr: !pto.ptr<f16>,
-                                      %dst_ptr: !pto.ptr<f16>, %ex_ptr: !pto.ptr<i16>) attributes {pto.aicore} {
+                                      %dst_ptr: !pto.ptr<f16>, %ex_ptr: !pto.ptr<i16>) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c256  = arith.constant 256  : index
@@ -930,7 +930,7 @@ pto.tstore ins(%dst_tile : !pto.tile_buf<vec, 1x1024xf16>)
   // dst: 128 f32 elements = 64 structures (topk)
   func.func @TMRGSORT_f32_3list_non_uniform(%src0_ptr: !pto.ptr<f32>, %src1_ptr: !pto.ptr<f32>,
                                             %src2_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>,
-                                            %ex_ptr: !pto.ptr<i16>) attributes {pto.aicore} {
+                                            %ex_ptr: !pto.ptr<i16>) attributes {pto.kernel} {
     %c0   = arith.constant 0   : index
     %c1   = arith.constant 1   : index
     %c64  = arith.constant 64  : index
@@ -1011,7 +1011,7 @@ pto.tstore ins(%dst_tile : !pto.tile_buf<vec, 1x1024xf16>)
   // dst: 1536 f16 elements = 384 structures (topk=384)
   func.func @TMRGSORT_f16_3list_exhausted(%src0_ptr: !pto.ptr<f16>, %src1_ptr: !pto.ptr<f16>,
                                           %src2_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>,
-                                          %ex_ptr: !pto.ptr<i16>) attributes {pto.aicore} {
+                                          %ex_ptr: !pto.ptr<i16>) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c512  = arith.constant 512  : index
@@ -1091,7 +1091,7 @@ pto.tstore ins(%dst_tile : !pto.tile_buf<vec, 1x1024xf16>)
   // dst: 448 f32 elements = 224 structures
   func.func @TMRGSORT_f32_4list_non_uniform(%src0_ptr: !pto.ptr<f32>, %src1_ptr: !pto.ptr<f32>,
                                             %src2_ptr: !pto.ptr<f32>, %src3_ptr: !pto.ptr<f32>,
-                                            %dst_ptr: !pto.ptr<f32>, %ex_ptr: !pto.ptr<i16>) attributes {pto.aicore} {
+                                            %dst_ptr: !pto.ptr<f32>, %ex_ptr: !pto.ptr<i16>) attributes {pto.kernel} {
     %c0   = arith.constant 0   : index
     %c1   = arith.constant 1   : index
     %c64  = arith.constant 64  : index
@@ -1188,7 +1188,7 @@ pto.tstore ins(%dst_tile : !pto.tile_buf<vec, 1x1024xf16>)
 // Iteration 3: 512*4=2048 > 1024 ✗ STOP
 // After 2 iterations: 2 blocks of 512 structures each remain
 // Use Format2 merge: store to src memory (reuse as intermediate), load into 2 tiles, merge
-func.func @TMRGSORT_f32_topk_2048_1024(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.aicore} {
+func.func @TMRGSORT_f32_topk_2048_1024(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.kernel} {
   %c0    = arith.constant 0    : index
   %c1    = arith.constant 1    : index
   %c64   = arith.constant 64   : i32    // blockLen iteration 1
@@ -1298,7 +1298,7 @@ func.func @TMRGSORT_f32_topk_2048_1024(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.p
 // Case: f32_topk_2048_2048 (full global sort)
 // Iterative merge: 64→256 (2 iterations), then Format2 merge for remaining 2 blocks
 // cols=1024 structures, after 2 iterations: 2 blocks of 512 structures each
-func.func @TMRGSORT_f32_topk_2048_2048(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.aicore} {
+func.func @TMRGSORT_f32_topk_2048_2048(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.kernel} {
   %c0    = arith.constant 0    : index
   %c1    = arith.constant 1    : index
   %c64   = arith.constant 64   : i32    // blockLen iteration 1
@@ -1407,7 +1407,7 @@ func.func @TMRGSORT_f32_topk_2048_2048(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.p
 // Case: f32_topk_1280_512 (iterative merge for global sort, then take topk)
 // cols=640 structures, after 2 iterations: 1 block of 512 structures + 1 block of 128 structures
 // Need Format2 merge to combine these two sorted blocks
-func.func @TMRGSORT_f32_topk_1280_512(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.aicore} {
+func.func @TMRGSORT_f32_topk_1280_512(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.kernel} {
   %c0    = arith.constant 0    : index
   %c1    = arith.constant 1    : index
   %c64   = arith.constant 64   : i32    // blockLen iteration 1
@@ -1521,7 +1521,7 @@ func.func @TMRGSORT_f32_topk_1280_512(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.pt
 // Iteration 1: 16*4=64 ≤ 512 → 8 blocks of 64 structures
 // Iteration 2: 64*4=256 ≤ 512 → 2 blocks of 256 structures
 // After 2 iterations: need Format2 merge for 2 blocks of 256 structures each
-func.func @TMRGSORT_f16_topk_2048_1024(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>) attributes {pto.aicore} {
+func.func @TMRGSORT_f16_topk_2048_1024(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>) attributes {pto.kernel} {
   %c0    = arith.constant 0    : index
   %c1    = arith.constant 1    : index
   %c64   = arith.constant 64   : i32    // blockLen iteration 1 (f16 elements)
@@ -1633,7 +1633,7 @@ func.func @TMRGSORT_f16_topk_2048_1024(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.p
 // Iteration 1: 16*4=64 ≤ 512 → 8 blocks of 64 structures
 // Iteration 2: 64*4=256 ≤ 512 → 2 blocks of 256 structures
 // After 2 iterations: need Format2 merge for 2 blocks, output all 512 structures
-func.func @TMRGSORT_f16_topk_2048_2048(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>) attributes {pto.aicore} {
+func.func @TMRGSORT_f16_topk_2048_2048(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>) attributes {pto.kernel} {
   %c0    = arith.constant 0    : index
   %c1    = arith.constant 1    : index
   %c64   = arith.constant 64   : i32    // blockLen iteration 1 (f16 elements)
@@ -1743,7 +1743,7 @@ func.func @TMRGSORT_f16_topk_2048_2048(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.p
 // Iteration 1: 16*4=64 ≤ 320 → 5 blocks of 64 structures
 // Iteration 2: 64*4=256 ≤ 320 → 1 block of 256 + 1 tail of 64 structures
 // After 2 iterations: Format2 merge for 256 + 64 structures
-func.func @TMRGSORT_f16_topk_1280_512(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>) attributes {pto.aicore} {
+func.func @TMRGSORT_f16_topk_1280_512(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>) attributes {pto.kernel} {
   %c0    = arith.constant 0    : index
   %c1    = arith.constant 1    : index
   %c64   = arith.constant 64   : i32    // blockLen iteration 1 (f16 elements)

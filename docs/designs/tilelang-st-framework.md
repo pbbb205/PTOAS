@@ -322,7 +322,7 @@ void LaunchTADD_f32_16x64(float *a, float *b, float *c, void *stream) {
 
 - `launch.cpp` 不需要包含 PTO 头文件
 - `AICORE` 直接本地定义为 `[aicore]`
-- 这里的 kernel 声明必须和 `tadd.pto` 中的 `pto.aicore` 函数签名对应，供 `bisheng -xcce` 直接链接 fatobj
+- 这里的 kernel 声明必须和 `tadd.pto` 中的 `pto.kernel` 函数签名对应，供 `bisheng -xcce` 直接链接 fatobj
 - kernel 参数顺序必须和 `.pto` 中函数签名保持一致
 
 ### 7.4 `testcase/tadd/main.cpp`

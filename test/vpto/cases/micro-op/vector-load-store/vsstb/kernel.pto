@@ -5,7 +5,7 @@
 // scenarios: core-f32, full-mask, block-strided-store, block-mask
 // -----------------------------------------------------------------------------
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
-  func.func @vsstb_kernel_2d(%arg0: !pto.ptr<f32, gm>, %arg1: !pto.ptr<f32, gm>) attributes {pto.aicore} {
+  func.func @vsstb_kernel_2d(%arg0: !pto.ptr<f32, gm>, %arg1: !pto.ptr<f32, gm>) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1_i64 = arith.constant 1 : i64
     %c0_i64 = arith.constant 0 : i64

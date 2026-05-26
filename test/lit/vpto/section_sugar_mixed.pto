@@ -2,7 +2,7 @@
 
 module attributes {pto.target_arch = "a5"} {
   func.func @section_sugar_kernel(%arg0: !pto.ptr<i16, gm>)
-      attributes {pto.aicore} {
+      attributes {pto.kernel} {
     %c0 = arith.constant 0 : i64
     %c1 = arith.constant 1 : i64
     %ub = pto.castptr %c0 : i64 -> !pto.ptr<i16, ub>

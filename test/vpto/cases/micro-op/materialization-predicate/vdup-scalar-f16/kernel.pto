@@ -5,7 +5,7 @@
 // scenarios: core-f16, scalar-broadcast
 // -----------------------------------------------------------------------------
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
-  func.func @vdup_scalar_f16_kernel_2d(%arg0: !pto.ptr<f16, gm>) attributes {pto.aicore} {
+  func.func @vdup_scalar_f16_kernel_2d(%arg0: !pto.ptr<f16, gm>) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c128 = arith.constant 128 : index
     %c1024 = arith.constant 1024 : index

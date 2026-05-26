@@ -9,7 +9,7 @@
 // RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto %s -o %t --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
 
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
-  func.func @copy_matrix_cc_to_ub_probe() attributes {pto.aicore} {
+  func.func @copy_matrix_cc_to_ub_probe() attributes {pto.kernel} {
     %c0_i64 = arith.constant 0 : i64
     %c16_i64 = arith.constant 16 : i64
     %c68720525568_i64 = arith.constant 68720525568 : i64

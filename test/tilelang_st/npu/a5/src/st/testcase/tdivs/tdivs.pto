@@ -11,7 +11,7 @@
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
 
   // Case 0: f32 32x64
-  func.func @TDIVS_f32_32x64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TDIVS_f32_32x64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c32 = arith.constant 32 : index
@@ -30,7 +30,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 1: f16 63x64
-  func.func @TDIVS_f16_63x64(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>, %scalar: f16) attributes {pto.aicore} {
+  func.func @TDIVS_f16_63x64(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>, %scalar: f16) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c63 = arith.constant 63 : index
@@ -49,7 +49,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 2: f32 7x448
-  func.func @TDIVS_f32_7x448(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TDIVS_f32_7x448(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c7 = arith.constant 7 : index
@@ -68,7 +68,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 3: f32 256x16
-  func.func @TDIVS_f32_256x16(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TDIVS_f32_256x16(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c256 = arith.constant 256 : index
@@ -89,7 +89,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   // ========== scalar / src direction ==========
 
   // Case 4: f32 32x64 scalar/src
-  func.func @TDIVS_f32_32x64_scalar_src(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TDIVS_f32_32x64_scalar_src(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c32 = arith.constant 32 : index
@@ -108,7 +108,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 5: f16 63x64 scalar/src
-  func.func @TDIVS_f16_63x64_scalar_src(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>, %scalar: f16) attributes {pto.aicore} {
+  func.func @TDIVS_f16_63x64_scalar_src(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>, %scalar: f16) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c63 = arith.constant 63 : index
@@ -127,7 +127,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 6: f32 7x448 scalar/src
-  func.func @TDIVS_f32_7x448_scalar_src(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TDIVS_f32_7x448_scalar_src(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c7 = arith.constant 7 : index
@@ -146,7 +146,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 7: f32 256x16 scalar/src
-  func.func @TDIVS_f32_256x16_scalar_src(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TDIVS_f32_256x16_scalar_src(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c256 = arith.constant 256 : index
@@ -167,7 +167,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   // ========== HIGH_PRECISION mode - src / scalar direction ==========
 
   // Case 8: f32 32x64 HP (precision_sensitive)
-  func.func @TDIVS_f32_32x64_hp(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TDIVS_f32_32x64_hp(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c32 = arith.constant 32 : index
@@ -186,7 +186,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 9: f16 63x64 HP (precision_sensitive)
-  func.func @TDIVS_f16_63x64_hp(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>, %scalar: f16) attributes {pto.aicore} {
+  func.func @TDIVS_f16_63x64_hp(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>, %scalar: f16) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c63 = arith.constant 63 : index
@@ -205,7 +205,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 10: f32 16x64 HP subnormal
-  func.func @TDIVS_f32_16x64_hp_subnormal(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TDIVS_f32_16x64_hp_subnormal(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c16 = arith.constant 16 : index
@@ -224,7 +224,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 11: f16 16x64 HP subnormal
-  func.func @TDIVS_f16_16x64_hp_subnormal(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>, %scalar: f16) attributes {pto.aicore} {
+  func.func @TDIVS_f16_16x64_hp_subnormal(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>, %scalar: f16) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c16 = arith.constant 16 : index
@@ -243,7 +243,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 12: f32 16x64 HP overflow
-  func.func @TDIVS_f32_16x64_hp_overflow(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TDIVS_f32_16x64_hp_overflow(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c16 = arith.constant 16 : index
@@ -262,7 +262,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 13: f16 16x64 HP overflow
-  func.func @TDIVS_f16_16x64_hp_overflow(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>, %scalar: f16) attributes {pto.aicore} {
+  func.func @TDIVS_f16_16x64_hp_overflow(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>, %scalar: f16) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c16 = arith.constant 16 : index
@@ -283,7 +283,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   // ========== HIGH_PRECISION mode - scalar / src direction ==========
 
   // Case 14: f32 32x64 HP scalar/src (precision_sensitive)
-  func.func @TDIVS_f32_32x64_hp_scalar_src(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TDIVS_f32_32x64_hp_scalar_src(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c32 = arith.constant 32 : index
@@ -302,7 +302,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 15: f16 63x64 HP scalar/src (precision_sensitive)
-  func.func @TDIVS_f16_63x64_hp_scalar_src(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>, %scalar: f16) attributes {pto.aicore} {
+  func.func @TDIVS_f16_63x64_hp_scalar_src(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>, %scalar: f16) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c63 = arith.constant 63 : index
@@ -321,7 +321,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 16: f32 16x64 HP subnormal scalar/src
-  func.func @TDIVS_f32_16x64_hp_subnormal_scalar_src(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TDIVS_f32_16x64_hp_subnormal_scalar_src(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c16 = arith.constant 16 : index
@@ -340,7 +340,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 17: f16 16x64 HP subnormal scalar/src
-  func.func @TDIVS_f16_16x64_hp_subnormal_scalar_src(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>, %scalar: f16) attributes {pto.aicore} {
+  func.func @TDIVS_f16_16x64_hp_subnormal_scalar_src(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>, %scalar: f16) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c16 = arith.constant 16 : index
@@ -359,7 +359,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 18: f32 16x64 HP overflow scalar/src
-  func.func @TDIVS_f32_16x64_hp_overflow_scalar_src(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TDIVS_f32_16x64_hp_overflow_scalar_src(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c16 = arith.constant 16 : index
@@ -378,7 +378,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 19: f16 16x64 HP overflow scalar/src
-  func.func @TDIVS_f16_16x64_hp_overflow_scalar_src(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>, %scalar: f16) attributes {pto.aicore} {
+  func.func @TDIVS_f16_16x64_hp_overflow_scalar_src(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>, %scalar: f16) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c16 = arith.constant 16 : index

@@ -14,7 +14,7 @@
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
 
   // Case 0: f32 64x64 (4096 elements)
-  func.func @TMOV_f32_64x64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.aicore} {
+  func.func @TMOV_f32_64x64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.kernel} {
     %c0    = arith.constant 0     : index
     %c1    = arith.constant 1     : index
     %c64   = arith.constant 64    : index
@@ -53,7 +53,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 1: f32 32x32 (1024 elements)
-  func.func @TMOV_f32_32x32(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.aicore} {
+  func.func @TMOV_f32_32x32(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.kernel} {
     %c0    = arith.constant 0     : index
     %c1    = arith.constant 1     : index
     %c32   = arith.constant 32    : index
@@ -92,7 +92,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 2: f32 128x128 (16384 elements)
-  func.func @TMOV_f32_128x128(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.aicore} {
+  func.func @TMOV_f32_128x128(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.kernel} {
     %c0     = arith.constant 0      : index
     %c1     = arith.constant 1      : index
     %c128   = arith.constant 128    : index
@@ -131,7 +131,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 3: f32 128x32 (4096 elements)
-  func.func @TMOV_f32_128x32(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.aicore} {
+  func.func @TMOV_f32_128x32(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.kernel} {
     %c0    = arith.constant 0     : index
     %c1    = arith.constant 1     : index
     %c128  = arith.constant 128   : index
@@ -171,7 +171,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 4: f32 128x64 (8192 elements)
-  func.func @TMOV_f32_128x64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.aicore} {
+  func.func @TMOV_f32_128x64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>) attributes {pto.kernel} {
     %c0    = arith.constant 0     : index
     %c1    = arith.constant 1     : index
     %c128  = arith.constant 128   : index
@@ -211,7 +211,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 5: f16 64x64 (4096 elements)
-  func.func @TMOV_f16_64x64(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>) attributes {pto.aicore} {
+  func.func @TMOV_f16_64x64(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>) attributes {pto.kernel} {
     %c0    = arith.constant 0     : index
     %c1    = arith.constant 1     : index
     %c64   = arith.constant 64    : index
@@ -250,7 +250,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 6: f16 32x32 (1024 elements)
-  func.func @TMOV_f16_32x32(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>) attributes {pto.aicore} {
+  func.func @TMOV_f16_32x32(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>) attributes {pto.kernel} {
     %c0    = arith.constant 0     : index
     %c1    = arith.constant 1     : index
     %c32   = arith.constant 32    : index
@@ -289,7 +289,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 7: f16 128x128 (16384 elements)
-  func.func @TMOV_f16_128x128(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>) attributes {pto.aicore} {
+  func.func @TMOV_f16_128x128(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>) attributes {pto.kernel} {
     %c0     = arith.constant 0      : index
     %c1     = arith.constant 1      : index
     %c128   = arith.constant 128    : index
@@ -328,7 +328,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 8: u8 64x64 (4096 elements)
-  func.func @TMOV_u8_64x64(%src_ptr: !pto.ptr<ui8>, %dst_ptr: !pto.ptr<ui8>) attributes {pto.aicore} {
+  func.func @TMOV_u8_64x64(%src_ptr: !pto.ptr<ui8>, %dst_ptr: !pto.ptr<ui8>) attributes {pto.kernel} {
     %c0    = arith.constant 0     : index
     %c1    = arith.constant 1     : index
     %c64   = arith.constant 64    : index
@@ -367,7 +367,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 9: u8 128x128 (16384 elements)
-  func.func @TMOV_u8_128x128(%src_ptr: !pto.ptr<ui8>, %dst_ptr: !pto.ptr<ui8>) attributes {pto.aicore} {
+  func.func @TMOV_u8_128x128(%src_ptr: !pto.ptr<ui8>, %dst_ptr: !pto.ptr<ui8>) attributes {pto.kernel} {
     %c0     = arith.constant 0      : index
     %c1     = arith.constant 1      : index
     %c128   = arith.constant 128    : index

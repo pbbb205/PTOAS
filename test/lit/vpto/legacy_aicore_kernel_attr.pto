@@ -1,0 +1,35 @@
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto %s -o - | FileCheck %s --check-prefix=SPLIT
+// RUN: ( ptoas --pto-arch=a5 --pto-backend=vpto %s -o %t --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s --check-prefix=LLVM
+
+module attributes {pto.target_arch = "a5"} {
+  func.func @legacy_attr_kernel(%arg0: !pto.ptr<i16, gm>)
+      attributes {pto.aicore} {
+    %c0 = arith.constant 0 : i64
+    %c1 = arith.constant 1 : i64
+    %ub = pto.castptr %c0 : i64 -> !pto.ptr<i16, ub>
+    %mat = pto.castptr %c0 : i64 -> !pto.ptr<i16, l1>
+
+    pto.section.vector {
+      pto.mte_gm_ub %arg0, %ub, %c0, %c1
+        nburst(%c1, %c1, %c1)
+        : !pto.ptr<i16, gm>, !pto.ptr<i16, ub>, i64, i64, i64, i64, i64
+    }
+
+    pto.section.cube {
+      pto.copy_ubuf_to_cbuf %ub, %mat, %c0, %c1, %c1, %c0, %c0
+        : !pto.ptr<i16, ub>, !pto.ptr<i16, l1>, i64, i64, i64, i64, i64
+    }
+
+    return
+  }
+}
+
+// SPLIT: module attributes {pto.kernel_kind = #pto.kernel_kind<vector>
+// SPLIT: func.func @legacy_attr_kernel
+// SPLIT-SAME: attributes {pto.aicore}
+// SPLIT: module attributes {pto.kernel_kind = #pto.kernel_kind<cube>
+// SPLIT: func.func @legacy_attr_kernel
+// SPLIT-SAME: attributes {pto.aicore}
+
+// LLVM-DAG: llvm.func @legacy_attr_kernel_mix_aiv
+// LLVM-DAG: llvm.func @legacy_attr_kernel_mix_aic

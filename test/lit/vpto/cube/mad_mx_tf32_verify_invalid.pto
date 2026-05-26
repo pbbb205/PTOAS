@@ -12,7 +12,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
   func.func @mad_mx_tf32_invalid(
       %lhs: !pto.ptr<f8E4M3FN, l0a>,
       %rhs: !pto.ptr<f8E4M3FN, l0b>,
-      %dst: !pto.ptr<f32, l0c>) attributes {pto.aicore} {
+      %dst: !pto.ptr<f32, l0c>) attributes {pto.kernel} {
     %c16 = arith.constant 16 : i64
     pto.mad_mx %lhs, %rhs, %dst, %c16, %c16, %c16 tf32_mode(round_even)
       : !pto.ptr<f8E4M3FN, l0a>, !pto.ptr<f8E4M3FN, l0b>, !pto.ptr<f32, l0c>, i64, i64, i64

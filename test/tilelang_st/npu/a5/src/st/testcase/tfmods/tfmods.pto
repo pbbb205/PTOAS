@@ -15,7 +15,7 @@
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
 
   // Case 0: f32 32x64 (2048 elements)
-  func.func @TFMODS_f32_32x64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TFMODS_f32_32x64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c32   = arith.constant 32   : index
@@ -55,7 +55,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 1: f16 63x64 (4032 elements)
-  func.func @TFMODS_f16_63x64(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>, %scalar: f16) attributes {pto.aicore} {
+  func.func @TFMODS_f16_63x64(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<f16>, %scalar: f16) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c63   = arith.constant 63   : index
@@ -95,7 +95,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 2: f32 7x448 (3136 elements)
-  func.func @TFMODS_f32_7x448(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TFMODS_f32_7x448(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c7    = arith.constant 7    : index
@@ -135,7 +135,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 3: f32 256x16 (4096 elements)
-  func.func @TFMODS_f32_256x16(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TFMODS_f32_256x16(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<f32>, %scalar: f32) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c256  = arith.constant 256  : index

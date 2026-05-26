@@ -12,7 +12,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
                                 %a_scale_gm: !pto.ptr<f8E4M3FN, gm>,
                                 %b_scale_gm: !pto.ptr<f8E4M3FN, gm>,
                                 %bias_gm: !pto.ptr<f16, gm>,
-                                %c_gm: !pto.ptr<f32, gm>) attributes {pto.aicore} {
+                                %c_gm: !pto.ptr<f32, gm>) attributes {pto.kernel} {
     %c0_i64 = arith.constant 0 : i64
     %c1_i64 = arith.constant 1 : i64
     %c16_i64 = arith.constant 16 : i64

@@ -9,7 +9,7 @@
 // RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto %s -o %t --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
 
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
-  func.func @vcvt_u32_to_u8_packed_parts(%seed: ui32, %dst: !pto.ptr<ui8, ub>) attributes {pto.aicore} {
+  func.func @vcvt_u32_to_u8_packed_parts(%seed: ui32, %dst: !pto.ptr<ui8, ub>) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     pto.vecscope {
       %mask = pto.pset_b8 "PAT_ALL" : !pto.mask<b8>

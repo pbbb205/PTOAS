@@ -13,7 +13,7 @@
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
   // Case 0: ui32 4x256 (1024 elements, valid=4x256)
   // Key and counter passed as ui32 arrays, converted to i32 for pto.trandom (which requires signless)
-  func.func @TRANDOM_int32_4x256(%key_ptr: !pto.ptr<ui32>, %counter_ptr: !pto.ptr<ui32>, %output_ptr: !pto.ptr<ui32>) attributes {pto.aicore} {
+  func.func @TRANDOM_int32_4x256(%key_ptr: !pto.ptr<ui32>, %counter_ptr: !pto.ptr<ui32>, %output_ptr: !pto.ptr<ui32>) attributes {pto.kernel} {
     %c0     = arith.constant 0     : index
     %c1     = arith.constant 1     : index
     %c2     = arith.constant 2     : index

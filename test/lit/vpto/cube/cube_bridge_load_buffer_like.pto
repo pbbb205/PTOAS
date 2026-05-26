@@ -19,7 +19,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
       %dst_right: memref<?xf16, #pto.address_space<right>>,
       %dst_left_mx: memref<?xf16, #pto.address_space<left>>,
       %dst_right_mx: memref<?xf16, #pto.address_space<right>>,
-      %dst_bias: memref<?xf32, #pto.address_space<bias>>) attributes {pto.aicore} {
+      %dst_bias: memref<?xf32, #pto.address_space<bias>>) attributes {pto.kernel} {
     %c0_i64 = arith.constant 0 : i64
     %c2_i64 = arith.constant 2 : i64
     %c4_i64 = arith.constant 4 : i64
@@ -41,7 +41,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
 }
 
 // ROUNDTRIP-LABEL: func.func @cube_bridge_load_buffer_like(
-// ROUNDTRIP-SAME: %{{.*}}: !pto.ptr<f16, l1>, %{{.*}}: !pto.ptr<f16, l0a>, %{{.*}}: !pto.ptr<f16, l0b>, %{{.*}}: !pto.ptr<f16, l0a>, %{{.*}}: !pto.ptr<f16, l0b>, %{{.*}}: !pto.ptr<f32, bt>) attributes {pto.aicore} {
+// ROUNDTRIP-SAME: %{{.*}}: !pto.ptr<f16, l1>, %{{.*}}: !pto.ptr<f16, l0a>, %{{.*}}: !pto.ptr<f16, l0b>, %{{.*}}: !pto.ptr<f16, l0a>, %{{.*}}: !pto.ptr<f16, l0b>, %{{.*}}: !pto.ptr<f32, bt>) attributes {pto.kernel} {
 // ROUNDTRIP: pto.mte_l1_l0a %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}
 // ROUNDTRIP: pto.mte_l1_l0b %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}} {transpose = true}
 // ROUNDTRIP: pto.mte_l1_l0a_mx %{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}

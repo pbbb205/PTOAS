@@ -19,7 +19,7 @@
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
   // ========== Case 8: uint16, src=259x7, dst=260x32, LoadPad=Min, FillPad=Max ==========
 
-  func.func @TFILLPAD_EXPAND_u16_260x32_src_259x7(%src_ptr: !pto.ptr<ui16>, %dst_ptr: !pto.ptr<ui16>) attributes {pto.aicore} {
+  func.func @TFILLPAD_EXPAND_u16_260x32_src_259x7(%src_ptr: !pto.ptr<ui16>, %dst_ptr: !pto.ptr<ui16>) attributes {pto.kernel} {
     %c0     = arith.constant 0     : index
     %c1     = arith.constant 1     : index
     %c7     = arith.constant 7     : index
@@ -70,7 +70,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 
   // ========== Case 9: int8, src=259x7, dst=260x64, LoadPad=Min, FillPad=Max ==========
 
-  func.func @TFILLPAD_EXPAND_s8_260x64_src_259x7(%src_ptr: !pto.ptr<i8>, %dst_ptr: !pto.ptr<i8>) attributes {pto.aicore} {
+  func.func @TFILLPAD_EXPAND_s8_260x64_src_259x7(%src_ptr: !pto.ptr<i8>, %dst_ptr: !pto.ptr<i8>) attributes {pto.kernel} {
     %c0     = arith.constant 0     : index
     %c1     = arith.constant 1     : index
     %c7     = arith.constant 7     : index

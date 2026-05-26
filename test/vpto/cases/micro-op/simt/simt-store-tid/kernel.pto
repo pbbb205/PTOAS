@@ -1,5 +1,5 @@
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
-  func.func @simt_store_tid_kernel(%arg0: !pto.ptr<i32, gm>) attributes {pto.aicore} {
+  func.func @simt_store_tid_kernel(%arg0: !pto.ptr<i32, gm>) attributes {pto.kernel} {
     %c0_i64 = arith.constant 0 : i64
     %c32_i64 = arith.constant 32 : i64
     %c128_i64 = arith.constant 128 : i64

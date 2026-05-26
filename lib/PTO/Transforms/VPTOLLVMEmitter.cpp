@@ -54,9 +54,15 @@ void attachHIVMKernelAnnotations(llvm::Module &llvmModule);
 
 namespace {
 
-constexpr llvm::StringLiteral kAICoreAttrName = "pto.aicore";
+constexpr llvm::StringLiteral kPTOKernelAttrName = "pto.kernel";
+constexpr llvm::StringLiteral kLegacyPTOAICoreAttrName = "pto.aicore";
 constexpr llvm::StringLiteral kVectorSuffix = "_mix_aiv";
 constexpr llvm::StringLiteral kCubeSuffix = "_mix_aic";
+
+static bool hasVPTOKernelAttr(Operation *op) {
+  return op->hasAttr(kPTOKernelAttrName) ||
+         op->hasAttr(kLegacyPTOAICoreAttrName);
+}
 
 static std::string getElementTypeFragment(Type type);
 static Type getElementTypeFromVectorLike(Type type);
@@ -7807,7 +7813,7 @@ getUniqueDeviceModuleByKernelKind(ModuleOp module, FunctionKernelKind kind,
   return matched;
 }
 
-static LogicalResult renameAICoreFunctionsForKernelKind(ModuleOp module,
+static LogicalResult renameKernelFunctionsForKernelKind(ModuleOp module,
                                                         llvm::raw_ostream &diagOS) {
   auto kernelKind = getKernelKind(module);
   if (!kernelKind) {
@@ -7828,7 +7834,7 @@ static LogicalResult renameAICoreFunctionsForKernelKind(ModuleOp module,
   }
 
   for (func::FuncOp funcOp : module.getOps<func::FuncOp>()) {
-    if (!funcOp->hasAttr(kAICoreAttrName))
+    if (!hasVPTOKernelAttr(funcOp))
       continue;
     if (funcOp.getSymName().ends_with(suffix))
       continue;
@@ -7868,7 +7874,7 @@ struct PrepareVPTOLLVMLoweringPass final
     ModuleOp module = getOperation();
     pto::annotatePTOEntryFunctions(module);
     forceV300CtrlModeForVPTOFuncs(module);
-    if (failed(renameAICoreFunctionsForKernelKind(module, llvm::errs())))
+    if (failed(renameKernelFunctionsForKernelKind(module, llvm::errs())))
       signalPassFailure();
   }
 };

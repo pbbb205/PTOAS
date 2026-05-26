@@ -7,20 +7,20 @@ VPTO fatobj 工作流当前使用显式双 module 编程模型：
 ```mlir
 module attributes {pto.target_arch = "a5"} {
   module attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
-    func.func @kernel(...) attributes {pto.aicore} {
+    func.func @kernel(...) attributes {pto.kernel} {
       ...
     }
   }
 
   module attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
-    func.func @kernel(...) attributes {pto.aicore} {
+    func.func @kernel(...) attributes {pto.kernel} {
       ...
     }
   }
 }
 ```
 
-这个模型适合作为后端规范输入，但对手写 mixed kernel 不够紧凑。我们希望增加一个语法糖：用户可以在一个 `pto.aicore` 函数内用 `pto.section.vector` 和 `pto.section.cube` 分别编写 vector / cube 代码，VPTO 路径入口处立刻把它解包为现有双 module 形式。
+这个模型适合作为后端规范输入，但对手写 mixed kernel 不够紧凑。我们希望增加一个语法糖：用户可以在一个 `pto.kernel` 函数内用 `pto.section.vector` 和 `pto.section.cube` 分别编写 vector / cube 代码，VPTO 路径入口处立刻把它解包为现有双 module 形式。
 
 ## 调研结论
 
@@ -34,19 +34,19 @@ module attributes {pto.target_arch = "a5"} {
 
 5. VPTO fatobj 后端当前只认规范双 module：
    - `vpto-normalize-container` 把单个带 `pto.kernel_kind` 的 module 包成外层 container，并要求外层只包含带 `pto.kernel_kind` 的子 module。
-   - `VPTOLLVMEmitter` 按子 module 的 `pto.kernel_kind` 选择 cube/vector LLVM 目标，并给 `pto.aicore` 函数补 `_mix_aic` / `_mix_aiv` 后缀。
-   - `VPTOHostStubEmission` 根据同名 `pto.aicore` 函数生成一个 host stub，并校验 mixed variants 的签名一致。
+   - `VPTOLLVMEmitter` 按子 module 的 `pto.kernel_kind` 选择 cube/vector LLVM 目标，并给 `pto.kernel` 函数补 `_mix_aic` / `_mix_aiv` 后缀。
+   - `VPTOHostStubEmission` 根据同名 `pto.kernel` 函数生成一个 host stub，并校验 mixed variants 的签名一致。
 
 结论：新语法糖应复用现有 `pto.section.cube/vector` op，只新增 VPTO 入口解包 pass，不改变 LLVM emitter、host stub emission 和 fatobj emission 的核心模型。
 
 ## 输入形式
 
-语法糖输入是一个普通 kernel module，module 上不需要 `pto.kernel_kind`。同一个 `pto.aicore` 函数内可以包含一个 vector section、一个 cube section，或者只包含其中一个。
+语法糖输入是一个普通 kernel module，module 上不需要 `pto.kernel_kind`。同一个 `pto.kernel` 函数内可以包含一个 vector section、一个 cube section，或者只包含其中一个。旧属性名 `pto.aicore` 仍被兼容识别，但新输入应使用 `pto.kernel`。
 
 ```mlir
 module attributes {pto.target_arch = "a5"} {
   func.func @kernel(%src: !pto.ptr<i16, gm>, %dst: !pto.ptr<i16, gm>)
-      attributes {pto.aicore} {
+      attributes {pto.kernel} {
     %c0 = arith.constant 0 : i64
 
     pto.section.vector {
@@ -72,7 +72,7 @@ section 内的代码允许使用函数参数、函数内 section 外定义的 SS
 module attributes {pto.target_arch = "a5"} {
   module attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
     func.func @kernel(%src: !pto.ptr<i16, gm>, %dst: !pto.ptr<i16, gm>)
-        attributes {pto.aicore} {
+        attributes {pto.kernel} {
       // original function body with cube sections removed
       return
     }
@@ -80,7 +80,7 @@ module attributes {pto.target_arch = "a5"} {
 
   module attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
     func.func @kernel(%src: !pto.ptr<i16, gm>, %dst: !pto.ptr<i16, gm>)
-        attributes {pto.aicore} {
+        attributes {pto.kernel} {
       // original function body with vector sections removed
       return
     }
@@ -98,7 +98,7 @@ module attributes {pto.target_arch = "a5"} {
 
    如果顶层 module 自身带 `pto.kernel_kind`，则由 `vpto-normalize-container` 包一层外层 container。
 
-   如果顶层 module 不带 `pto.kernel_kind`，且含有 `pto.aicore` 函数内的 `pto.section.cube/vector`，则进入 section sugar 解包。
+   如果顶层 module 不带 `pto.kernel_kind`，且含有 `pto.kernel` 函数内的 `pto.section.cube/vector`，则进入 section sugar 解包。
 
 2. 为每个实际出现的 kernel kind 创建一个子 module。
 
@@ -108,9 +108,9 @@ module attributes {pto.target_arch = "a5"} {
 
    外层 module 保留 `pto.target_arch` 等 module 级公共属性。
 
-3. 为每个带 `pto.aicore` 的函数生成同名函数 variant。
+3. 为每个带 `pto.kernel` 的函数生成同名函数 variant。
 
-   输出函数保留原函数名、参数列表、结果类型和 `pto.aicore` 属性。后续 `VPTOLLVMEmitter` 仍负责补 `_mix_aiv` / `_mix_aic` 后缀。
+   输出函数保留原函数名、参数列表、结果类型和 `pto.kernel` 属性。后续 `VPTOLLVMEmitter` 仍负责补 `_mix_aiv` / `_mix_aic` 后缀。
 
    vector module 中放原函数的一个 clone，然后删除其中所有 `pto.section.cube`。
 
@@ -132,13 +132,13 @@ module attributes {pto.target_arch = "a5"} {
 
 ## 约束
 
-1. 一个 `pto.aicore` 函数内每种 section 最多出现一次。
+1. 一个 `pto.kernel` 函数内每种 section 最多出现一次。
 
 2. `pto.section.cube` 和 `pto.section.vector` 不能嵌套。
 
-3. section sugar 输入中，`pto.aicore` 函数 body 的顶层可包含公共前置定义、section op、同步/搬移等普通操作和 `return`。这些 section 外操作会被完整保留到每个目标函数中。
+3. section sugar 输入中，`pto.kernel` 函数 body 的顶层可包含公共前置定义、section op、同步/搬移等普通操作和 `return`。这些 section 外操作会被完整保留到每个目标函数中。
 
-4. 同一个输入 module 中如果有多个 `pto.aicore` 函数，则每个函数只进入它实际包含的 section kind 对应子 module。后续 host stub 继续要求同名 mixed variants 的签名一致。
+4. 同一个输入 module 中如果有多个 `pto.kernel` 函数，则每个函数只进入它实际包含的 section kind 对应子 module。后续 host stub 继续要求同名 mixed variants 的签名一致。
 
 5. helper 函数随目标 module 一起复制。无用 helper 可以交给后续 DCE 或保持存在，不作为 section sugar 的语义问题。
 
@@ -194,6 +194,6 @@ section.cube/vector -> kernel_kind module
    - 同一个函数里重复 vector section。
    - section 嵌套。
    - section 捕获不可克隆的外部 SSA 值。
-   - `pto.aicore` 函数有返回值。
+   - `pto.kernel` 函数有返回值。
 
 4. 把现有一个 mixed VPTO host validation case 改写成 section sugar 输入，确认 `ptoas --pto-backend=vpto` 仍能直接生成 fatobj 并通过 SIM。

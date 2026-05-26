@@ -9,7 +9,7 @@
 // RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto %s -o %t --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
 
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
-  func.func @vbitcast_f32_to_i32_store(%value: f32, %dst: !pto.ptr<i32, ub>) attributes {pto.aicore} {
+  func.func @vbitcast_f32_to_i32_store(%value: f32, %dst: !pto.ptr<i32, ub>) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     pto.vecscope {
       %mask = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>
@@ -20,7 +20,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
     return
   }
 
-  func.func @vbitcast_f32_to_i16x128_store(%value: f32, %dst: !pto.ptr<i16, ub>) attributes {pto.aicore} {
+  func.func @vbitcast_f32_to_i16x128_store(%value: f32, %dst: !pto.ptr<i16, ub>) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     pto.vecscope {
       %mask_f32 = pto.pset_b32 "PAT_ALL" : !pto.mask<b32>

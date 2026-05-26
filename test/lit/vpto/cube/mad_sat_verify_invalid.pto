@@ -12,7 +12,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
   func.func @mad_integer_sat_invalid(
       %lhs: !pto.ptr<i8, l0a>,
       %rhs: !pto.ptr<i8, l0b>,
-      %dst: !pto.ptr<i32, l0c>) attributes {pto.aicore} {
+      %dst: !pto.ptr<i32, l0c>) attributes {pto.kernel} {
     %c16 = arith.constant 16 : i64
     pto.mad %lhs, %rhs, %dst, %c16, %c16, %c16 sat
       : !pto.ptr<i8, l0a>, !pto.ptr<i8, l0b>, !pto.ptr<i32, l0c>, i64, i64, i64

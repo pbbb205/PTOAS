@@ -18,7 +18,7 @@
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
   func.func @cube_load_frac_nd2nz_kernel(%src_gm: !pto.ptr<f16, gm>,
                                          %id_gm: !pto.ptr<f16, gm>,
-                                         %out_gm: !pto.ptr<f32, gm>) attributes {pto.aicore} {
+                                         %out_gm: !pto.ptr<f32, gm>) attributes {pto.kernel} {
     %c0_i64 = arith.constant 0 : i64
     %c1_i64 = arith.constant 1 : i64
     %c32_i64 = arith.constant 32 : i64
@@ -82,7 +82,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
 
   func.func @cube_load_frac_dn2nz_kernel(%id_gm: !pto.ptr<f16, gm>,
                                          %src_gm: !pto.ptr<f16, gm>,
-                                         %out_gm: !pto.ptr<f32, gm>) attributes {pto.aicore} {
+                                         %out_gm: !pto.ptr<f32, gm>) attributes {pto.kernel} {
     %c0_i64 = arith.constant 0 : i64
     %c1_i64 = arith.constant 1 : i64
     %c2_i64 = arith.constant 2 : i64
@@ -132,7 +132,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
 
   func.func @cube_load_frac_nchw_nc1hwc0_kernel(%id_gm: !pto.ptr<f16, gm>,
                                                 %src_gm: !pto.ptr<f16, gm>,
-                                                %out_gm: !pto.ptr<f32, gm>) attributes {pto.aicore} {
+                                                %out_gm: !pto.ptr<f32, gm>) attributes {pto.kernel} {
     %c0_i64 = arith.constant 0 : i64
     %c1_i64 = arith.constant 1 : i64
     %c10_i64 = arith.constant 10 : i64
@@ -182,7 +182,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
 
   func.func @cube_load_frac_nchw_fz4d_kernel(%id_gm: !pto.ptr<f16, gm>,
                                              %src_gm: !pto.ptr<f16, gm>,
-                                             %out_gm: !pto.ptr<f32, gm>) attributes {pto.aicore} {
+                                             %out_gm: !pto.ptr<f32, gm>) attributes {pto.kernel} {
     %c0_i64 = arith.constant 0 : i64
     %c1_i64 = arith.constant 1 : i64
     %c2_i64 = arith.constant 2 : i64
@@ -235,7 +235,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
 
   func.func @cube_load_frac_ncdhw_ndc1hwc0_kernel(%id_gm: !pto.ptr<f16, gm>,
                                                   %src_gm: !pto.ptr<f16, gm>,
-                                                  %out_gm: !pto.ptr<f32, gm>) attributes {pto.aicore} {
+                                                  %out_gm: !pto.ptr<f32, gm>) attributes {pto.kernel} {
     %c0_i64 = arith.constant 0 : i64
     %c1_i64 = arith.constant 1 : i64
     %c7_i64 = arith.constant 7 : i64
@@ -285,7 +285,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
 
   func.func @cube_load_frac_ncdhw_fz3d_kernel(%id_gm: !pto.ptr<f16, gm>,
                                               %src_gm: !pto.ptr<f16, gm>,
-                                              %out_gm: !pto.ptr<f32, gm>) attributes {pto.aicore} {
+                                              %out_gm: !pto.ptr<f32, gm>) attributes {pto.kernel} {
     %c0_i64 = arith.constant 0 : i64
     %c1_i64 = arith.constant 1 : i64
     %c2_i64 = arith.constant 2 : i64

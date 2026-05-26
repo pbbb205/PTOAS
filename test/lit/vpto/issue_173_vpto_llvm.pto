@@ -11,7 +11,7 @@
 // Regression test for issue #173: signed and signless i16 vector stores should
 // share the same LLVM/HIVM declaration after VPTO type conversion.
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
-  func.func @store_signed_i16(%value: !pto.vreg<128xsi16>, %dst: !pto.ptr<si16, ub>) attributes {pto.aicore} {
+  func.func @store_signed_i16(%value: !pto.vreg<128xsi16>, %dst: !pto.ptr<si16, ub>) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     pto.vecscope {
       %mask = pto.pset_b16 "PAT_ALL" : !pto.mask<b16>
@@ -20,7 +20,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
     return
   }
 
-  func.func @store_signless_i16(%value: !pto.vreg<128xi16>, %dst: !pto.ptr<i16, ub>) attributes {pto.aicore} {
+  func.func @store_signless_i16(%value: !pto.vreg<128xi16>, %dst: !pto.ptr<i16, ub>) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     pto.vecscope {
       %mask = pto.pset_b16 "PAT_ALL" : !pto.mask<b16>

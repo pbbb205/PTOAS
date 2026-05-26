@@ -13,7 +13,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
       %lhs: !pto.ptr<f32, l0a>,
       %rhs: !pto.ptr<f32, l0b>,
       %dst: !pto.ptr<f32, l0c>,
-      %bias: !pto.ptr<f32, bt>) attributes {pto.aicore} {
+      %bias: !pto.ptr<f32, bt>) attributes {pto.kernel} {
     %c16 = arith.constant 16 : i64
     pto.mad %lhs, %rhs, %dst, %c16, %c16, %c16 unit_flag(check_only) disable_gemv sat tf32_mode(round_even) n_dir
       : !pto.ptr<f32, l0a>, !pto.ptr<f32, l0b>, !pto.ptr<f32, l0c>, i64, i64, i64

@@ -15,7 +15,7 @@
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
 
   // Case 0: f32 1x64 (64 elements)
-  func.func @TCMP_f32_1x64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<ui8>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TCMP_f32_1x64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<ui8>, %scalar: f32) attributes {pto.kernel} {
     %c0   = arith.constant 0   : index
     %c1   = arith.constant 1   : index
     %c64  = arith.constant 64  : index
@@ -54,7 +54,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 1: f32 4x64 (256 elements)
-  func.func @TCMP_f32_4x64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<ui8>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TCMP_f32_4x64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<ui8>, %scalar: f32) attributes {pto.kernel} {
     %c0   = arith.constant 0   : index
     %c1   = arith.constant 1   : index
     %c4   = arith.constant 4   : index
@@ -94,7 +94,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 2: f32 8x64 (512 elements)
-  func.func @TCMP_f32_8x64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<ui8>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TCMP_f32_8x64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<ui8>, %scalar: f32) attributes {pto.kernel} {
     %c0   = arith.constant 0   : index
     %c1   = arith.constant 1   : index
     %c8   = arith.constant 8   : index
@@ -134,7 +134,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 3: f32 32x64 (2048 elements)
-  func.func @TCMP_f32_32x64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<ui8>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TCMP_f32_32x64(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<ui8>, %scalar: f32) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c32   = arith.constant 32   : index
@@ -174,7 +174,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 4: f32 128x128 (16384 elements)
-  func.func @TCMP_f32_128x128(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<ui8>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TCMP_f32_128x128(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<ui8>, %scalar: f32) attributes {pto.kernel} {
     %c0     = arith.constant 0     : index
     %c1     = arith.constant 1     : index
     %c128   = arith.constant 128   : index
@@ -213,7 +213,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 5: i32 16x32 (512 elements)
-  func.func @TCMP_i32_16x32(%src_ptr: !pto.ptr<i32>, %dst_ptr: !pto.ptr<ui8>, %scalar: i32) attributes {pto.aicore} {
+  func.func @TCMP_i32_16x32(%src_ptr: !pto.ptr<i32>, %dst_ptr: !pto.ptr<ui8>, %scalar: i32) attributes {pto.kernel} {
     %c0   = arith.constant 0   : index
     %c1   = arith.constant 1   : index
     %c16  = arith.constant 16  : index
@@ -253,7 +253,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 6: i32 32x32 (1024 elements)
-  func.func @TCMP_i32_32x32(%src_ptr: !pto.ptr<i32>, %dst_ptr: !pto.ptr<ui8>, %scalar: i32) attributes {pto.aicore} {
+  func.func @TCMP_i32_32x32(%src_ptr: !pto.ptr<i32>, %dst_ptr: !pto.ptr<ui8>, %scalar: i32) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c32   = arith.constant 32   : index
@@ -292,7 +292,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 7: i32 64x64 tile with valid 32x64 (4096 elements, 2048 valid)
-  func.func @TCMP_i32_32x64_valid32x64(%src_ptr: !pto.ptr<i32>, %dst_ptr: !pto.ptr<ui8>, %scalar: i32) attributes {pto.aicore} {
+  func.func @TCMP_i32_32x64_valid32x64(%src_ptr: !pto.ptr<i32>, %dst_ptr: !pto.ptr<ui8>, %scalar: i32) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c32   = arith.constant 32   : index
@@ -332,7 +332,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 8: f32 7x448 (3136 elements)
-  func.func @TCMP_f32_7x448(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<ui8>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TCMP_f32_7x448(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<ui8>, %scalar: f32) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c7    = arith.constant 7    : index
@@ -372,7 +372,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 9: f32 256x16 (4096 elements)
-  func.func @TCMP_f32_256x16(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<ui8>, %scalar: f32) attributes {pto.aicore} {
+  func.func @TCMP_f32_256x16(%src_ptr: !pto.ptr<f32>, %dst_ptr: !pto.ptr<ui8>, %scalar: f32) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c256  = arith.constant 256  : index
@@ -412,7 +412,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 10: i32 31x128 (3968 elements)
-  func.func @TCMP_i32_31x128(%src_ptr: !pto.ptr<i32>, %dst_ptr: !pto.ptr<ui8>, %scalar: i32) attributes {pto.aicore} {
+  func.func @TCMP_i32_31x128(%src_ptr: !pto.ptr<i32>, %dst_ptr: !pto.ptr<ui8>, %scalar: i32) attributes {pto.kernel} {
     %c0    = arith.constant 0     : index
     %c1    = arith.constant 1     : index
     %c31   = arith.constant 31    : index
@@ -452,7 +452,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 11: f16 32x128 (4096 elements)
-  func.func @TCMP_f16_32x128(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<ui8>, %scalar: f16) attributes {pto.aicore} {
+  func.func @TCMP_f16_32x128(%src_ptr: !pto.ptr<f16>, %dst_ptr: !pto.ptr<ui8>, %scalar: f16) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c32   = arith.constant 32   : index
@@ -492,7 +492,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
 
   // Case 12: i16 32x128 (4096 elements)
-  func.func @TCMP_i16_32x128(%src_ptr: !pto.ptr<i16>, %dst_ptr: !pto.ptr<ui8>, %scalar: i16) attributes {pto.aicore} {
+  func.func @TCMP_i16_32x128(%src_ptr: !pto.ptr<i16>, %dst_ptr: !pto.ptr<ui8>, %scalar: i16) attributes {pto.kernel} {
     %c0    = arith.constant 0    : index
     %c1    = arith.constant 1    : index
     %c32   = arith.constant 32   : index

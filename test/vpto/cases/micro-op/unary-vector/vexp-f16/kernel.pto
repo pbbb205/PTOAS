@@ -6,7 +6,7 @@
 // NOTE: f16 vector exp baseline.
 // -----------------------------------------------------------------------------
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
-  func.func @vexp_f16_kernel_2d(%arg0: !pto.ptr<f16, gm>, %arg1: !pto.ptr<f16, gm>) attributes {pto.aicore} {
+  func.func @vexp_f16_kernel_2d(%arg0: !pto.ptr<f16, gm>, %arg1: !pto.ptr<f16, gm>) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c128 = arith.constant 128 : index

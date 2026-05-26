@@ -8,14 +8,14 @@
 module attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
   func.func @helper(...) {
   }
-  func.func @foo(...) attributes {pto.aicore} {
+  func.func @foo(...) attributes {pto.kernel} {
     ...
   }
 }
 
 module attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
   func.func @helper(...) {}
-  func.func @foo(...) attributes {pto.aicore} {
+  func.func @foo(...) attributes {pto.kernel} {
     ...
   }
 }
@@ -23,7 +23,7 @@ module attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
 
 允许只有一个 module，但是最多每个 kernel_kind 一个 module，只有vector|cube两类 module
 
-带 `pto.aicore` 的函数在输入中保留逻辑函数名，不要求输入侧手工拼接 `_mix_aic` / `_mix_aiv` 后缀。
+带 `pto.kernel` 的函数在输入中保留逻辑函数名，不要求输入侧手工拼接 `_mix_aic` / `_mix_aiv` 后缀。旧属性名 `pto.aicore` 仍被兼容识别，但新输入应使用 `pto.kernel`。
 
 ### 输出
 
@@ -67,9 +67,9 @@ module {
 
 ### `VPTOHostStubEmission`
 
-1. 负责 stub 源码字符串的生成，依据输入中 `pto.aicore` 函数的签名和符号约定生成对应 stub
+1. 负责 stub 源码字符串的生成，依据输入中 `pto.kernel` 函数的签名和符号约定生成对应 stub
 
-2. cube 和 vector module 中的同名 `pto.aicore` 函数共享同一个 stub 函数
+2. cube 和 vector module 中的同名 `pto.kernel` 函数共享同一个 stub 函数
 
 ### `VPTOLLVMEmitter`
 
@@ -77,7 +77,7 @@ module {
 
 2. 对外职责是接收嵌套 module 输入，并输出按 `kernel_kind` 拆分好的 vector / cube llvm module
 
-3. 对带 `pto.aicore` 的函数，按所属 `kernel_kind` 自动补真实 device 符号后缀：
+3. 对带 `pto.kernel` 的函数，按所属 `kernel_kind` 自动补真实 device 符号后缀：
 
 - vector 补 `_mix_aiv`
 - cube 补 `_mix_aic`

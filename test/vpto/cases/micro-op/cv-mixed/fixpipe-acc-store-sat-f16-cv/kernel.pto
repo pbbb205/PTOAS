@@ -26,7 +26,7 @@ module attributes {pto.target_arch = "a5"} {
                                                  %out_gm_nosat_gm: !pto.ptr<f16, gm>,
                                                  %out_l1_sat_gm: !pto.ptr<f16, gm>,
                                                  %out_l1_nosat_gm: !pto.ptr<f16, gm>)
-      attributes {pto.aicore} {
+      attributes {pto.kernel} {
     %c0_i64 = arith.constant 0 : i64
     %c1_i64 = arith.constant 1 : i64
     %c8_i64 = arith.constant 8 : i64

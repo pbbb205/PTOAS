@@ -21,7 +21,7 @@ module attributes {pto.target_arch = "a5"} {
                                                     %out_atomic_add_gm: !pto.ptr<f32, gm>,
                                                     %out_atomic_max_gm: !pto.ptr<f32, gm>,
                                                     %out_atomic_min_gm: !pto.ptr<f32, gm>)
-      attributes {pto.aicore} {
+      attributes {pto.kernel} {
     %c0_i64 = arith.constant 0 : i64
     %c1_i64 = arith.constant 1 : i64
     %c40_i64 = arith.constant 40 : i64

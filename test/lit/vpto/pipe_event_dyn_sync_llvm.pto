@@ -16,7 +16,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   // Section 1: Basic index type event ID
   // ===----------------------------------------------------------------------===
   
-  func.func @pipe_event_dyn_sync_basic(%event_id: index) attributes {pto.aicore} {
+  func.func @pipe_event_dyn_sync_basic(%event_id: index) attributes {pto.kernel} {
     pto.set_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %event_id]
     pto.wait_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_MTE3>, %event_id]
     return
@@ -27,14 +27,14 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   // ===----------------------------------------------------------------------===
   
   // Test minimum pipe values: PIPE_S=0, PIPE_V=1, PIPE_M=2
-  func.func @pipe_event_dyn_sync_min_pipes(%eid: index) attributes {pto.aicore} {
+  func.func @pipe_event_dyn_sync_min_pipes(%eid: index) attributes {pto.kernel} {
     pto.set_flag_dyn [#pto.pipe<PIPE_S>, #pto.pipe<PIPE_V>, %eid]
     pto.wait_flag_dyn [#pto.pipe<PIPE_S>, #pto.pipe<PIPE_M>, %eid]
     return
   }
   
   // Test MTE pipes: PIPE_MTE1=3, PIPE_MTE2=4, PIPE_MTE3=5, PIPE_MTE4=7, PIPE_MTE5=8
-  func.func @pipe_event_dyn_sync_mte_pipes(%eid: index) attributes {pto.aicore} {
+  func.func @pipe_event_dyn_sync_mte_pipes(%eid: index) attributes {pto.kernel} {
     pto.set_flag_dyn [#pto.pipe<PIPE_MTE1>, #pto.pipe<PIPE_MTE2>, %eid]
     pto.wait_flag_dyn [#pto.pipe<PIPE_MTE3>, #pto.pipe<PIPE_MTE4>, %eid]
     pto.set_flag_dyn [#pto.pipe<PIPE_MTE5>, #pto.pipe<PIPE_V>, %eid]
@@ -42,14 +42,14 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   }
   
   // Test high pipe values: PIPE_FIX=10, PIPE_V2=9, PIPE_ALL=6
-  func.func @pipe_event_dyn_sync_high_pipes(%eid: index) attributes {pto.aicore} {
+  func.func @pipe_event_dyn_sync_high_pipes(%eid: index) attributes {pto.kernel} {
     pto.set_flag_dyn [#pto.pipe<PIPE_FIX>, #pto.pipe<PIPE_V2>, %eid]
     pto.wait_flag_dyn [#pto.pipe<PIPE_ALL>, #pto.pipe<PIPE_FIX>, %eid]
     return
   }
   
   // Test virtual pipes: VIRTUAL_PIPE_MTE2_L1A=11, VIRTUAL_PIPE_MTE2_L1B=12
-  func.func @pipe_event_dyn_sync_virtual_pipes(%eid: index) attributes {pto.aicore} {
+  func.func @pipe_event_dyn_sync_virtual_pipes(%eid: index) attributes {pto.kernel} {
     pto.set_flag_dyn [#pto.pipe<VIRTUAL_PIPE_MTE2_L1A>, #pto.pipe<VIRTUAL_PIPE_MTE2_L1B>, %eid]
     pto.wait_flag_dyn [#pto.pipe<VIRTUAL_PIPE_MTE2_L1A>, #pto.pipe<VIRTUAL_PIPE_MTE2_L1B>, %eid]
     return
@@ -59,7 +59,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   // Section 3: Computed event IDs
   // ===----------------------------------------------------------------------===
   
-  func.func @pipe_event_dyn_sync_computed(%base: index, %offset: index) attributes {pto.aicore} {
+  func.func @pipe_event_dyn_sync_computed(%base: index, %offset: index) attributes {pto.kernel} {
     %eid = arith.addi %base, %offset : index
     pto.set_flag_dyn [#pto.pipe<PIPE_V>, #pto.pipe<PIPE_M>, %eid]
     pto.wait_flag_dyn [#pto.pipe<PIPE_V>, #pto.pipe<PIPE_M>, %eid]
@@ -70,7 +70,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   // Section 4: Constant event IDs
   // ===----------------------------------------------------------------------===
   
-  func.func @pipe_event_dyn_sync_const() attributes {pto.aicore} {
+  func.func @pipe_event_dyn_sync_const() attributes {pto.kernel} {
     %c7 = arith.constant 7 : index
     pto.set_flag_dyn [#pto.pipe<PIPE_MTE3>, #pto.pipe<PIPE_MTE4>, %c7]
     pto.wait_flag_dyn [#pto.pipe<PIPE_MTE3>, #pto.pipe<PIPE_MTE4>, %c7]
@@ -81,12 +81,12 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
   // Section 5: Standalone operations (not paired)
   // ===----------------------------------------------------------------------===
   
-  func.func @pipe_event_dyn_sync_only_set(%eid: index) attributes {pto.aicore} {
+  func.func @pipe_event_dyn_sync_only_set(%eid: index) attributes {pto.kernel} {
     pto.set_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_V>, %eid]
     return
   }
   
-  func.func @pipe_event_dyn_sync_only_wait(%eid: index) attributes {pto.aicore} {
+  func.func @pipe_event_dyn_sync_only_wait(%eid: index) attributes {pto.kernel} {
     pto.wait_flag_dyn [#pto.pipe<PIPE_MTE2>, #pto.pipe<PIPE_V>, %eid]
     return
   }

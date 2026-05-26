@@ -1123,7 +1123,7 @@ void LaunchTSUB_f32_16x64(float *a, float *b, float *c, void *stream) {
 ```
 
 关键约束：
-- `extern "C" __global__ AICORE void ...` 声明需要和 `.pto` 中的 `pto.aicore` 函数签名对应
+- `extern "C" __global__ AICORE void ...` 声明需要和 `.pto` 中的 `pto.kernel` 函数签名对应
 - kernel 参数类型和顺序必须与 `.pto` 中函数签名一致
 - `<<<1, nullptr, stream>>>` 表示单核启动
 
@@ -1310,7 +1310,7 @@ build/testcase/tsub/
 | 阶段 | 排查方向 |
 |---|---|
 | `ptoas` 编译失败 | 检查 `.pto` 语法、TileLang 模板是否匹配、是否缺少 `--enable-tile-op-expand` |
-| fatobj 生成失败 | 检查 `ptoas` stderr、`.pto` 语义和 `pto.aicore` 函数签名 |
+| fatobj 生成失败 | 检查 `ptoas` stderr、`.pto` 语义和 `pto.kernel` 函数签名 |
 | 链接失败 | 检查共享库符号名一致性、ACL 运行时依赖 |
 | kernel 执行失败 | 确认 `build/testcase/<op>/<case>/input*.bin` 是否已生成 |
 | compare fail | 先检查 `output.bin` vs `golden.bin` 差异，再检查 `.pto` 语义和参数顺序 |

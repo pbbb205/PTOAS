@@ -26,6 +26,10 @@ using namespace mlir::pto;
 
 namespace {
 
+static bool hasVPTOKernelAttr(Operation *op) {
+  return op->hasAttr("pto.kernel") || op->hasAttr("pto.aicore");
+}
+
 static bool hasKernelKind(ModuleOp module) {
   return module->hasAttr(FunctionKernelKindAttr::name);
 }
@@ -38,7 +42,7 @@ static bool hasKernelKindChildModule(ModuleOp module) {
 static bool hasCVSections(ModuleOp module) {
   bool found = false;
   module.walk([&](func::FuncOp funcOp) {
-    if (found || !funcOp->hasAttr("pto.aicore"))
+    if (found || !hasVPTOKernelAttr(funcOp))
       return WalkResult::advance();
     WalkResult result = funcOp.walk([&](Operation *op) {
       if (isa<SectionCubeOp, SectionVectorOp>(op)) {
@@ -56,7 +60,7 @@ static bool hasCVSections(ModuleOp module) {
 static bool hasSectionKind(ModuleOp module, FunctionKernelKind kind) {
   bool found = false;
   module.walk([&](func::FuncOp funcOp) {
-    if (found || !funcOp->hasAttr("pto.aicore"))
+    if (found || !hasVPTOKernelAttr(funcOp))
       return WalkResult::advance();
     WalkResult result = funcOp.walk([&](Operation *op) {
       bool matches = kind == FunctionKernelKind::Cube
@@ -118,10 +122,10 @@ static LogicalResult verifyNoNestedSections(ModuleOp module) {
   return status;
 }
 
-static LogicalResult verifyAICoreFunctionsUseSections(ModuleOp module) {
+static LogicalResult verifyKernelFunctionsUseSections(ModuleOp module) {
   LogicalResult status = success();
   module.walk([&](func::FuncOp funcOp) {
-    if (failed(status) || !funcOp->hasAttr("pto.aicore"))
+    if (failed(status) || !hasVPTOKernelAttr(funcOp))
       return WalkResult::advance();
     if (!hasAnySection(funcOp)) {
       status = funcOp.emitOpError(
@@ -137,7 +141,7 @@ static LogicalResult verifyAICoreFunctionsUseSections(ModuleOp module) {
 static LogicalResult verifyUniqueSectionKindsPerFunction(ModuleOp module) {
   LogicalResult status = success();
   module.walk([&](func::FuncOp funcOp) {
-    if (failed(status) || !funcOp->hasAttr("pto.aicore"))
+    if (failed(status) || !hasVPTOKernelAttr(funcOp))
       return WalkResult::advance();
     unsigned cubeCount = 0;
     unsigned vectorCount = 0;
@@ -160,11 +164,11 @@ static LogicalResult verifyUniqueSectionKindsPerFunction(ModuleOp module) {
   return status;
 }
 
-static void eraseAICoreFunctionsWithoutSectionKind(ModuleOp module,
+static void eraseKernelFunctionsWithoutSectionKind(ModuleOp module,
                                                    FunctionKernelKind kind) {
   SmallVector<func::FuncOp> eraseFuncs;
   module.walk([&](func::FuncOp funcOp) {
-    if (funcOp->hasAttr("pto.aicore") && !hasSectionKind(funcOp, kind))
+    if (hasVPTOKernelAttr(funcOp) && !hasSectionKind(funcOp, kind))
       eraseFuncs.push_back(funcOp);
   });
 
@@ -209,7 +213,7 @@ static ModuleOp cloneModuleForKind(ModuleOp source, FunctionKernelKind kind,
   auto cloned = cast<ModuleOp>(source->clone());
   cloned->setAttr(FunctionKernelKindAttr::name,
                   FunctionKernelKindAttr::get(cloned.getContext(), kind));
-  eraseAICoreFunctionsWithoutSectionKind(cloned, kind);
+  eraseKernelFunctionsWithoutSectionKind(cloned, kind);
   rewriteSectionsForKind(cloned, kind);
   builder.insert(cloned);
   return cloned;
@@ -222,7 +226,7 @@ static LogicalResult splitCVModule(ModuleOp module) {
     return success();
   if (failed(verifyNoNestedSections(module)))
     return failure();
-  if (failed(verifyAICoreFunctionsUseSections(module)))
+  if (failed(verifyKernelFunctionsUseSections(module)))
     return failure();
   if (failed(verifyUniqueSectionKindsPerFunction(module)))
     return failure();

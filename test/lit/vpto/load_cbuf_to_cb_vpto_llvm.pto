@@ -9,7 +9,7 @@
 // RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto %s -o %t --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
 
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
-  func.func @load_cbuf_to_cb_2dv2_control() attributes {pto.aicore} {
+  func.func @load_cbuf_to_cb_2dv2_control() attributes {pto.kernel} {
     %c0 = arith.constant 0 : i64
     %c2 = arith.constant 2 : i64
     %c3 = arith.constant 3 : i64

@@ -9,7 +9,7 @@
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
   func.func @mad_bf16bf16f32_kernel(%a_gm: !pto.ptr<bf16, gm>,
                         %b_gm: !pto.ptr<bf16, gm>,
-                        %c_gm: !pto.ptr<f32, gm>) attributes {pto.aicore} {
+                        %c_gm: !pto.ptr<f32, gm>) attributes {pto.kernel} {
     %c0_i64 = arith.constant 0 : i64
     %c1_i64 = arith.constant 1 : i64
     %c16_i64 = arith.constant 16 : i64

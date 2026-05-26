@@ -20,6 +20,10 @@ using namespace mlir;
 
 namespace {
 
+static bool hasVPTOKernelAttr(Operation *op) {
+  return op->hasAttr("pto.kernel") || op->hasAttr("pto.aicore");
+}
+
 struct VPTOKernelStubDecl {
   std::string logicalName;
   SmallVector<std::string> argTypes;
@@ -76,7 +80,7 @@ static LogicalResult collectVPTOKernelStubDecls(
   llvm::StringMap<unsigned> logicalNameToIndex;
 
   module.walk([&](func::FuncOp func) {
-    if (func.isExternal() || !func->hasAttr("pto.aicore"))
+    if (func.isExternal() || !hasVPTOKernelAttr(func))
       return;
 
     std::string logicalName = getLogicalKernelName(func.getSymName());
@@ -111,7 +115,7 @@ LogicalResult mlir::pto::emitVPTOHostStubSource(ModuleOp module,
     return failure();
 
   if (stubDecls.empty()) {
-    diagOS << "Error: no pto.aicore kernels found for host stub emission.\n";
+    diagOS << "Error: no pto.kernel functions found for host stub emission.\n";
     return failure();
   }
 

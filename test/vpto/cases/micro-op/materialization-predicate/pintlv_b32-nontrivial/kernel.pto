@@ -5,7 +5,7 @@
 // scenarios: predicate-transform, lane-order, nontrivial-pattern
 // -----------------------------------------------------------------------------
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
-  func.func @pintlv_b32_nontrivial_kernel_2d(%arg0: !pto.ptr<ui32, gm>) attributes {pto.aicore} {
+  func.func @pintlv_b32_nontrivial_kernel_2d(%arg0: !pto.ptr<ui32, gm>) attributes {pto.kernel} {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c32 = arith.constant 32 : index

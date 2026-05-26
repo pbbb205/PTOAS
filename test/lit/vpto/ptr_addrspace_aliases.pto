@@ -7,7 +7,7 @@ module {
       %l0b: !pto.ptr<f16, l0b>,
       %l0c: !pto.ptr<f32, l0c>,
       %bt: !pto.ptr<f32, bt>,
-      %fb: !pto.ptr<ui64, fb>) attributes {pto.aicore} {
+      %fb: !pto.ptr<ui64, fb>) attributes {pto.kernel} {
     return
   }
 
@@ -17,7 +17,7 @@ module {
       %right: !pto.ptr<f16, right>,
       %acc: !pto.ptr<f32, acc>,
       %bias: !pto.ptr<f32, bias>,
-      %scaling: !pto.ptr<ui64, scaling>) attributes {pto.aicore} {
+      %scaling: !pto.ptr<ui64, scaling>) attributes {pto.kernel} {
     return
   }
 }
