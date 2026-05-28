@@ -8,10 +8,16 @@
 
 import unittest
 import inspect
+from pathlib import Path
+import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from ptodsl.ptodsl import _ops, pto
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "ptodsl"))
+
+import ptodsl._ops as _ops
+from ptodsl import pto
 
 
 def _identity(value):

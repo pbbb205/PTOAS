@@ -28,7 +28,7 @@ from ptodsl import pto, scalar
 from ptodsl._bootstrap import make_context
 from ptodsl._runtime.launch import LaunchHandle, _marshal_launch_args
 from mlir.ir import Module
-from ptodsl_docs_fragment_fixtures import FRAGMENT_FIXTURES, render_fragment_fixture
+from support.docs_fragment_fixtures import FRAGMENT_FIXTURES, render_fragment_fixture
 
 FENCE_RE = re.compile(r"^```(?P<lang>[A-Za-z0-9_+-]*)\s*$")
 META_RE = re.compile(r"^\s*<!--\s*ptodsl-doc-(?P<kind>test|pending)\s*:\s*(?P<body>.*?)\s*-->\s*$")

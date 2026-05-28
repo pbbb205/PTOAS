@@ -144,7 +144,7 @@ scripts/sim_dsl.sh test/dsl-st/predicate_pack_launch.py
 如果只是先做编译链检查，也可以先跑：
 
 ```bash
-python3 test/python/ptodsl_jit_compile.py
+python3 ptodsl/tests/test_jit_compile.py
 ```
 
 ## 编写建议

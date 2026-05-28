@@ -13,10 +13,10 @@ set(_ptodsl_test_env
   "PATH=${CMAKE_BINARY_DIR}/tools/ptoas:${CMAKE_INSTALL_PREFIX}/bin:$ENV{PATH}"
 )
 
-function(add_ptodsl_python_test test_name script_name)
+function(add_ptodsl_python_test test_name script_path)
   add_test(
     NAME ${test_name}
-    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/${script_name}"
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/${script_path}"
   )
   set_tests_properties(${test_name} PROPERTIES
     LABELS "PTODSL"
@@ -24,11 +24,26 @@ function(add_ptodsl_python_test test_name script_name)
   )
 endfunction()
 
-add_ptodsl_python_test(ptodsl_compact_tile_buf_asm compact_tile_buf_asm.py)
-add_ptodsl_python_test(ptodsl_low_precision_types low_precision_types.py)
-add_ptodsl_python_test(ptodsl_docs_as_test ptodsl_docs_as_test.py)
-add_ptodsl_python_test(ptodsl_flash_attention_demo_compile ptodsl_flash_attention_demo_compile.py)
-add_ptodsl_python_test(ptodsl_jit_compile ptodsl_jit_compile.py)
-add_ptodsl_python_test(ptodsl_jit_diagnostics ptodsl_jit_diagnostics.py)
-add_ptodsl_python_test(ptodsl_ptoas_frontend_verify ptodsl_ptoas_frontend_verify.py)
-add_ptodsl_python_test(ptodsl_subkernel_diagnostics ptodsl_subkernel_diagnostics.py)
+# Auto-discover PTODSL Python regressions by filename convention:
+#   - ptodsl/tests/test_*.py
+file(
+  GLOB _ptodsl_test_files
+  CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/test_*.py"
+)
+
+list(SORT _ptodsl_test_files)
+
+foreach(test_file IN LISTS _ptodsl_test_files)
+  file(RELATIVE_PATH rel_path "${CMAKE_SOURCE_DIR}" "${test_file}")
+  get_filename_component(stem "${test_file}" NAME_WE)
+
+  if(stem MATCHES "^test_")
+    string(REGEX REPLACE "^test_" "" stem_suffix "${stem}")
+    set(test_name "ptodsl_${stem_suffix}")
+  else()
+    set(test_name "ptodsl_${stem}")
+  endif()
+
+  add_ptodsl_python_test("${test_name}" "${rel_path}")
+endforeach()

@@ -133,7 +133,7 @@ add_subdirectory(tools)
 if(BUILD_TESTING)
   enable_testing()
   if(PTO_ENABLE_PYTHON_BINDING)
-    add_subdirectory(test/python)
+    add_subdirectory(ptodsl/tests)
     add_test(
       NAME tilelang_dsl_import
       COMMAND "${Python3_EXECUTABLE}"

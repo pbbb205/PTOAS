@@ -41,7 +41,7 @@ cd $PTOAS_REPO_ROOT          # e.g. export PTOAS_REPO_ROOT=/workdir/ptoas_a5
 bash quick_install.sh
 
 # Set up environment in every new shell
-source set_ptoas_env.sh
+source scripts/ptoas_env.sh
 ```
 
 ---
@@ -57,7 +57,7 @@ pip install -e .
 
 ## JIT examples
 
-`ptodsl/examples/jit/` contains self-contained `@pto.jit` examples that cover
+`ptodsl/examples/` contains self-contained `@pto.jit` examples that cover
 both compile-only and end-to-end launch flows.
 
 ### Prerequisites for launch examples
@@ -71,7 +71,7 @@ Set up the environment in each new shell:
 
 ```bash
 cd $PTOAS_REPO_ROOT
-source set_ptoas_env.sh
+source scripts/ptoas_env.sh
 source "${ASCEND_HOME_PATH}/bin/setenv.bash"
 ```
 
@@ -87,7 +87,7 @@ Equivalent IR to the TileLang ST `tadd.pto` testcase.
 Compile-only:
 
 ```bash
-python3 ptodsl/examples/jit/tadd_launch.py --emit-mlir
+python3 ptodsl/examples/tadd_launch.py --emit-mlir
 ```
 
 Expected: MLIR containing `@TADD_f32_16x64` and `@TADD_f32_32x32`.
@@ -95,14 +95,14 @@ Expected: MLIR containing `@TADD_f32_16x64` and `@TADD_f32_32x32`.
 Optional PTOAS frontend smoke:
 
 ```bash
-python3 ptodsl/examples/jit/tadd_launch.py --emit-mlir > /tmp/tadd_dsl.mlir
+python3 ptodsl/examples/tadd_launch.py --emit-mlir > /tmp/tadd_dsl.mlir
 ptoas --emit-pto-ir /tmp/tadd_dsl.mlir -o - | head
 ```
 
 End-to-end under the `msprof` CPU simulator:
 
 ```bash
-scripts/sim_dsl.sh ptodsl/examples/jit/tadd_launch.py
+scripts/sim_dsl.sh ptodsl/examples/tadd_launch.py
 ```
 
 Expected output:
@@ -116,7 +116,7 @@ All cases passed.
 Direct run on a real NPU:
 
 ```bash
-python3 ptodsl/examples/jit/tadd_launch.py
+python3 ptodsl/examples/tadd_launch.py
 ```
 
 ### `flash_attention_softmax_launch.py`
@@ -129,13 +129,13 @@ UB and then uses a packed online-softmax recurrence so one NPU can stream
 Compile-only:
 
 ```bash
-python3 ptodsl/examples/jit/flash_attention_softmax_launch.py --emit-mlir
+python3 ptodsl/examples/flash_attention_softmax_launch.py --emit-mlir
 ```
 
 End-to-end under the `msprof` CPU simulator:
 
 ```bash
-scripts/sim_dsl.sh ptodsl/examples/jit/flash_attention_softmax_launch.py
+scripts/sim_dsl.sh ptodsl/examples/flash_attention_softmax_launch.py
 ```
 
 Expected output:
@@ -149,7 +149,7 @@ All cases passed.
 Direct run on a real NPU:
 
 ```bash
-python3 ptodsl/examples/jit/flash_attention_softmax_launch.py
+python3 ptodsl/examples/flash_attention_softmax_launch.py
 ```
 
 ### Launch artifacts
@@ -163,12 +163,12 @@ python3 ptodsl/examples/jit/flash_attention_softmax_launch.py
 
 ```bash
 cd $PTOAS_REPO_ROOT
-python3 test/python/ptodsl_jit_compile.py
-python3 test/python/ptodsl_jit_diagnostics.py
-python3 test/python/ptodsl_subkernel_diagnostics.py
-python3 test/python/ptodsl_flash_attention_demo_compile.py
-python3 test/python/ptodsl_ptoas_frontend_verify.py
-python3 test/python/ptodsl_docs_as_test.py
+python3 ptodsl/tests/test_jit_compile.py
+python3 ptodsl/tests/test_jit_diagnostics.py
+python3 ptodsl/tests/test_subkernel_diagnostics.py
+python3 ptodsl/tests/test_flash_attention_demo_compile.py
+python3 ptodsl/tests/test_ptoas_frontend_verify.py
+python3 ptodsl/tests/test_docs_as_test.py
 ```
 
 Expected output:
@@ -182,7 +182,11 @@ ptodsl_ptoas_frontend_verify: PASS
 ptodsl_docs_as_test: PASS
 ```
 
-`ptodsl_docs_as_test.py` is the docs-as-test regression for the PTODSL user
+`ptodsl/tests/` is the canonical home for PTODSL-specific regression scripts.
+The launchable sources under `ptodsl/examples/` remain examples; the
+regressions that protect them live here alongside compile-only and docs checks.
+
+`test_docs_as_test.py` is the docs-as-test regression for the PTODSL user
 guide under `ptodsl/docs/user_guide/`. It scans every Python fenced code block
 and requires each one to be explicitly classified with either
 `ptodsl-doc-test` or `ptodsl-doc-pending` metadata.
@@ -200,7 +204,7 @@ Run it directly while editing the manual:
 
 ```bash
 cd $PTOAS_REPO_ROOT
-python3 test/python/ptodsl_docs_as_test.py
+python3 ptodsl/tests/test_docs_as_test.py
 ```
 
 When it fails, the diagnostic includes the Markdown path, starting line number,
@@ -209,25 +213,25 @@ through generated IR logs.
 
 These PTODSL regressions are intentionally complementary:
 
-- `ptodsl_jit_compile.py` protects canonical authored compile probes and
+- `test_jit_compile.py` protects canonical authored compile probes and
   lowering contracts for the public PTODSL surface.
-- `ptodsl_flash_attention_demo_compile.py` protects the bundled
+- `test_flash_attention_demo_compile.py` protects the bundled
   `ptodsl/examplesflash_attention_sketch.py` authored demo as a stable end-to-end
   contract.
-- `ptodsl_ptoas_frontend_verify.py` protects the handoff from PTODSL-emitted
+- `test_ptoas_frontend_verify.py` protects the handoff from PTODSL-emitted
   MLIR into standalone `ptoas` frontend verification.
-- `ptodsl_docs_as_test.py` protects the user manual itself: documented
+- `test_docs_as_test.py` protects the user manual itself: documented
   self-contained examples must still compile, fixture-backed partial fragments
   must still compile inside their declared context, and explicitly marked
   pending snippets remain visible as docs/test debt.
 
-`ptodsl_docs_as_test.py` is not a replacement for the authored compile/demo
+`test_docs_as_test.py` is not a replacement for the authored compile/demo
 regressions above. It reuses the same compile-only and frontend-validation
 boundaries, but its job is to keep `ptodsl/docs/user_guide/` honest rather than
 to redefine the canonical demo contracts.
 
 The legacy `ptodsl/check_ir.py` script has been retired. PTODSL validation now
-lives under `test/python/` so every regression shares the same bootstrap,
+lives under `ptodsl/tests/` so every regression shares the same bootstrap,
 public surface, and canonical authored targets as the tracing/JIT
 implementation.
 

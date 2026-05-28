@@ -29,7 +29,7 @@ def resolve_ptoas_binary() -> Path:
         return Path(from_path)
 
     raise FileNotFoundError(
-        "unable to locate ptoas; build ptoas or add it to PATH after sourcing set_ptoas_env.sh"
+        "unable to locate ptoas; build ptoas or add it to PATH after sourcing scripts/ptoas_env.sh"
     )
 
 

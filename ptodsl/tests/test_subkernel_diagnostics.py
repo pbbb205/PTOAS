@@ -57,9 +57,12 @@ def host_tensor_operand_probe(tensor):
     pto.pipe_barrier(pto.Pipe.ALL)
 
 
-@pto.jit(target="a5")
-def host_tensor_into_subkernel_probe(A: pto.tensor_spec(rank=2, dtype=pto.f32)):
-    host_tensor_operand_probe(A)
+def define_host_tensor_into_subkernel_probe():
+    @pto.jit(target="a5")
+    def bad_probe(A: pto.tensor_spec(rank=2, dtype=pto.f32)):
+        host_tensor_operand_probe(A)
+
+    return bad_probe
 
 
 @pto.simt
@@ -121,10 +124,11 @@ def main() -> None:
         "@pto.jit positional parameters",
     )
     expect_raises(
-        host_tensor_into_subkernel_probe.compile,
+        define_host_tensor_into_subkernel_probe,
         TypeError,
-        "@pto.simd parameter 'tensor' uses a host tensor value",
-        "host tensors only belong at the @pto.jit boundary",
+        "@pto.jit positional parameter 'A' still uses legacy host-tensor entry annotation",
+        "no longer accepts pto.tensor_spec(...)",
+        "pto.make_tensor_view(...)",
     )
     expect_raises(
         nested_simt_from_simd_entry.compile,

@@ -175,7 +175,7 @@ chmod 700 "${RUNTIME_OUTPUT_DIR}"
 MSPROF_STDIO_LOG="${RUNTIME_OUTPUT_DIR}/msprof.stdout.log"
 
 source "${ASCEND_HOME_PATH}/bin/setenv.bash"
-source "${REPO_ROOT}/set_ptoas_env.sh"
+source "${REPO_ROOT}/scripts/ptoas_env.sh"
 export LD_LIBRARY_PATH="${SIM_LIB_DIR}:${LD_LIBRARY_PATH:-}"
 ulimit -n 65535
 
