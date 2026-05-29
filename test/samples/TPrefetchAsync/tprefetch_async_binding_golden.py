@@ -20,11 +20,6 @@ def main():
     dst = np.full((128,), -1.0, dtype=np.float32)
     dst.tofile("v2.bin")
 
-    # Placeholder backing storage for PrefetchAsyncContext. Board validation
-    # should pass a real SDMA workspace instead of using this buffer directly.
-    workspace = np.zeros((16 * 1024,), dtype=np.int8)
-    workspace.tofile("v3.bin")
-
     src.tofile("golden_v2.bin")
 
 
