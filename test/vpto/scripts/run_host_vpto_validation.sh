@@ -255,6 +255,7 @@ build_one_impl() {
   local launch_obj="${out_dir}/launch.o"
   local kernel_fatobj="${out_dir}/kernel.fatobj.o"
   local kernel_so="${out_dir}/lib${case_token}_kernel.so"
+  local -a ptoas_args=()
 
   [[ -f "${case_dir}/main.cpp" ]] || die "missing main.cpp for ${case_name}"
   [[ -f "${case_dir}/launch.cpp" ]] || die "missing launch.cpp for ${case_name}"
@@ -263,8 +264,14 @@ build_one_impl() {
   [[ -f "${case_dir}/kernel.pto" ]] ||
     die "missing kernel.pto for ${case_name}"
 
+  if [[ -f "${case_dir}/ptoas.flags" ]]; then
+    read -r -a ptoas_args < "${case_dir}/ptoas.flags"
+  else
+    read -r -a ptoas_args <<< "${PTOAS_FLAGS}"
+  fi
+
   log "[$case_name] step 1/4: emit kernel fatobj"
-  "${PTOAS_BIN}" ${PTOAS_FLAGS} \
+  "${PTOAS_BIN}" "${ptoas_args[@]}" \
     "${case_dir}/kernel.pto" -o "${kernel_fatobj}"
 
   log "[$case_name] step 2/4: build launch object"

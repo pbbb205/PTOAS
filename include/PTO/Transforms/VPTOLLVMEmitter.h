@@ -37,6 +37,11 @@ struct VPTOEmissionOptions {
 };
 
 struct EmittedLLVMModule {
+  void reset() {
+    module.reset();
+    context.reset();
+  }
+
   std::unique_ptr<llvm::LLVMContext> context;
   std::unique_ptr<llvm::Module> module;
 };

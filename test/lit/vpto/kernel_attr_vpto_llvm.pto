@@ -6,28 +6,12 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-#ifndef PTOAS_VPTO_HOST_STUB_EMISSION_H
-#define PTOAS_VPTO_HOST_STUB_EMISSION_H
+// RUN: ( mkdir -p %T && ptoas --pto-arch=a5 --pto-backend=vpto %s -o %t --mlir-print-ir-after=convert-func-to-llvm 2>&1 || true ) | FileCheck %s
 
-#include "mlir/IR/BuiltinOps.h"
-#include "mlir/Support/LLVM.h"
-#include "mlir/Support/LogicalResult.h"
-
-#include <string>
-
-namespace llvm {
-class raw_ostream;
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @kernel_attr_entry() attributes {pto.kernel} {
+    return
+  }
 }
 
-namespace mlir::pto {
-
-LogicalResult emitVPTOHostStubSource(ModuleOp module, std::string &stubSource,
-                                     llvm::raw_ostream &diagOS);
-
-LogicalResult emitVPTOHostStubSource(ArrayRef<ModuleOp> modules,
-                                     std::string &stubSource,
-                                     llvm::raw_ostream &diagOS);
-
-} // namespace mlir::pto
-
-#endif
+// CHECK-LABEL: llvm.func @kernel_attr_entry_mix_aiv

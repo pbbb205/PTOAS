@@ -2311,6 +2311,15 @@ bool mlir::pto::isScalarPtrOrMemRef(Type type) {
   return false;
 }
 
+bool mlir::pto::hasPTOKernelAttr(Operation *op) {
+  return op && (op->hasAttr(kPTOKernelAttrName) ||
+                op->hasAttr(kLegacyPTOAICoreAttrName));
+}
+
+bool mlir::pto::isPTOKernelFunction(func::FuncOp func) {
+  return func && !func.isDeclaration() && hasPTOKernelAttr(func.getOperation());
+}
+
 bool mlir::pto::hasExplicitPTOEntryAttr(func::FuncOp func) {
   return func && (func->hasAttrOfType<UnitAttr>(kPTOEntryAttrName) ||
                   func->hasAttrOfType<UnitAttr>(kLegacyHACCEntryAttrName));

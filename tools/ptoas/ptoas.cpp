@@ -6,11 +6,11 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
+#include "ptoas.h"
 #include "PTO/IR/PTO.h"
 #include "PTO/Transforms/VPTOLLVMEmitter.h"
 #include "PTO/Transforms/Passes.h"
 #include "PTO/Transforms/BufferizableOpInterfaceImpl.h"
-#include "VPTOFatobjEmission.h"
 #include "VPTOHostStubEmission.h"
 #include "TilelangDaemon.h"
 #include "PTO/Transforms/CppPostprocess.h"
@@ -29,7 +29,9 @@
 #include <cstring>
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Arith/Transforms/BufferizableOpInterfaceImpl.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/Dialect/Tensor/Transforms/BufferizableOpInterfaceImpl.h"
 #include "mlir/Target/Cpp/CppEmitter.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/ToolOutputFile.h"
@@ -90,8 +92,45 @@ using StringRefVector =
 
 int main(int argc, char **argv);
 
-static void printPTOASVersion(llvm::raw_ostream &os) {
-  os << "ptoas " << PTOAS_RELEASE_VERSION << "\n";
+void mlir::pto::registerPTOASDialects(DialectRegistry &registry) {
+  registry.insert<mlir::func::FuncDialect>();
+  registry.insert<mlir::tensor::TensorDialect>();
+  registry.insert<mlir::arith::ArithDialect>();
+  registry.insert<mlir::memref::MemRefDialect>();
+  registry.insert<mlir::affine::AffineDialect>();
+  registry.insert<mlir::cf::ControlFlowDialect>();
+  registry.insert<mlir::bufferization::BufferizationDialect>();
+  registry.insert<mlir::scf::SCFDialect>();
+  registry.insert<mlir::math::MathDialect>();
+
+  registry.insert<mlir::pto::PTODialect>();
+  arith::registerBufferizableOpInterfaceExternalModels(registry);
+  tensor::registerBufferizableOpInterfaceExternalModels(registry);
+  pto::registerBufferizableOpInterfaceExternalModels(registry);
+
+  registry.insert<emitc::EmitCDialect>();
+  registry.insert<mlir::LLVM::LLVMDialect>();
+}
+
+void mlir::pto::registerPTOASPassesAndCLOptions() {
+  mlir::registerAllPasses();
+  mlir::pto::registerPTOPasses();
+  mlir::pto::registerPTOViewToMemrefPass();
+  mlir::pto::registerPTOInlineLibCall();
+  mlir::pto::registerFoldTileBufIntrinsics();
+  mlir::pto::registerExpandTileOp();
+  mlir::registerPassManagerCLOptions();
+}
+
+void mlir::pto::loadPTOASDialects(MLIRContext &context) {
+  context.getOrLoadDialect<emitc::EmitCDialect>();
+  context.getOrLoadDialect<mlir::pto::PTODialect>();
+  context.getOrLoadDialect<func::FuncDialect>();
+  context.getOrLoadDialect<arith::ArithDialect>();
+  context.getOrLoadDialect<math::MathDialect>();
+  context.getOrLoadDialect<memref::MemRefDialect>();
+  context.getOrLoadDialect<affine::AffineDialect>();
+  context.getOrLoadDialect<mlir::LLVM::LLVMDialect>();
 }
 
 static std::string getParentDir(llvm::StringRef path) {
@@ -274,15 +313,6 @@ static LogicalResult reorderEmitCFunctions(ModuleOp module) {
 // --------------------------------------------------------------------------
 // Command Line Options
 // --------------------------------------------------------------------------
-static llvm::cl::opt<std::string> inputFilename(llvm::cl::Positional,
-                                                llvm::cl::desc("<input file>"),
-                                                llvm::cl::init("-"));
-
-static llvm::cl::opt<std::string> outputFilename("o",
-                                                 llvm::cl::desc("Output filename"),
-                                                 llvm::cl::value_desc("filename"),
-                                                 llvm::cl::init("-"));
-
 static llvm::cl::opt<bool> enableInsertSync("enable-insert-sync",
                                             llvm::cl::desc("Enable automatic synchronization insertion pass"),
                                             llvm::cl::init(false));
@@ -408,12 +438,12 @@ static llvm::cl::opt<bool> emitAddPtrTrace(
     llvm::cl::desc("Emit addptr trace comments in generated C++ output"),
     llvm::cl::init(false));
 
-static llvm::cl::opt<bool> emitMlirIR(
+llvm::cl::opt<bool> mlir::pto::emitMlirIR(
     "emit-pto-ir",
     llvm::cl::desc("Emit PTO IR after lowering instead of C++"),
     llvm::cl::init(false));
 
-static llvm::cl::opt<std::string> ptoTargetArch(
+llvm::cl::opt<std::string> mlir::pto::ptoTargetArch(
     "pto-arch",
     llvm::cl::desc("Target Ascend architecture for codegen: a3 or a5 (default: a3)"),
     llvm::cl::value_desc("a3|a5"),
@@ -425,12 +455,12 @@ static llvm::cl::opt<std::string> ptoBuildLevel(
     llvm::cl::value_desc("level1|level2|level3"),
     llvm::cl::init("level2"));
 
-static llvm::cl::opt<std::string> ptoBackend(
+llvm::cl::opt<std::string> mlir::pto::ptoBackend(
     "pto-backend",
     llvm::cl::desc("Final PTOAS backend: emitc or vpto (default: emitc)"),
     llvm::cl::value_desc("emitc|vpto"), llvm::cl::init("emitc"));
 
-static llvm::cl::opt<bool> emitVPTO(
+llvm::cl::opt<bool> mlir::pto::emitVPTO(
     "emit-vpto",
     llvm::cl::desc("Write final post-pass VPTO IR to -o"),
     llvm::cl::init(false));
@@ -451,12 +481,12 @@ static llvm::cl::opt<bool> dumpVPTOIR(
     llvm::cl::desc("Print post-pass VPTO backend IR to stderr"),
     llvm::cl::init(false));
 
-static llvm::cl::opt<bool> ptoPrintSeamIR(
+llvm::cl::opt<bool> mlir::pto::ptoPrintSeamIR(
     "pto-print-seam-ir",
     llvm::cl::desc("Print shared pre-backend seam IR to stderr"),
     llvm::cl::init(false));
 
-static llvm::cl::opt<std::string> ptoSeamIRFile(
+llvm::cl::opt<std::string> mlir::pto::ptoSeamIRFile(
     "pto-seam-ir-file",
     llvm::cl::desc("Write shared pre-backend seam IR to a file"),
     llvm::cl::value_desc("path"),
@@ -466,11 +496,6 @@ enum class PTOBuildLevel {
   Level1,
   Level2,
   Level3,
-};
-
-enum class PTOBackend {
-  EmitC,
-  VPTO,
 };
 
 static PTOBuildLevel defaultBuildLevel() {
@@ -513,21 +538,6 @@ static bool parseAutoSyncTailHint(llvm::StringRef hintStr, std::string &normaliz
       s == "setwait-mte3-to-s-event0" ||
       s == "setwait_mte3_to_s_event0") {
     normalized = kAutoSyncTailPolicyMte3ToSEvent0.str();
-    return true;
-  }
-  return false;
-}
-
-static bool parseBackend(llvm::StringRef backendStr, PTOBackend &out) {
-  std::string s = backendStr.str();
-  for (char &c : s)
-    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  if (s == "emitc") {
-    out = PTOBackend::EmitC;
-    return true;
-  }
-  if (s == "vpto") {
-    out = PTOBackend::VPTO;
     return true;
   }
   return false;
@@ -1505,38 +1515,37 @@ static pto::VPTOEmissionOptions buildVPTOEmissionOptions() {
   return options;
 }
 
-static int emitVPTOBackendResult(ModuleOp module,
-                                 llvm::ToolOutputFile &outputFile) {
+static int emitVPTOBackendResult(ModuleOp module, PTOASCompileResult &result,
+                                 bool emitHostStub) {
   if (emitVPTO) {
-    module.print(outputFile.os());
-    outputFile.os() << "\n";
-    outputFile.keep();
+    result.kind = PTOASCompileResultKind::Text;
+    llvm::raw_string_ostream os(result.textOutput);
+    module.print(os);
+    os << "\n";
+    os.flush();
     return 0;
   }
 
   pto::VPTOEmissionOptions options = buildVPTOEmissionOptions();
   std::string stubSource;
-  if (failed(pto::emitVPTOHostStubSource(module, stubSource, llvm::errs()))) {
-    llvm::errs() << "Error: Failed to emit VPTO host stub source.\n";
-    return 1;
+  if (emitHostStub) {
+    if (failed(pto::emitVPTOHostStubSource(module, stubSource, llvm::errs()))) {
+      llvm::errs() << "Error: Failed to emit VPTO host stub source.\n";
+      return 1;
+    }
   }
 
-  pto::EmittedLLVMModule cubeModule;
-  pto::EmittedLLVMModule vectorModule;
   if (failed(
-          pto::lowerVPTOModuleToLLVMModules(module, options, cubeModule,
-                                            vectorModule, llvm::errs()))) {
+          pto::lowerVPTOModuleToLLVMModules(module, options,
+                                            result.vptoCubeModule,
+                                            result.vptoVectorModule,
+                                            llvm::errs()))) {
     llvm::errs() << "Error: Failed to lower VPTO to LLVM modules.\n";
     return 1;
   }
 
-  if (failed(pto::emitVPTOFatobj(cubeModule.module.get(),
-                                 vectorModule.module.get(), stubSource,
-                                 outputFile, llvm::errs()))) {
-    llvm::errs() << "Error: Failed to emit VPTO fatobj.\n";
-    return 1;
-  }
-  outputFile.keep();
+  result.vptoStubSource = std::move(stubSource);
+  result.kind = PTOASCompileResultKind::VPTOObject;
   return 0;
 }
 
@@ -1563,151 +1572,17 @@ static LogicalResult runVPTOBackendPipeline(OwningOpRef<ModuleOp> &module,
   return success();
 }
 
-int main(int argc, char **argv) {
-  DialectRegistry registry;
-  registry.insert<mlir::func::FuncDialect>();
-  registry.insert<mlir::tensor::TensorDialect>();
-  registry.insert<mlir::arith::ArithDialect>();
-  registry.insert<mlir::memref::MemRefDialect>();
-  registry.insert<mlir::affine::AffineDialect>();
-  registry.insert<mlir::cf::ControlFlowDialect>();
-  registry.insert<mlir::bufferization::BufferizationDialect>();
-  registry.insert<mlir::scf::SCFDialect>();
-  registry.insert<mlir::math::MathDialect>();
-
-  registry.insert<mlir::pto::PTODialect>();
-  arith::registerBufferizableOpInterfaceExternalModels(registry);
-  tensor::registerBufferizableOpInterfaceExternalModels(registry);
-  pto::registerBufferizableOpInterfaceExternalModels(registry);
-
-  registry.insert<emitc::EmitCDialect>();
-  registry.insert<mlir::LLVM::LLVMDialect>();
-  mlir::registerAllPasses();
-  ::registerPTOPasses();
-  mlir::pto::registerPTOViewToMemrefPass();
-  ::registerPTOInlineLibCall();
-  ::registerFoldTileBufIntrinsics();
-  ::registerExpandTileOp();
-  mlir::registerPassManagerCLOptions();
-
-  llvm::cl::SetVersionPrinter(printPTOASVersion);
-
-  bool cliArchSpecified = false;
-  for (int i = 1; i < argc; ++i) {
-    llvm::StringRef arg(argv[i]);
-    if (arg == "--pto-arch" || arg.starts_with("--pto-arch="))
-      cliArchSpecified = true;
-  }
-
-  // Parse command line options
-  llvm::cl::ParseCommandLineOptions(argc, argv, "PTO Assembler (ptoas)\n");
-
-  PTOBackend effectiveBackend = PTOBackend::EmitC;
-  if (!parseBackend(ptoBackend, effectiveBackend)) {
-    llvm::errs() << "Error: invalid --pto-backend='" << ptoBackend
-                 << "'. Expected 'emitc' or 'vpto'.\n";
-    return 1;
-  }
+int mlir::pto::compilePTOASModule(
+    OwningOpRef<ModuleOp> &module, llvm::StringRef arch,
+    PTOBackend effectiveBackend, int argc, char **argv,
+    PTOASCompileResult &result, bool emitVPTOHostStub) {
+  result.reset();
 
   if (effectiveBackend != PTOBackend::VPTO &&
       (emitVPTO || ptoPrintSeamIR || !ptoSeamIRFile.empty())) {
     llvm::errs() << "Error: VPTO-specific flags require "
-                    "--pto-backend=vpto.\n";
+                    "--pto-backend=vpto or pto.backend = \"vpto\".\n";
     return 1;
-  }
-
-  // Read whole input first (so we can auto-detect .ptobc by magic).
-  auto fileOrErr = llvm::MemoryBuffer::getFileOrSTDIN(inputFilename);
-  if (!fileOrErr) {
-    llvm::errs() << "Error: Could not open input file: "
-                 << fileOrErr.getError().message() << "\n";
-    return 1;
-  }
-
-  MLIRContext context(registry);
-  // Be tolerant: ptobc decode may materialize ops from dialects that aren't
-  // explicitly registered/loaded in this tool yet.
-  context.allowUnregisteredDialects(true);
-
-  context.getOrLoadDialect<emitc::EmitCDialect>();
-  context.getOrLoadDialect<mlir::pto::PTODialect>();
-  context.getOrLoadDialect<func::FuncDialect>();
-  context.getOrLoadDialect<arith::ArithDialect>();
-  context.getOrLoadDialect<math::MathDialect>();
-  context.getOrLoadDialect<memref::MemRefDialect>();
-  context.getOrLoadDialect<affine::AffineDialect>();
-  context.getOrLoadDialect<mlir::LLVM::LLVMDialect>();
-
-  OwningOpRef<ModuleOp> module;
-  llvm::StringRef buf = (*fileOrErr)->getBuffer();
-  const bool isPTOBC = (buf.size() >= 6 && std::memcmp(buf.data(), "PTOBC\0", 6) == 0);
-
-  auto normalizeArch = [](llvm::StringRef archValue) {
-    std::string normalized = archValue.str();
-    for (char &c : normalized)
-      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    return normalized;
-  };
-  auto detectTextualModuleArch = [&](llvm::StringRef text) -> std::optional<std::string> {
-    StringRefVector matches;
-    llvm::Regex archRegex(
-        R"ptoarch("?(pto\.target_arch)"?[[:space:]]*=[[:space:]]*"([[:alpha:][:digit:]_]+)")ptoarch");
-    if (!archRegex.match(text, &matches) || matches.size() < 3)
-      return std::nullopt;
-    return normalizeArch(matches[2]);
-  };
-
-  std::string arch = normalizeArch(ptoTargetArch);
-  if (cliArchSpecified) {
-    if (arch != "a3" && arch != "a5") {
-      llvm::errs() << "Error: invalid --pto-arch='" << ptoTargetArch
-                   << "'. Expected 'a3' or 'a5'.\n";
-      return 1;
-    }
-  } else if (!isPTOBC) {
-    if (auto detectedArch = detectTextualModuleArch(buf))
-      arch = *detectedArch;
-  }
-  if (arch != "a3" && arch != "a5")
-    arch = "a3";
-
-  if (isPTOBC) {
-    // Decode PTO bytecode directly into an MLIR module.
-    llvm::ArrayRef<uint8_t> bytes(reinterpret_cast<const uint8_t *>(buf.data()), buf.size());
-#if defined(__cpp_exceptions) || defined(__EXCEPTIONS)
-    try {
-      module = ptobc::decodePTOBCToModule(bytes, context);
-    } catch (...) {
-      llvm::errs() << "Error: Failed to decode PTOBC.\n";
-      return 1;
-    }
-#else
-    module = ptobc::decodePTOBCToModule(bytes, context);
-#endif
-    if (!module) {
-      llvm::errs() << "Error: Failed to decode PTOBC.\n";
-      return 1;
-    }
-  } else {
-    // Parse textual MLIR (.pto).
-    llvm::SourceMgr sourceMgr;
-    sourceMgr.AddNewSourceBuffer(std::move(*fileOrErr), llvm::SMLoc());
-    pto::ScopedPTOParserTargetArch scopedParserArch(
-        &context, arch == "a5" ? pto::PTOParserTargetArch::A5
-                               : pto::PTOParserTargetArch::A3);
-    module = parseSourceFile<ModuleOp>(sourceMgr, &context);
-    if (!module) {
-      llvm::errs() << "Error: Failed to parse MLIR.\n";
-      return 1;
-    }
-  }
-
-  // If the CLI explicitly requested an arch, it overrides the input module.
-  // Otherwise, preserve the textual module's arch when present and only fall
-  // back to the effective default.
-  if (cliArchSpecified || !module->getOperation()->hasAttr("pto.target_arch")) {
-    module->getOperation()->setAttr("pto.target_arch",
-                                    mlir::StringAttr::get(&context, arch));
   }
 
   PTOBuildLevel effectiveLevel = defaultBuildLevel();
@@ -1752,7 +1627,7 @@ int main(int argc, char **argv) {
       return;
     }
     func->setAttr("pto.auto_sync_tail_hint",
-                  mlir::StringAttr::get(&context, normalizedHint));
+                  mlir::StringAttr::get(module->getContext(), normalizedHint));
   });
   if (invalidAutoSyncTailHint)
     return 1;
@@ -1820,14 +1695,6 @@ int main(int argc, char **argv) {
       return 1;
   }
 
-  // [Fix] ToolOutputFile Usage
-  std::error_code ec;
-  llvm::ToolOutputFile outputFile(outputFilename, ec, llvm::sys::fs::OF_None);
-  if (ec) {
-    llvm::errs() << ec.message() << "\n";
-    return 1;
-  }
-
   const bool hasTileOpsToExpand = hasUnexpandedTileOps(*module);
   const bool hasTilelangHelpers = hasTilelangInlineHelpers(*module);
 
@@ -1840,11 +1707,11 @@ int main(int argc, char **argv) {
     if (failed(runVPTOBackendPipeline(module, argc, argv, hasTileOpsToExpand,
                                       hasTilelangHelpers)))
       return 1;
-    return emitVPTOBackendResult(module.get(), outputFile);
+    return emitVPTOBackendResult(*module, result, emitVPTOHostStub);
   }
 
   // Main PassManager
-  PassManager pm(&context);
+  PassManager pm(module->getContext());
 
   if (failed(applyPassManagerCLOptions(pm)))
     return 1;
@@ -1906,8 +1773,10 @@ int main(int argc, char **argv) {
       llvm::errs() << "Error: Pass execution failed.\n";
       return 1;
     }
-    module->print(outputFile.os());
-    outputFile.keep();
+    result.kind = PTOASCompileResultKind::Text;
+    llvm::raw_string_ostream os(result.textOutput);
+    module->print(os);
+    os.flush();
     return 0;
   }
 
@@ -1919,7 +1788,7 @@ int main(int argc, char **argv) {
     return 1;
 
   module->getOperation()->setAttr("pto.target_arch",
-                                  mlir::StringAttr::get(&context, arch));
+                                  mlir::StringAttr::get(module->getContext(), arch));
 
   if (effectiveBackend == PTOBackend::VPTO) {
     if (failed(pm.run(*module))) {
@@ -1937,7 +1806,7 @@ int main(int argc, char **argv) {
     if (failed(runVPTOBackendPipeline(module, argc, argv, hasTileOpsToExpand,
                                       hasTilelangHelpers)))
       return 1;
-    return emitVPTOBackendResult(module.get(), outputFile);
+    return emitVPTOBackendResult(*module, result, emitVPTOHostStub);
   }
 
   if (arch == "a3") {
@@ -1983,10 +1852,7 @@ int main(int argc, char **argv) {
   rewriteScalarConstantDecls(cppOutput);
   rewriteHoistedGlobalTensorDecls(cppOutput);
 
-  outputFile.os() << cppOutput;
-  outputFile.os().flush();
-
-  outputFile.keep(); // Success, keep the file
-
+  result.kind = PTOASCompileResultKind::Text;
+  result.textOutput = std::move(cppOutput);
   return 0;
 }

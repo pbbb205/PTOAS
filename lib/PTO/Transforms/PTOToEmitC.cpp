@@ -3058,14 +3058,15 @@ struct FuncToEmitC : public OpConversionPattern<func::FuncOp> {
     }
 
     if (op.isDeclaration()) {
-      emitcFunc.setSpecifiersAttr(rewriter.getStrArrayAttr({"extern"}));
+      emitcFunc.setSpecifiersAttr(
+          rewriter.getStrArrayAttr({"extern \"C\"", "AICORE"}));
       rewriter.eraseOp(op);
       return success();
     }
 
     if (pto::isPTOEntryFunction(op)) {
       emitcFunc.setSpecifiersAttr(
-          rewriter.getStrArrayAttr({"__global__ AICORE"}));
+          rewriter.getStrArrayAttr({"extern \"C\"", "__global__ AICORE"}));
     } else if (op.isPrivate()) {
       emitcFunc.setSpecifiersAttr(
           rewriter.getStrArrayAttr({"static", "AICORE"}));

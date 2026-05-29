@@ -20,10 +20,6 @@ using namespace mlir;
 
 namespace {
 
-static bool hasVPTOKernelAttr(Operation *op) {
-  return op->hasAttr("pto.kernel") || op->hasAttr("pto.aicore");
-}
-
 struct VPTOKernelStubDecl {
   std::string logicalName;
   SmallVector<std::string> argTypes;
@@ -74,35 +70,37 @@ static std::string getStubCType(Type type) {
 } // namespace
 
 static LogicalResult collectVPTOKernelStubDecls(
-    ModuleOp module, SmallVectorImpl<VPTOKernelStubDecl> &decls,
+    ArrayRef<ModuleOp> modules, SmallVectorImpl<VPTOKernelStubDecl> &decls,
     llvm::raw_ostream &diagOS) {
   bool hadError = false;
   llvm::StringMap<unsigned> logicalNameToIndex;
 
-  module.walk([&](func::FuncOp func) {
-    if (func.isExternal() || !hasVPTOKernelAttr(func))
-      return;
+  for (ModuleOp module : modules) {
+    module.walk([&](func::FuncOp func) {
+      if (!pto::isPTOKernelFunction(func))
+        return;
 
-    std::string logicalName = getLogicalKernelName(func.getSymName());
-    SmallVector<std::string> argTypes;
-    argTypes.reserve(func.getNumArguments());
-    for (Type type : func.getArgumentTypes())
-      argTypes.push_back(getStubCType(type));
+      std::string logicalName = getLogicalKernelName(func.getSymName());
+      SmallVector<std::string> argTypes;
+      argTypes.reserve(func.getNumArguments());
+      for (Type type : func.getArgumentTypes())
+        argTypes.push_back(getStubCType(type));
 
-    auto [it, inserted] =
-        logicalNameToIndex.try_emplace(logicalName, decls.size());
-    if (inserted) {
-      decls.push_back(VPTOKernelStubDecl{logicalName, std::move(argTypes)});
-      return;
-    }
+      auto [it, inserted] =
+          logicalNameToIndex.try_emplace(logicalName, decls.size());
+      if (inserted) {
+        decls.push_back(VPTOKernelStubDecl{logicalName, std::move(argTypes)});
+        return;
+      }
 
-    VPTOKernelStubDecl &existing = decls[it->second];
-    if (existing.argTypes != argTypes) {
-      diagOS << "Error: mixed kernel variants disagree on host stub signature "
-             << "for '" << logicalName << "'.\n";
-      hadError = true;
-    }
-  });
+      VPTOKernelStubDecl &existing = decls[it->second];
+      if (existing.argTypes != argTypes) {
+        diagOS << "Error: mixed kernel variants disagree on host stub signature "
+               << "for '" << logicalName << "'.\n";
+        hadError = true;
+      }
+    });
+  }
 
   return hadError ? failure() : success();
 }
@@ -110,8 +108,14 @@ static LogicalResult collectVPTOKernelStubDecls(
 LogicalResult mlir::pto::emitVPTOHostStubSource(ModuleOp module,
                                                 std::string &stubSource,
                                                 llvm::raw_ostream &diagOS) {
+  return emitVPTOHostStubSource(ArrayRef<ModuleOp>(module), stubSource, diagOS);
+}
+
+LogicalResult mlir::pto::emitVPTOHostStubSource(ArrayRef<ModuleOp> modules,
+                                                std::string &stubSource,
+                                                llvm::raw_ostream &diagOS) {
   SmallVector<VPTOKernelStubDecl> stubDecls;
-  if (failed(collectVPTOKernelStubDecls(module, stubDecls, diagOS)))
+  if (failed(collectVPTOKernelStubDecls(modules, stubDecls, diagOS)))
     return failure();
 
   if (stubDecls.empty()) {

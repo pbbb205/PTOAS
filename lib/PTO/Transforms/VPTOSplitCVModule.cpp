@@ -26,10 +26,6 @@ using namespace mlir::pto;
 
 namespace {
 
-static bool hasVPTOKernelAttr(Operation *op) {
-  return op->hasAttr("pto.kernel") || op->hasAttr("pto.aicore");
-}
-
 static bool hasKernelKind(ModuleOp module) {
   return module->hasAttr(FunctionKernelKindAttr::name);
 }
@@ -42,7 +38,7 @@ static bool hasKernelKindChildModule(ModuleOp module) {
 static bool hasCVSections(ModuleOp module) {
   bool found = false;
   module.walk([&](func::FuncOp funcOp) {
-    if (found || !hasVPTOKernelAttr(funcOp))
+    if (found || !pto::isPTOKernelFunction(funcOp))
       return WalkResult::advance();
     WalkResult result = funcOp.walk([&](Operation *op) {
       if (isa<SectionCubeOp, SectionVectorOp>(op)) {
@@ -60,7 +56,7 @@ static bool hasCVSections(ModuleOp module) {
 static bool hasSectionKind(ModuleOp module, FunctionKernelKind kind) {
   bool found = false;
   module.walk([&](func::FuncOp funcOp) {
-    if (found || !hasVPTOKernelAttr(funcOp))
+    if (found || !pto::isPTOKernelFunction(funcOp))
       return WalkResult::advance();
     WalkResult result = funcOp.walk([&](Operation *op) {
       bool matches = kind == FunctionKernelKind::Cube
@@ -125,7 +121,7 @@ static LogicalResult verifyNoNestedSections(ModuleOp module) {
 static LogicalResult verifyKernelFunctionsUseSections(ModuleOp module) {
   LogicalResult status = success();
   module.walk([&](func::FuncOp funcOp) {
-    if (failed(status) || !hasVPTOKernelAttr(funcOp))
+    if (failed(status) || !pto::isPTOKernelFunction(funcOp))
       return WalkResult::advance();
     if (!hasAnySection(funcOp)) {
       status = funcOp.emitOpError(
@@ -141,7 +137,7 @@ static LogicalResult verifyKernelFunctionsUseSections(ModuleOp module) {
 static LogicalResult verifyUniqueSectionKindsPerFunction(ModuleOp module) {
   LogicalResult status = success();
   module.walk([&](func::FuncOp funcOp) {
-    if (failed(status) || !hasVPTOKernelAttr(funcOp))
+    if (failed(status) || !pto::isPTOKernelFunction(funcOp))
       return WalkResult::advance();
     unsigned cubeCount = 0;
     unsigned vectorCount = 0;
@@ -168,7 +164,7 @@ static void eraseKernelFunctionsWithoutSectionKind(ModuleOp module,
                                                    FunctionKernelKind kind) {
   SmallVector<func::FuncOp> eraseFuncs;
   module.walk([&](func::FuncOp funcOp) {
-    if (hasVPTOKernelAttr(funcOp) && !hasSectionKind(funcOp, kind))
+    if (pto::isPTOKernelFunction(funcOp) && !hasSectionKind(funcOp, kind))
       eraseFuncs.push_back(funcOp);
   });
 

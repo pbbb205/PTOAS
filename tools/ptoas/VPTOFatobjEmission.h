@@ -9,22 +9,18 @@
 #ifndef PTOAS_VPTO_FATOBJ_EMISSION_H
 #define PTOAS_VPTO_FATOBJ_EMISSION_H
 
-#include "llvm/ADT/StringRef.h"
-#include "mlir/Support/LogicalResult.h"
-
-namespace llvm {
-class ToolOutputFile;
-class Module;
-class raw_ostream;
-}
+#include "ObjectEmission.h"
 
 namespace mlir::pto {
 
-LogicalResult emitVPTOFatobj(llvm::Module *cubeModule,
-                             llvm::Module *vectorModule,
-                             llvm::StringRef stubSource,
-                             llvm::ToolOutputFile &outputFile,
-                             llvm::raw_ostream &diagOS);
+inline LogicalResult emitVPTOFatobj(llvm::Module *cubeModule,
+                                    llvm::Module *vectorModule,
+                                    llvm::StringRef stubSource,
+                                    llvm::ToolOutputFile &outputFile,
+                                    llvm::raw_ostream &diagOS) {
+  return emitFatobjLLVMWithRuntime(cubeModule, vectorModule, stubSource,
+                                   outputFile, diagOS);
+}
 
 } // namespace mlir::pto
 

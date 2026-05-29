@@ -1372,8 +1372,6 @@ struct PTOViewToMemrefPass
     MLIRContext *ctx = &getContext();
 
     for (auto func : mod.getOps<func::FuncOp>()) {
-      if (func.isExternal()) continue;
-
       // ------------------------------------------------------------------
       // Stage 0: ensure inttoptr values remain scalar-load/store only.
       // ------------------------------------------------------------------
@@ -1382,7 +1380,6 @@ struct PTOViewToMemrefPass
         return;
       }
 
-      Block &entry = func.front();
       auto fnTy = func.getFunctionType();
 
       // ------------------------------------------------------------------
@@ -1394,15 +1391,17 @@ struct PTOViewToMemrefPass
       SmallVector<Type> newResults;
       for (Type t : fnTy.getResults()) newResults.push_back(convertPTOTypeToMemRef(t));
 
+      func.setFunctionType(FunctionType::get(ctx, newInputs, newResults));
+      if (func.isExternal()) continue;
+
+      Block &entry = func.front();
+
       // Update entry block arguments
       for (unsigned i = 0; i < entry.getNumArguments(); ++i) {
         if (entry.getArgument(i).getType() != newInputs[i]) {
             entry.getArgument(i).setType(newInputs[i]);
         }
       }
-
-      // Update function type
-      func.setFunctionType(FunctionType::get(ctx, newInputs, newResults));
 
       // ------------------------------------------------------------------
       // Stage 0.20: lower pto.inttoptr result types to GM memrefs.
