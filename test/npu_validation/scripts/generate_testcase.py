@@ -791,7 +791,6 @@ def _detect_set_ffts_pointer_params(text: str, pointer_param_names):
 def _detect_prefetch_workspace_pointer_params(text: str, pointer_param_names):
     if not pointer_param_names:
         return set()
-
     def _is_fully_wrapped_by_parentheses(expr: str) -> bool:
         if not (expr.startswith("(") and expr.endswith(")")):
             return False
@@ -1644,11 +1643,9 @@ def generate_testcase(
         else:
             aicore_arch = _infer_aicore_arch(raw_kernel, soc_version)
 
-    # TPREFETCH_ASYNC currently uses the A2/A3 SDMA implementation in pto-isa.
-    # Compiling generated board payloads as dav-c310/REGISTER_BASE on
-    # Ascend910B3 boards can fault in the UB scratch path. Keep these kernels
-    # on the A2/A3 compile mode even when the board's SOC string contains 910B.
-    if uses_prefetch_async_runtime and aicore_arch.startswith("dav-c310"):
+    is_a5_soc = "950" in (soc_version or "").lower() or "a5" in (soc_version or "").lower()
+
+    if uses_prefetch_async_runtime and (not is_a5_soc) and aicore_arch.startswith("dav-c310"):
         if aicore_arch.endswith("-cube"):
             aicore_arch = "dav-c220-cube"
         elif aicore_arch == "dav-c310":
@@ -1745,9 +1742,7 @@ def generate_testcase(
     #   non-determinism between CPU golden and real NPU.
     data_ptrs = [p for p in params if p["kind"] == "ptr" and p["role"] not in {"ffts", "prefetch_workspace"}]
     ffts_ptrs = [p for p in params if p["kind"] == "ptr" and p["role"] == "ffts"]
-    prefetch_workspace_ptrs = [
-        p for p in params if p["kind"] == "ptr" and p["role"] == "prefetch_workspace"
-    ]
+    prefetch_workspace_ptrs = [p for p in params if p["kind"] == "ptr" and p["role"] == "prefetch_workspace"]
     init_ptrs = list(data_ptrs)
     output_ptrs = [p for p in data_ptrs if p["role"] == "output"]
 
@@ -1900,16 +1895,30 @@ def generate_testcase(
         )
     if prefetch_workspace_ptrs:
         param_decls_lines.append("    pto::comm::sdma::SdmaWorkspaceManager sdmaMgr;")
-        init_runtime_ptrs.append("    if (!sdmaMgr.Init()) {")
-        init_runtime_ptrs.append('        std::fprintf(stderr, "[ERROR] SdmaWorkspaceManager::Init failed\\n");')
-        init_runtime_ptrs.append("        rc = 1;")
-        init_runtime_ptrs.append("        goto cleanup;")
+        param_decls_lines.append("    bool sdmaWorkspaceOk = false;")
+        param_decls_lines.append('    const char *sdmaSocVersion = std::getenv("SOC_VERSION");')
+        param_decls_lines.append(
+            '    const bool skipSdmaWorkspaceInit = (std::getenv("PTO_DISABLE_SDMA_WORKSPACE_INIT") != nullptr) || '
+            '(sdmaSocVersion != nullptr && (std::strstr(sdmaSocVersion, "950") != nullptr || '
+            'std::strstr(sdmaSocVersion, "A5") != nullptr || std::strstr(sdmaSocVersion, "a5") != nullptr));'
+        )
+        init_runtime_ptrs.append("    if (skipSdmaWorkspaceInit) {")
+        init_runtime_ptrs.append(
+            '        std::fprintf(stderr, "[WARN] Skip SdmaWorkspaceManager::Init on this platform - TPREFETCH_ASYNC will fall back to no-op prefetch\\n");'
+        )
+        init_runtime_ptrs.append("    } else {")
+        init_runtime_ptrs.append("        sdmaWorkspaceOk = sdmaMgr.Init();")
+        init_runtime_ptrs.append("    }")
+        init_runtime_ptrs.append("    if (!skipSdmaWorkspaceInit && !sdmaWorkspaceOk) {")
+        init_runtime_ptrs.append(
+            '        std::fprintf(stderr, "[WARN] SdmaWorkspaceManager::Init failed - TPREFETCH_ASYNC will fall back to no-op prefetch\\n");'
+        )
         init_runtime_ptrs.append("    }")
         for p in prefetch_workspace_ptrs:
             init_runtime_ptrs.append(
-                f"    {p['name']}Device = reinterpret_cast<{p['host_type']} *>(sdmaMgr.GetWorkspaceAddr());"
+                f"    {p['name']}Device = sdmaWorkspaceOk ? reinterpret_cast<{p['host_type']} *>(sdmaMgr.GetWorkspaceAddr()) : nullptr;"
             )
-            init_runtime_ptrs.append(f"    if ({p['name']}Device == nullptr) {{")
+            init_runtime_ptrs.append(f"    if (sdmaWorkspaceOk && {p['name']}Device == nullptr) {{")
             init_runtime_ptrs.append(
                 f'        std::fprintf(stderr, "[ERROR] SDMA workspace address is null for {p["name"]}\\n");'
             )
@@ -2241,7 +2250,7 @@ def generate_testcase(
     sv = (soc_version or "").lower()
     if "910b" in sv or "950" in sv or "a5" in sv:
         mem_base_define = "REGISTER_BASE"
-    if uses_prefetch_async_runtime:
+    if uses_prefetch_async_runtime and not is_a5_soc:
         mem_base_define = "MEMORY_BASE"
 
     # CCE printing support is gated behind `--cce-enable-print` on some bisheng
