@@ -22,6 +22,11 @@ add_mlir_dialect_library(PTOTransforms
   PTOValidateVPTOIR.cpp
   PTOInferVPTOVecScope.cpp
 
+  TileFusion/FusionAnalysis.cpp
+  TileFusion/FusionOpSemantics.cpp
+  TileFusion/PTOFusionPlan.cpp
+  TileFusion/PTOOpScheduling.cpp
+  TileFusion/PTOMarkLastUse.cpp
   InsertSync/PTOInsertSync.cpp
   PTOInjectBarrierAllSync.cpp
   InsertSync/InsertSyncDebug.cpp
@@ -32,6 +37,7 @@ add_mlir_dialect_library(PTOTransforms
   PTOLowerToOpLibCalls.cpp
   PTOInstantiateAndInlineOpLib.cpp
   PTOToEmitC.cpp
+  CppPostprocess.cpp
   Utils.cpp
   OptMemPlanForPipeline.cpp
   AllocToPointerCast.cpp

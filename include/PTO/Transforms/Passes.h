@@ -75,6 +75,10 @@ std::unique_ptr<Pass> createPTOValidateIntToPtrUsesPass();
 std::unique_ptr<Pass> createPTOMaterializeTileHandlesPass();
 std::unique_ptr<Pass> createInferPTOLayoutPass();
 std::unique_ptr<Pass> createPTOA5NormalizeTMovPass();
+std::unique_ptr<Pass> createFusionPlanPass();
+std::unique_ptr<Pass> createOpSchedulingPass();
+std::unique_ptr<Pass> createPTOMarkLastUsePass();
+
 LogicalResult validateIntToPtrUses(func::FuncOp func);
 
 std::unique_ptr<Pass> createPTOInferVPTOVecScopePass();

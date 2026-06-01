@@ -134,6 +134,131 @@ enum TNotifyMteDrainMask : unsigned {
   kDrainMte2 = 1U << 0,
   kDrainMte3 = 1U << 1,
 };
+static constexpr llvm::StringLiteral kLastUseAttrName = "pto.last_use";
+static constexpr llvm::StringLiteral kLastUseMarkerPrefix = "PTOAS__LAST_USE__";
+
+static SmallVector<unsigned, 4> collectTileOperandNumbers(Operation *op) {
+  SmallVector<unsigned, 4> tileOperandNumbers;
+  for (OpOperand &operand : op->getOpOperands()) {
+    if (isa<pto::TileBufType>(operand.get().getType()))
+      tileOperandNumbers.push_back(operand.getOperandNumber());
+  }
+  return tileOperandNumbers;
+}
+
+static bool isDpsInitOperand(OpOperand &operand) {
+  Operation *owner = operand.getOwner();
+  if (auto dpsIface = dyn_cast<pto::PTO_DpsInitOpInterface>(owner)) {
+    for (OpOperand &init : dpsIface.getDpsInitsMutable()) {
+      if (&init == &operand)
+        return true;
+    }
+  }
+  return false;
+}
+
+static SmallVector<unsigned, 4>
+buildDefaultLastUseTileSlotOrder(Operation *op) {
+  SmallVector<unsigned, 4> dpsInitTileOperands;
+  SmallVector<unsigned, 4> nonDpsTileOperands;
+  for (OpOperand &operand : op->getOpOperands()) {
+    if (!isa<pto::TileBufType>(operand.get().getType()))
+      continue;
+    if (isDpsInitOperand(operand))
+      dpsInitTileOperands.push_back(operand.getOperandNumber());
+    else
+      nonDpsTileOperands.push_back(operand.getOperandNumber());
+  }
+
+  // Most tile intrinsics lower as `CALLEE(dst, src0, src1, ...)`. When an op
+  // has exactly one DPS init tile, treat that output slot as the leading
+  // emitted tile operand so `[[pto::last_use(...)]]` aligns with the final
+  // intrinsic call order.
+  if (dpsInitTileOperands.size() == 1) {
+    SmallVector<unsigned, 4> ordered{dpsInitTileOperands.front()};
+    ordered.append(nonDpsTileOperands.begin(), nonDpsTileOperands.end());
+    return ordered;
+  }
+
+  SmallVector<unsigned, 4> ordered = std::move(nonDpsTileOperands);
+  ordered.append(dpsInitTileOperands.begin(), dpsInitTileOperands.end());
+  return ordered;
+}
+
+static std::optional<std::string> buildLastUseMarkerCallee(Operation *op,
+                                                           StringRef callee,
+                                                           ArrayRef<unsigned> tileSlotOrder = {}) {
+  auto lastUseAttr = dyn_cast_or_null<DenseI64ArrayAttr>(
+      op->getAttr(kLastUseAttrName));
+  if (!lastUseAttr)
+    return std::nullopt;
+
+  SmallVector<unsigned, 4> originalTileOperands = collectTileOperandNumbers(op);
+  ArrayRef<int64_t> originalBits = lastUseAttr.asArrayRef();
+  if (originalTileOperands.size() != originalBits.size())
+    return std::nullopt;
+
+  SmallVector<unsigned, 4> defaultTileSlotOrder;
+  if (tileSlotOrder.empty()) {
+    defaultTileSlotOrder = buildDefaultLastUseTileSlotOrder(op);
+    tileSlotOrder = defaultTileSlotOrder;
+  }
+  if (tileSlotOrder.size() != originalBits.size())
+    return std::nullopt;
+
+  SmallVector<int64_t, 4> reorderedBits;
+  reorderedBits.reserve(tileSlotOrder.size());
+  for (unsigned operandNumber : tileSlotOrder) {
+    bool found = false;
+    for (auto [idx, originalOperandNumber] : llvm::enumerate(originalTileOperands)) {
+      if (originalOperandNumber != operandNumber)
+        continue;
+      reorderedBits.push_back(originalBits[idx]);
+      found = true;
+      break;
+    }
+    if (!found)
+      return std::nullopt;
+  }
+
+  std::string marker = kLastUseMarkerPrefix.str();
+  marker.append(callee.str());
+  marker.append("__");
+  bool first = true;
+  for (int64_t bit : reorderedBits) {
+    if (!first)
+      marker.append("__");
+    first = false;
+    marker.append(std::to_string(bit));
+  }
+  return marker;
+}
+
+static StringRef getLastUseAwareCallee(Operation *op, StringRef callee,
+                                       std::string &storage,
+                                       ArrayRef<unsigned> tileSlotOrder = {}) {
+  std::optional<std::string> marker =
+      buildLastUseMarkerCallee(op, callee, tileSlotOrder);
+  if (!marker)
+    return callee;
+  storage = std::move(*marker);
+  return storage;
+}
+
+static void createLastUseAwareOpaqueCall(ConversionPatternRewriter &rewriter,
+                                         Operation *op, TypeRange resultTypes,
+                                         StringRef callee,
+                                         ValueRange operands,
+                                         ArrayAttr args = ArrayAttr{},
+                                         ArrayAttr templateArgs = ArrayAttr{},
+                                         ArrayRef<unsigned> tileSlotOrder = {}) {
+  std::string calleeStorage;
+  StringRef effectiveCallee =
+      getLastUseAwareCallee(op, callee, calleeStorage, tileSlotOrder);
+  rewriter.create<emitc::CallOpaqueOp>(op->getLoc(), resultTypes,
+                                       effectiveCallee, args, templateArgs,
+                                       operands);
+}
 
 static Value peelUnrealized(Value v) {
   if (auto castOp = v.getDefiningOp<UnrealizedConversionCastOp>())
@@ -5797,7 +5922,6 @@ struct PTOTAxpyToEmitC : public OpConversionPattern<pto::TAxpyOp> {
   LogicalResult matchAndRewrite(pto::TAxpyOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-
     Value src = peelUnrealized(adaptor.getSrc());
     Value dst = peelUnrealized(adaptor.getDst());
     Value scalar = peelUnrealized(adaptor.getScalar());
@@ -5872,7 +5996,6 @@ struct PTOGetScaleAddrToEmitC
   LogicalResult matchAndRewrite(pto::TGetScaleAddrOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-
     Value src = peelUnrealized(adaptor.getSrc());
     Value dst = peelUnrealized(adaptor.getDst());
 
@@ -6163,10 +6286,8 @@ struct PTOTAddToTADD : public OpConversionPattern<pto::TAddOp> {
     Value src1 = peelUnrealized(adaptor.getSrc1());
     Value dst  = peelUnrealized(adaptor.getDst());
 
-    rewriter.create<emitc::CallOpaqueOp>(
-        op.getLoc(), TypeRange{}, "TADD",
-        ArrayAttr{}, ArrayAttr{},
-        ValueRange{dst, src0, src1});
+    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                 "TADD", ValueRange{dst, src0, src1});
 
     rewriter.eraseOp(op);
     return success();
@@ -7591,10 +7712,8 @@ struct PTOAddSToTADDS : public OpConversionPattern<pto::TAddSOp> {
     Value dst    = peelUnrealized(adaptor.getDst());
     Value scalar = peelUnrealized(adaptor.getScalar());
 
-    rewriter.create<emitc::CallOpaqueOp>(
-        op.getLoc(), TypeRange{}, "TADDS",
-        ArrayAttr{}, ArrayAttr{},
-        ValueRange{dst, src, scalar});
+    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                 "TADDS", ValueRange{dst, src, scalar});
 
     rewriter.eraseOp(op);
     return success();
@@ -7794,7 +7913,6 @@ struct PTOColExpandMulToEmitC : public OpConversionPattern<pto::TColExpandMulOp>
   LogicalResult matchAndRewrite(pto::TColExpandMulOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-
     Value src0 = peelUnrealized(adaptor.getSrc0());
     Value src1 = peelUnrealized(adaptor.getSrc1());
     Value dst = peelUnrealized(adaptor.getDst());
@@ -7816,7 +7934,6 @@ struct PTOColExpandAddToEmitC : public OpConversionPattern<pto::TColExpandAddOp>
   LogicalResult matchAndRewrite(pto::TColExpandAddOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-
     Value src0 = peelUnrealized(adaptor.getSrc0());
     Value src1 = peelUnrealized(adaptor.getSrc1());
     Value dst = peelUnrealized(adaptor.getDst());
@@ -7877,7 +7994,6 @@ struct PTOColExpandExpdifToEmitC
   LogicalResult matchAndRewrite(pto::TColExpandExpdifOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-
     Value src0 = peelUnrealized(adaptor.getSrc0());
     Value src1 = peelUnrealized(adaptor.getSrc1());
     Value dst = peelUnrealized(adaptor.getDst());
@@ -7899,7 +8015,6 @@ struct PTOColExpandSubToEmitC : public OpConversionPattern<pto::TColExpandSubOp>
   LogicalResult matchAndRewrite(pto::TColExpandSubOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-
     Value src0 = peelUnrealized(adaptor.getSrc0());
     Value src1 = peelUnrealized(adaptor.getSrc1());
     Value dst = peelUnrealized(adaptor.getDst());
@@ -7921,7 +8036,6 @@ struct PTOColExpandMaxToEmitC : public OpConversionPattern<pto::TColExpandMaxOp>
   LogicalResult matchAndRewrite(pto::TColExpandMaxOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-
     Value src0 = peelUnrealized(adaptor.getSrc0());
     Value src1 = peelUnrealized(adaptor.getSrc1());
     Value dst = peelUnrealized(adaptor.getDst());
@@ -7943,7 +8057,6 @@ struct PTOColExpandMinToEmitC : public OpConversionPattern<pto::TColExpandMinOp>
   LogicalResult matchAndRewrite(pto::TColExpandMinOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-
     Value src0 = peelUnrealized(adaptor.getSrc0());
     Value src1 = peelUnrealized(adaptor.getSrc1());
     Value dst = peelUnrealized(adaptor.getDst());
@@ -8062,17 +8175,12 @@ struct PTOColMaxToEmitC : public OpConversionPattern<pto::TColMaxOp> {
 
   LogicalResult matchAndRewrite(pto::TColMaxOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-
     Value src = peelUnrealized(adaptor.getSrc());
     Value dst = peelUnrealized(adaptor.getDst());
 
     // intrinsic: TCOLMAX(dst, src)
-    rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TCOLMAX",
-        /*args=*/ArrayAttr{},          // default: print all operands
-        /*templateArgs=*/ArrayAttr{},
-        /*operands=*/ValueRange{dst, src});
+    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                 "TCOLMAX", ValueRange{dst, src});
 
     rewriter.eraseOp(op);
     return success();
@@ -8085,7 +8193,6 @@ struct PTOColArgMaxToEmitC : public OpConversionPattern<pto::TColArgMaxOp> {
   LogicalResult matchAndRewrite(pto::TColArgMaxOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-
     Value src = peelUnrealized(adaptor.getSrc());
     Value tmp = peelUnrealized(adaptor.getTmp());
     Value dst = peelUnrealized(adaptor.getDst());
@@ -8106,17 +8213,12 @@ struct PTOColMinToEmitC : public OpConversionPattern<pto::TColMinOp> {
 
   LogicalResult matchAndRewrite(pto::TColMinOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-
     Value src = peelUnrealized(adaptor.getSrc());
     Value dst = peelUnrealized(adaptor.getDst());
 
     // intrinsic: TCOLMIN(dst, src)
-    rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TCOLMIN",
-        /*args=*/ArrayAttr{},          // default: print all operands
-        /*templateArgs=*/ArrayAttr{},
-        /*operands=*/ValueRange{dst, src});
+    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                 "TCOLMIN", ValueRange{dst, src});
 
     rewriter.eraseOp(op);
     return success();
@@ -8129,7 +8231,6 @@ struct PTOColArgMinToEmitC : public OpConversionPattern<pto::TColArgMinOp> {
   LogicalResult matchAndRewrite(pto::TColArgMinOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-
     Value src = peelUnrealized(adaptor.getSrc());
     Value tmp = peelUnrealized(adaptor.getTmp());
     Value dst = peelUnrealized(adaptor.getDst());
@@ -8169,18 +8270,23 @@ struct PTOColSumToEmitC : public OpConversionPattern<pto::TColSumOp> {
       Value isBinaryVal = rewriter.create<emitc::ConstantOp>(
           loc, boolTy, emitc::OpaqueAttr::get(ctx, tok));
 
-      rewriter.create<emitc::CallOpaqueOp>(
-          loc, TypeRange{}, "TCOLSUM",
-          /*args=*/ArrayAttr(),             
-          /*templateArgs=*/ArrayAttr(),
-          /*operands=*/ValueRange{dst, src, tmp, isBinaryVal});
+      SmallVector<unsigned, 3> tileSlotOrder;
+      tileSlotOrder.push_back(op.getDstMutable().getOperandNumber());
+      tileSlotOrder.push_back(op.getSrcMutable().getOperandNumber());
+      tileSlotOrder.push_back(op.getTmpMutable().begin()->getOperandNumber());
+
+      createLastUseAwareOpaqueCall(
+          rewriter, op.getOperation(), TypeRange{}, "TCOLSUM",
+          ValueRange{dst, src, tmp, isBinaryVal}, ArrayAttr{}, ArrayAttr{},
+          tileSlotOrder);
     } else {
       // Format 1: without tmp and isBinary
-      rewriter.create<emitc::CallOpaqueOp>(
-          loc, TypeRange{}, "TCOLSUM",
-          /*args=*/ArrayAttr(),             
-          /*templateArgs=*/ArrayAttr(),
-          /*operands=*/ValueRange{dst, src});
+      SmallVector<unsigned, 2> tileSlotOrder;
+      tileSlotOrder.push_back(op.getDstMutable().getOperandNumber());
+      tileSlotOrder.push_back(op.getSrcMutable().getOperandNumber());
+      createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                   "TCOLSUM", ValueRange{dst, src},
+                                   ArrayAttr{}, ArrayAttr{}, tileSlotOrder);
     }
 
     rewriter.eraseOp(op);
@@ -8324,10 +8430,8 @@ struct PTODivToTDIV : public OpConversionPattern<pto::TDivOp> {
           {emitc::OpaqueAttr::get(ctx, precisionTok)});
     }
 
-    rewriter.create<emitc::CallOpaqueOp>(
-        op.getLoc(), TypeRange{}, "TDIV",
-        ArrayAttr{}, templateArgs,
-        ValueRange{dst, src0, src1});
+    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                 "TDIV", ValueRange{dst, src0, src1}, ArrayAttr{}, templateArgs);
 
     rewriter.eraseOp(op);
     return success();
@@ -8344,18 +8448,14 @@ struct PTODivSToEmitC : public OpConversionPattern<pto::TDivSOp> {
 
   LogicalResult matchAndRewrite(pto::TDivSOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-
     Value src    = peelUnrealized(adaptor.getSrc());
     Value scalar = peelUnrealized(adaptor.getScalar());
     Value dst    = peelUnrealized(adaptor.getDst());
     // Preserve source order from textual parse:
     // ins(tile, scalar)   -> TDIVS(dst, tile, scalar)
     // ins(scalar, tile)   -> TDIVS(dst, scalar, tile)
-    rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TDIVS",
-        ArrayAttr{}, ArrayAttr{},
-        ValueRange{dst, src, scalar});
+    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                 "TDIVS", ValueRange{dst, src, scalar});
 
     rewriter.eraseOp(op);
     return success();
@@ -8373,15 +8473,11 @@ struct PTOTDivSToEmitC : public OpConversionPattern<pto::TDivSOp> {
 
   LogicalResult matchAndRewrite(pto::TDivSOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-
     Value src    = peelUnrealized(adaptor.getSrc());
     Value scalar = peelUnrealized(adaptor.getScalar());
     Value dst    = peelUnrealized(adaptor.getDst());
-    rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TDIVS",
-        ArrayAttr{}, ArrayAttr{},
-        ValueRange{dst, src, scalar});
+    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                 "TDIVS", ValueRange{dst, src, scalar});
 
     rewriter.eraseOp(op);
     return success();
@@ -8396,9 +8492,7 @@ struct PTOExpToEmitC : public OpConversionPattern<pto::TExpOp> {
 
   LogicalResult matchAndRewrite(pto::TExpOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
     auto *ctx = rewriter.getContext();
-
     Value src = peelUnrealized(adaptor.getSrc());
     Value dst = peelUnrealized(adaptor.getDst());
 
@@ -8417,10 +8511,8 @@ struct PTOExpToEmitC : public OpConversionPattern<pto::TExpOp> {
           {emitc::OpaqueAttr::get(ctx, precisionTok)});
     }
 
-    rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TEXP",
-        ArrayAttr{}, templateArgs,
-        ValueRange{dst, src});
+    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                 "TEXP", ValueRange{dst, src}, ArrayAttr{}, templateArgs);
 
     rewriter.eraseOp(op);
     return success();
@@ -8435,15 +8527,11 @@ struct PTOExpandsToEmitC : public OpConversionPattern<pto::TExpandsOp> {
 
   LogicalResult matchAndRewrite(pto::TExpandsOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-
     Value scalar = peelUnrealized(adaptor.getScalar());
     Value dst    = peelUnrealized(adaptor.getDst());
 
-    rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TEXPANDS",
-        ArrayAttr{}, ArrayAttr{},
-        ValueRange{dst, scalar});
+    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                 "TEXPANDS", ValueRange{dst, scalar});
 
     rewriter.eraseOp(op);
     return success();
@@ -8838,17 +8926,13 @@ struct PTOMaxToEmitC : public OpConversionPattern<pto::TMaxOp> {
 
   LogicalResult matchAndRewrite(pto::TMaxOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-
     Value src0 = peelUnrealized(adaptor.getSrc0());
     Value src1 = peelUnrealized(adaptor.getSrc1());
     Value dst  = peelUnrealized(adaptor.getDst());
 
     SmallVector<Value, 3> operands{dst, src0, src1};
-    rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TMAX",
-        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
-        /*operands=*/operands);
+    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                 "TMAX", operands);
 
     rewriter.eraseOp(op);
     return success();
@@ -8864,17 +8948,13 @@ struct PTOMaxToEmitC : public OpConversionPattern<pto::TMaxOp> {
 	
 	  LogicalResult matchAndRewrite(pto::TMaxSOp op, OpAdaptor adaptor,
 	                                ConversionPatternRewriter &rewriter) const override {
-	    auto loc = op.getLoc();
-	
 	    Value src0 = peelUnrealized(adaptor.getSrc());
 	    Value scalar = peelUnrealized(adaptor.getScalar());
 	    Value dst  = peelUnrealized(adaptor.getDst());
 
 	    SmallVector<Value, 3> operands{dst, src0, scalar};
-	    rewriter.create<emitc::CallOpaqueOp>(
-	        loc, TypeRange{}, "TMAXS",
-	        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
-        /*operands=*/operands);
+	    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+	                                 "TMAXS", operands);
 
     rewriter.eraseOp(op);
     return success();
@@ -8891,17 +8971,13 @@ struct PTOMinToEmitC : public OpConversionPattern<pto::TMinOp> {
 
   LogicalResult matchAndRewrite(pto::TMinOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-
     Value src0 = peelUnrealized(adaptor.getSrc0());
     Value src1 = peelUnrealized(adaptor.getSrc1());
     Value dst  = peelUnrealized(adaptor.getDst());
 
     SmallVector<Value, 3> operands{dst, src0, src1};
-    rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TMIN",
-        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
-        /*operands=*/operands);
+    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                 "TMIN", operands);
 
     rewriter.eraseOp(op);
     return success();
@@ -8921,17 +8997,13 @@ struct PTOMinsToEmitC : public OpConversionPattern<pto::TMinSOp> {
 
   LogicalResult matchAndRewrite(pto::TMinSOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-
     Value src = peelUnrealized(adaptor.getSrc());
     Value dst = peelUnrealized(adaptor.getDst());
     Value scalar = peelUnrealized(adaptor.getScalar());
 
     SmallVector<Value, 3> operands{dst, src, scalar};
-    rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TMINS",
-        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
-        /*operands=*/operands);
+    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                 "TMINS", operands);
 
     rewriter.eraseOp(op);
     return success();
@@ -9270,17 +9342,13 @@ struct PTOMulToEmitC : public OpConversionPattern<pto::TMulOp> {
 
   LogicalResult matchAndRewrite(pto::TMulOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-
     Value src0 = peelUnrealized(adaptor.getSrc0());
     Value src1 = peelUnrealized(adaptor.getSrc1());
     Value dst  = peelUnrealized(adaptor.getDst());
 
     SmallVector<Value, 3> operands{dst, src0, src1};
-    rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TMUL",
-        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
-        /*operands=*/operands);
+    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                 "TMUL", operands);
 
     rewriter.eraseOp(op);
     return success();
@@ -9295,17 +9363,13 @@ struct PTOMulsToEmitC : public OpConversionPattern<pto::TMulSOp> {
 
   LogicalResult matchAndRewrite(pto::TMulSOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-
     Value src = peelUnrealized(adaptor.getSrc0());
     Value dst = peelUnrealized(adaptor.getDst());
     Value scalar = peelUnrealized(adaptor.getScalar());
 
     SmallVector<Value, 3> operands{dst, src, scalar};
-    rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TMULS",
-        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
-        /*operands=*/operands);
+    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                 "TMULS", operands);
 
     rewriter.eraseOp(op);
     return success();
@@ -9371,7 +9435,6 @@ struct PTOOrToEmitC : public OpConversionPattern<pto::TOrOp> {
   LogicalResult matchAndRewrite(pto::TOrOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-
     Value src0 = peelUnrealized(adaptor.getSrc0());
     Value src1 = peelUnrealized(adaptor.getSrc1());
     Value dst  = peelUnrealized(adaptor.getDst());
@@ -9424,7 +9487,6 @@ struct PTOPartAddToEmitC : public OpConversionPattern<pto::TPartAddOp> {
   LogicalResult matchAndRewrite(pto::TPartAddOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-
     Value src0 = peelUnrealized(adaptor.getSrc0());
     Value src1 = peelUnrealized(adaptor.getSrc1());
     Value dst  = peelUnrealized(adaptor.getDst());
@@ -9738,7 +9800,6 @@ struct PTORemSToEmitC : public OpConversionPattern<pto::TRemSOp> {
   LogicalResult matchAndRewrite(pto::TRemSOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-
     Value src = peelUnrealized(adaptor.getSrc());
     Value tmp = peelUnrealized(adaptor.getTmp());
     Value dst = peelUnrealized(adaptor.getDst());
@@ -9851,17 +9912,12 @@ struct PTORowExpandExpdifToEmitC
   }
 };
 
-//===----------------------------------------------------------------------===//
-// PTOConvert.cpp  (add lowering + patterns.add for TROWEXPANDDIV DPS/memref op)
-//===----------------------------------------------------------------------===//
-// Helper: replace or erase based on whether op has results.
 static void replaceOrEraseWithOpaqueCallAndReturnDst(Operation *op, Value dst,
                                                      StringRef callee,
                                                      ArrayRef<Value> args,
                                                      ArrayAttr templateArgs,
                                                      ConversionPatternRewriter &rewriter) {
-  rewriter.create<emitc::CallOpaqueOp>(
-      op->getLoc(), TypeRange{}, callee, ArrayAttr{}, templateArgs, ValueRange(args));
+  createLastUseAwareOpaqueCall(rewriter, op, TypeRange{}, callee, args, ArrayAttr{}, templateArgs);
   if (op->getNumResults() == 1)
     rewriter.replaceOp(op, dst);
   else
@@ -10038,7 +10094,6 @@ struct PTORowExpandDivToEmitC : public OpConversionPattern<pto::TRowExpandDivOp>
 
   LogicalResult matchAndRewrite(pto::TRowExpandDivOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
     auto *ctx = rewriter.getContext();
 
     Value src0 = peelUnrealized(adaptor.getSrc0());
@@ -10065,10 +10120,8 @@ struct PTORowExpandDivToEmitC : public OpConversionPattern<pto::TRowExpandDivOp>
       templateArgs = rewriter.getArrayAttr(
           {emitc::OpaqueAttr::get(ctx, precisionTok)});
     }
-    rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TROWEXPANDDIV",
-        /*args=*/ArrayAttr{}, /*templateArgs=*/templateArgs,
-        /*operands=*/operands);
+    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                 "TROWEXPANDDIV", operands, ArrayAttr{}, templateArgs);
 
     rewriter.eraseOp(op);
     return success();
@@ -10083,8 +10136,6 @@ struct PTORowExpandMulToEmitC : public OpConversionPattern<pto::TRowExpandMulOp>
 
   LogicalResult matchAndRewrite(pto::TRowExpandMulOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-
     Value src0 = peelUnrealized(adaptor.getSrc0());
     Value src1 = peelUnrealized(adaptor.getSrc1());
     Value dst  = peelUnrealized(adaptor.getDst());
@@ -10095,10 +10146,8 @@ struct PTORowExpandMulToEmitC : public OpConversionPattern<pto::TRowExpandMulOp>
       operands.assign({dst, src0, src1, tmp});
     else
       operands.assign({dst, src0, src1});
-    rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TROWEXPANDMUL",
-        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
-        /*operands=*/operands);
+    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                 "TROWEXPANDMUL", operands);
 
     rewriter.eraseOp(op);
     return success();
@@ -10199,17 +10248,13 @@ struct PTORowMaxToEmitC : public OpConversionPattern<pto::TRowMaxOp> {
 
   LogicalResult matchAndRewrite(pto::TRowMaxOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-
     Value src = peelUnrealized(adaptor.getSrc());
     Value tmp = peelUnrealized(adaptor.getTmp());
     Value dst = peelUnrealized(adaptor.getDst());
 
     SmallVector<Value, 3> operands{dst, src, tmp};
-    rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TROWMAX",
-        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
-        /*operands=*/operands);
+    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                 "TROWMAX", operands);
 
     rewriter.eraseOp(op);
     return success();
@@ -10223,7 +10268,6 @@ struct PTORowArgMaxToEmitC
   LogicalResult matchAndRewrite(pto::TRowArgMaxOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-
     Value src = peelUnrealized(adaptor.getSrc());
     Value tmp = peelUnrealized(adaptor.getTmp());
     Value dst = peelUnrealized(adaptor.getDst());
@@ -10246,17 +10290,13 @@ struct PTORowMinToEmitC : public OpConversionPattern<pto::TRowMinOp> {
 
   LogicalResult matchAndRewrite(pto::TRowMinOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-
     Value src = peelUnrealized(adaptor.getSrc());
     Value tmp = peelUnrealized(adaptor.getTmp());
     Value dst = peelUnrealized(adaptor.getDst());
 
     SmallVector<Value, 3> operands{dst, src, tmp};
-    rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TROWMIN",
-        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
-        /*operands=*/operands);
+    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                 "TROWMIN", operands);
 
     rewriter.eraseOp(op);
     return success();
@@ -10270,7 +10310,6 @@ struct PTORowArgMinToEmitC
   LogicalResult matchAndRewrite(pto::TRowArgMinOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
-
     Value src = peelUnrealized(adaptor.getSrc());
     Value tmp = peelUnrealized(adaptor.getTmp());
     Value dst = peelUnrealized(adaptor.getDst());
@@ -10294,17 +10333,13 @@ struct PTORowSumToEmitC : public OpConversionPattern<pto::TRowSumOp> {
 
   LogicalResult matchAndRewrite(pto::TRowSumOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-
     Value src = peelUnrealized(adaptor.getSrc());
     Value tmp = peelUnrealized(adaptor.getTmp());
     Value dst = peelUnrealized(adaptor.getDst());
 
     SmallVector<Value, 3> operands{dst, src, tmp};
-    rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TROWSUM",
-        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
-        /*operands=*/operands);
+    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                 "TROWSUM", operands);
 
     rewriter.eraseOp(op);
     return success();
@@ -10668,17 +10703,13 @@ struct PTOSubSToEmitC : public OpConversionPattern<pto::TSubOp> {
 
   LogicalResult matchAndRewrite(pto::TSubOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-
     Value src0 = peelUnrealized(adaptor.getSrc0());
     Value src1 = peelUnrealized(adaptor.getSrc1());
     Value dst = peelUnrealized(adaptor.getDst());
 
     SmallVector<Value, 4> operands{dst, src0, src1};
-    rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TSUB",
-        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
-        /*operands=*/operands);
+    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                 "TSUB", operands);
 
     rewriter.eraseOp(op);
     return success();
@@ -10724,17 +10755,13 @@ struct PTOSubSSToEmitC : public OpConversionPattern<pto::TSubSOp> {
 
   LogicalResult matchAndRewrite(pto::TSubSOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto loc = op.getLoc();
-
     Value src = peelUnrealized(adaptor.getSrc());
     Value scalar = peelUnrealized(adaptor.getScalar());
     Value dst = peelUnrealized(adaptor.getDst());
 
     SmallVector<Value, 4> operands{dst, src, scalar};
-    rewriter.create<emitc::CallOpaqueOp>(
-        loc, TypeRange{}, "TSUBS",
-        /*args=*/ArrayAttr{}, /*templateArgs=*/ArrayAttr{},
-        /*operands=*/operands);
+    createLastUseAwareOpaqueCall(rewriter, op.getOperation(), TypeRange{},
+                                 "TSUBS", operands);
 
     rewriter.eraseOp(op);
     return success();
