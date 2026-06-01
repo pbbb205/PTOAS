@@ -2,15 +2,12 @@ module {
   func.func @syncall_binding_kernel(%arg0: !pto.ptr<i32>, %arg1: i32) {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
-    %c64 = arith.constant 64 : index
-    %0 = pto.make_tensor_view %arg0, shape = [%c64], strides = [%c1] : !pto.tensor_view<64xi32>
-    %1 = pto.partition_view %0, offsets = [%c0], sizes = [%c64] : !pto.tensor_view<64xi32>
-    %2 = pto.alloc_tile : !pto.tile_buf<vec, 1x64xi32>
-    %3 = pto.alloc_tile : !pto.tile_buf<mat, 1x64xi32>
-    pto.syncall(%1, %2, %arg1 : !pto.partition_tensor_view<64xi32>, !pto.tile_buf<vec, 1x64xi32>, i32) mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<aiv_only>
-    pto.syncall(%1, %2, %3, %arg1 : !pto.partition_tensor_view<64xi32>, !pto.tile_buf<vec, 1x64xi32>, !pto.tile_buf<mat, 1x64xi32>, i32) mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<mix>
-    pto.syncall() mode = #pto.sync_all_mode<hard>, core_type = #pto.sync_core_type<mix>
+    %c384 = arith.constant 384 : index
+    %c12288_i64 = arith.constant 12288 : i64
+    %0 = pto.make_tensor_view %arg0, shape = [%c384], strides = [%c1] : !pto.tensor_view<384xi32>
+    %1 = pto.partition_view %0, offsets = [%c0], sizes = [%c384] : !pto.tensor_view<384xi32>
+    %2 = pto.alloc_tile addr = %c12288_i64 : !pto.tile_buf<vec, 1x64xi32>
+    pto.syncall(%1, %2, %arg1 : !pto.partition_tensor_view<384xi32>, !pto.tile_buf<vec, 1x64xi32>, i32) mode = #pto.sync_all_mode<soft>, core_type = #pto.sync_core_type<aiv_only>
     return
   }
 }
-

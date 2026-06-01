@@ -187,6 +187,20 @@ fi
 log "SIM_SOC_VERSION=${SIM_SOC_VERSION}"
 log "PTOAS_BOARD_IS_A3=${PTOAS_BOARD_IS_A3}"
 
+# Export runtime knobs consumed by generated testcase main.cpp.
+# CI/runtime commonly launches the built testcase directly instead of the
+# generated run.sh wrapper, so shell-local variables are not visible via
+# getenv() unless exported here.
+export RUN_MODE
+export SOC_VERSION="${SIM_SOC_VERSION}"
+if [[ "${PTOAS_BOARD_IS_A3}" != "1" ]]; then
+  board_chip_lc="$(printf '%s' "${_board_chip}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "${board_chip_lc}" == *950* || "${board_chip_lc}" == *a5* || "${SOC_VERSION,,}" == *950* || "${SOC_VERSION,,}" == *a5* ]]; then
+    export PTO_DISABLE_SDMA_WORKSPACE_INIT=1
+    log "Export PTO_DISABLE_SDMA_WORKSPACE_INIT=1 for A5 TPREFETCH_ASYNC runtime fallback"
+  fi
+fi
+
 LD_LIBRARY_PATH_NPU="${LD_LIBRARY_PATH}"
 LD_LIBRARY_PATH_SIM="${LD_LIBRARY_PATH}"
 for d in \

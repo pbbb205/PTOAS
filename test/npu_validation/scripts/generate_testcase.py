@@ -788,6 +788,86 @@ def _detect_set_ffts_pointer_params(text: str, pointer_param_names):
     return hits
 
 
+def _detect_prefetch_workspace_pointer_params(text: str, pointer_param_names):
+    if not pointer_param_names:
+        return set()
+    def _is_fully_wrapped_by_parentheses(expr: str) -> bool:
+        if not (expr.startswith("(") and expr.endswith(")")):
+            return False
+        depth = 0
+        for i, ch in enumerate(expr):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0 and i != len(expr) - 1:
+                    return False
+        return depth == 0
+
+    def _extract_identifier(expr: str) -> Optional[str]:
+        cur = expr.strip()
+        for _ in range(8):
+            prev = cur
+            while _is_fully_wrapped_by_parentheses(cur):
+                cur = cur[1:-1].strip()
+
+            m = re.match(r"^(?:reinterpret_cast|static_cast|const_cast|dynamic_cast)\s*<[^>]+>\s*\((.*)\)$", cur, re.S)
+            if m:
+                cur = m.group(1).strip()
+                continue
+
+            m = re.match(r"^\(\s*[^()]+\s*\)\s*(.+)$", cur, re.S)
+            if m:
+                cur = m.group(1).strip()
+                continue
+
+            if cur == prev:
+                break
+
+        return cur if re.fullmatch(r"[A-Za-z_]\w*", cur) else None
+
+    pointer_set = set(pointer_param_names)
+    alias = {}
+    for m in re.finditer(r"\b([A-Za-z_]\w*)\s*=\s*([^;]+);", text):
+        lhs = m.group(1)
+        rhs = m.group(2).strip()
+        src = _extract_identifier(rhs)
+        if src:
+            alias[lhs] = src
+
+    def _resolve_pointer_param(name: str) -> Optional[str]:
+        cur = name
+        seen = set()
+        for _ in range(12):
+            if cur in seen:
+                break
+            seen.add(cur)
+            if cur in pointer_set:
+                return cur
+            nxt = alias.get(cur)
+            if not nxt:
+                return None
+            cur = nxt
+        return None
+
+    hits = set()
+    for m in re.finditer(r"\bPrefetchAsyncContext\s+\w+\s*=\s*[^;]*\(([^)]*)\)\s*;", text, re.S):
+        raw_arg = m.group(1).strip()
+        arg_name = _extract_identifier(raw_arg)
+        if not arg_name:
+            continue
+        resolved = _resolve_pointer_param(arg_name)
+        if resolved:
+            hits.add(resolved)
+
+    if not hits:
+        for name in pointer_param_names:
+            pat = rf"\bPrefetchAsyncContext\b[^\n;]*\b{re.escape(name)}\b"
+            if re.search(pat, text):
+                hits.add(name)
+    return hits
+
+
 def _parse_kernel_params(text: str):
     match = re.search(r"__global__\s+(?:\w+\s+)*void\s+\w+\s*\(([^)]*)\)", text, re.S)
     if not match:
@@ -1507,6 +1587,12 @@ def generate_testcase(
     has_vec_only_section = has_dav_vec and not has_dav_cube
 
     is_mixed_kernel = kernel_info["kind"] == "mixed"
+    raw_params = kernel_info["raw_params"]
+    pointer_param_names = [_extract_cpp_name(p) for p in raw_params if _is_gm_pointer_param(p)]
+    prefetch_workspace_param_names = _detect_prefetch_workspace_pointer_params(
+        raw_kernel_for_analysis, pointer_param_names
+    )
+    uses_prefetch_async_runtime = bool(prefetch_workspace_param_names) and "TPREFETCH_ASYNC(" in raw_kernel_for_analysis
 
     if aicore_arch is None:
         if is_mixed_kernel:
@@ -1557,6 +1643,16 @@ def generate_testcase(
         else:
             aicore_arch = _infer_aicore_arch(raw_kernel, soc_version)
 
+    is_a5_soc = "950" in (soc_version or "").lower() or "a5" in (soc_version or "").lower()
+
+    if uses_prefetch_async_runtime and (not is_a5_soc) and aicore_arch.startswith("dav-c310"):
+        if aicore_arch.endswith("-cube"):
+            aicore_arch = "dav-c220-cube"
+        elif aicore_arch == "dav-c310":
+            aicore_arch = "dav-c220"
+        else:
+            aicore_arch = "dav-c220-vec"
+
     # For single-section kernels, force-define DAV macro(s) to keep section
     # bodies visible to the selected compile arch.
     # For mix-kernel arch (dav-c310/dav-c220), do not force-define macros.
@@ -1571,10 +1667,7 @@ def generate_testcase(
     rows, cols = _parse_shape(kernel_info["call_text"])
     logical_elem_count = rows * cols
     kernel_name = kernel_info["kernel_name"]
-    raw_params = kernel_info["raw_params"]
     mrgsort_block_len = _infer_mrgsort_block_len(raw_kernel_for_analysis) if "TMRGSORT" in raw_kernel_for_analysis else None
-
-    pointer_param_names = [_extract_cpp_name(p) for p in raw_params if _is_gm_pointer_param(p)]
     inferred_void_ptr_types = {}
     for raw in raw_params:
         if not _is_gm_pointer_param(raw):
@@ -1587,17 +1680,21 @@ def generate_testcase(
                 inferred_void_ptr_types[name] = inferred
 
     ffts_param_names = _detect_set_ffts_pointer_params(raw_kernel_for_analysis, pointer_param_names)
-    non_ffts_pointer_param_names = [n for n in pointer_param_names if n not in ffts_param_names]
+    non_runtime_pointer_param_names = [
+        n
+        for n in pointer_param_names
+        if n not in ffts_param_names and n not in prefetch_workspace_param_names
+    ]
 
     output_param_names = []
     for writer_text in kernel_info["writer_texts"]:
-        output_param_names.extend(_detect_output_pointer_params(writer_text, non_ffts_pointer_param_names))
+        output_param_names.extend(_detect_output_pointer_params(writer_text, non_runtime_pointer_param_names))
     output_param_names = _ordered_unique(output_param_names)
-    if not output_param_names and non_ffts_pointer_param_names:
+    if not output_param_names and non_runtime_pointer_param_names:
         output_param_names = [
-            non_ffts_pointer_param_names[0]
-            if len(non_ffts_pointer_param_names) == 1
-            else non_ffts_pointer_param_names[-1]
+            non_runtime_pointer_param_names[0]
+            if len(non_runtime_pointer_param_names) == 1
+            else non_runtime_pointer_param_names[-1]
         ]
     output_param_name_set = set(output_param_names)
 
@@ -1618,7 +1715,11 @@ def generate_testcase(
                     "role": (
                         "ffts"
                         if name in ffts_param_names
-                        else ("output" if name in output_param_name_set else "input")
+                        else (
+                            "prefetch_workspace"
+                            if name in prefetch_workspace_param_names
+                            else ("output" if name in output_param_name_set else "input")
+                        )
                     ),
                 }
             )
@@ -1639,8 +1740,9 @@ def generate_testcase(
     # - Some kernels are in-place (single pointer param) or may read from an
     #   "output" pointer as scratch. Leaving buffers uninitialized leads to
     #   non-determinism between CPU golden and real NPU.
-    data_ptrs = [p for p in params if p["kind"] == "ptr" and p["role"] != "ffts"]
+    data_ptrs = [p for p in params if p["kind"] == "ptr" and p["role"] not in {"ffts", "prefetch_workspace"}]
     ffts_ptrs = [p for p in params if p["kind"] == "ptr" and p["role"] == "ffts"]
+    prefetch_workspace_ptrs = [p for p in params if p["kind"] == "ptr" and p["role"] == "prefetch_workspace"]
     init_ptrs = list(data_ptrs)
     output_ptrs = [p for p in data_ptrs if p["role"] == "output"]
 
@@ -1757,6 +1859,8 @@ def generate_testcase(
             param_decls_lines.append(f"    {p['host_type']} *{p['name']}Device = nullptr;")
             param_decls_lines.append(f"    uint64_t {p['name']}FftsAddr = 0;")
             param_decls_lines.append(f"    uint32_t {p['name']}FftsLen = 0;")
+        elif p["role"] == "prefetch_workspace":
+            param_decls_lines.append(f"    {p['host_type']} *{p['name']}Device = nullptr;")
         else:
             param_decls_lines.append(f"    {p['host_type']} *{p['name']}Host = nullptr;")
             param_decls_lines.append(f"    {p['host_type']} *{p['name']}Device = nullptr;")
@@ -1789,6 +1893,39 @@ def generate_testcase(
         init_runtime_ptrs.append(
             f"    {p['name']}Device = reinterpret_cast<{p['host_type']} *>({p['name']}FftsAddr);"
         )
+    if prefetch_workspace_ptrs:
+        param_decls_lines.append("    pto::comm::sdma::SdmaWorkspaceManager sdmaMgr;")
+        param_decls_lines.append("    bool sdmaWorkspaceOk = false;")
+        param_decls_lines.append('    const char *sdmaSocVersion = std::getenv("SOC_VERSION");')
+        param_decls_lines.append(
+            '    const bool skipSdmaWorkspaceInit = (std::getenv("PTO_DISABLE_SDMA_WORKSPACE_INIT") != nullptr) || '
+            '(sdmaSocVersion != nullptr && (std::strstr(sdmaSocVersion, "950") != nullptr || '
+            'std::strstr(sdmaSocVersion, "A5") != nullptr || std::strstr(sdmaSocVersion, "a5") != nullptr));'
+        )
+        init_runtime_ptrs.append("    if (skipSdmaWorkspaceInit) {")
+        init_runtime_ptrs.append(
+            '        std::fprintf(stderr, "[WARN] Skip SdmaWorkspaceManager::Init on this platform - TPREFETCH_ASYNC will fall back to no-op prefetch\\n");'
+        )
+        init_runtime_ptrs.append("    } else {")
+        init_runtime_ptrs.append("        sdmaWorkspaceOk = sdmaMgr.Init();")
+        init_runtime_ptrs.append("    }")
+        init_runtime_ptrs.append("    if (!skipSdmaWorkspaceInit && !sdmaWorkspaceOk) {")
+        init_runtime_ptrs.append(
+            '        std::fprintf(stderr, "[WARN] SdmaWorkspaceManager::Init failed - TPREFETCH_ASYNC will fall back to no-op prefetch\\n");'
+        )
+        init_runtime_ptrs.append("    }")
+        for p in prefetch_workspace_ptrs:
+            init_runtime_ptrs.append(
+                f"    {p['name']}Device = sdmaWorkspaceOk ? reinterpret_cast<{p['host_type']} *>(sdmaMgr.GetWorkspaceAddr()) : nullptr;"
+            )
+            init_runtime_ptrs.append(f"    if (sdmaWorkspaceOk && {p['name']}Device == nullptr) {{")
+            init_runtime_ptrs.append(
+                f'        std::fprintf(stderr, "[ERROR] SDMA workspace address is null for {p["name"]}\\n");'
+            )
+            init_runtime_ptrs.append("        rc = 1;")
+            init_runtime_ptrs.append("        goto cleanup;")
+            init_runtime_ptrs.append("    }")
+        free_device.append("    sdmaMgr.Finalize();")
 
     read_inputs = []
     copy_inputs = []
@@ -1824,6 +1961,12 @@ def generate_testcase(
         # header here instead of `runtime/rt.h` to avoid environment-specific
         # include path issues on some board images.
         runtime_rt_include = '#include <stdint.h>\n#include <ccelib/common/runtime.h>'
+    if prefetch_workspace_ptrs:
+        runtime_rt_include = (
+            runtime_rt_include + '\n#include "pto/npu/comm/async/sdma/sdma_workspace_manager.hpp"'
+            if runtime_rt_include
+            else '#include "pto/npu/comm/async/sdma/sdma_workspace_manager.hpp"'
+        )
     main_cpp = (
         template
         .replace("@RUNTIME_RT_INCLUDE@", runtime_rt_include)
@@ -2107,6 +2250,8 @@ def generate_testcase(
     sv = (soc_version or "").lower()
     if "910b" in sv or "950" in sv or "a5" in sv:
         mem_base_define = "REGISTER_BASE"
+    if uses_prefetch_async_runtime and not is_a5_soc:
+        mem_base_define = "MEMORY_BASE"
 
     # CCE printing support is gated behind `--cce-enable-print` on some bisheng
     # toolchains. Only enable it when kernels emit printf.

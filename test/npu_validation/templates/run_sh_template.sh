@@ -9,8 +9,10 @@
 
 set -euo pipefail
 
-RUN_MODE="@RUN_MODE@"
-SOC_VERSION="@SOC_VERSION@"
+RUN_MODE="${RUN_MODE:-@RUN_MODE@}"
+export RUN_MODE
+SOC_VERSION="${SOC_VERSION:-@SOC_VERSION@}"
+export SOC_VERSION
 GOLDEN_MODE="${GOLDEN_MODE:-npu}"  # sim|npu|skip
 BUILD_DIR="${BUILD_DIR:-build}"
 

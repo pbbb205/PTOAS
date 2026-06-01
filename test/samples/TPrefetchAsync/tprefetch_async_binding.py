@@ -24,25 +24,36 @@ def build():
             ptr_i8 = pto.PtrType.get(i8, ctx)
             tv_f32 = pto.TensorViewType.get([128], f32, ctx)
             pv_f32 = pto.PartitionTensorViewType.get([128], f32, ctx)
+            vec = pto.AddressSpaceAttr.get(pto.AddressSpace.VEC, ctx)
+            bl = pto.BLayoutAttr.get(pto.BLayout.RowMajor, ctx)
+            sl = pto.SLayoutAttr.get(pto.SLayout.NoneBox, ctx)
+            pd = pto.PadValueAttr.get(pto.PadValue.Null, ctx)
+            cfg = pto.TileBufConfigAttr.get(bl, sl, pto.TileConfig.fractalABSize, pd, ctx)
+            tile_f32 = pto.TileBufType.get([1, 128], f32, vec, [1, 128], cfg, ctx)
 
-            fn_ty = func.FunctionType.get([ptr_f32, ptr_i8], [])
+            fn_ty = func.FunctionType.get([ptr_f32, ptr_f32, ptr_i8], [])
             with InsertionPoint(module.body):
                 fn = func.FuncOp("tprefetch_async_binding_kernel", fn_ty)
                 entry = fn.add_entry_block()
 
             with InsertionPoint(entry):
-                src_ptr, workspace_ptr = entry.arguments
+                src_ptr, dst_ptr, workspace_ptr = entry.arguments
                 c0 = arith.ConstantOp(idx, 0).result
                 c1 = arith.ConstantOp(idx, 1).result
                 c128 = arith.ConstantOp(idx, 128).result
 
                 src_view = pto.MakeTensorViewOp(tv_f32, src_ptr, [c128], [c1]).result
+                dst_view = pto.MakeTensorViewOp(tv_f32, dst_ptr, [c128], [c1]).result
                 src = pto.PartitionViewOp(pv_f32, src_view, offsets=[c0], sizes=[c128]).result
+                dst = pto.PartitionViewOp(pv_f32, dst_view, offsets=[c0], sizes=[c128]).result
 
                 prefetch_ctx = pto.MakePrefetchAsyncContextOp(workspace_ptr).result
                 event = pto.TPrefetchAsyncOp(src, prefetch_ctx).result
                 session = pto.GetPrefetchAsyncSessionOp(prefetch_ctx).result
                 pto.WaitAsyncEventOp(event, session)
+                tile = pto.AllocTileOp(tile_f32).result
+                pto.TLoadOp(None, src, tile)
+                pto.TStoreOp(None, tile, dst)
                 func.ReturnOp([])
 
             module.operation.verify()

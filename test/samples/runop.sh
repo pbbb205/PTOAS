@@ -454,6 +454,30 @@ process_one_dir() {
 
     # Write output via -o to avoid mixing debug prints with generated C++.
     local -a ptoas_cmd=("${ptoas_cmd_base[@]}" "$pto_input" -o "$cpp")
+    if [[ "$base" == "syncall_binding" ]]; then
+      local sample_has_level3=0
+      for ((i=0; i<${#ptoas_cmd[@]}; i++)); do
+        if [[ "${ptoas_cmd[$i]}" == "--pto-level=level3" ]]; then
+          sample_has_level3=1
+          break
+        fi
+        if [[ "${ptoas_cmd[$i]}" == "--pto-level" ]]; then
+          if (( i + 1 < ${#ptoas_cmd[@]} )) && [[ "${ptoas_cmd[$((i+1))]}" == "level3" ]]; then
+            sample_has_level3=1
+            break
+          fi
+        fi
+      done
+      if [[ $sample_has_level3 -eq 0 ]]; then
+        ptoas_cmd=("$ptoas")
+        if (( ${#ptoas_flags[@]} )); then
+          ptoas_cmd+=(--pto-level=level3 "${ptoas_flags[@]}")
+        else
+          ptoas_cmd+=(--pto-level=level3)
+        fi
+        ptoas_cmd+=("$pto_input" -o "$cpp")
+      fi
+    fi
     local ptoas_log="${out_subdir}/${base}-ptoas.log"
     if ! "${ptoas_cmd[@]}" >"${ptoas_log}" 2>&1; then
       if [[ $expect_fail -eq 1 ]]; then

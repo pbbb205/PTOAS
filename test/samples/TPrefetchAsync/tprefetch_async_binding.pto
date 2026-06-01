@@ -1,15 +1,19 @@
 module {
-  func.func @tprefetch_async_binding_kernel(%arg0: !pto.ptr<f32>, %arg1: !pto.ptr<i8>) {
+  func.func @tprefetch_async_binding_kernel(%arg0: !pto.ptr<f32>, %arg1: !pto.ptr<f32>, %arg2: !pto.ptr<i8>) {
     %c0 = arith.constant 0 : index
     %c1 = arith.constant 1 : index
     %c128 = arith.constant 128 : index
     %0 = pto.make_tensor_view %arg0, shape = [%c128], strides = [%c1] : !pto.tensor_view<128xf32>
-    %1 = pto.partition_view %0, offsets = [%c0], sizes = [%c128] : !pto.tensor_view<128xf32>
-    %2 = pto.make_prefetch_async_context(%arg1 : !pto.ptr<i8>) -> !pto.prefetch_async_context
-    %3 = pto.tprefetch_async(%1, %2 : !pto.partition_tensor_view<128xf32>, !pto.prefetch_async_context) -> !pto.async_event
-    %4 = pto.get_prefetch_async_session %2 : !pto.prefetch_async_context -> !pto.async_session
-    %5 = pto.comm.wait_async_event(%3, %4 : !pto.async_event, !pto.async_session) -> i1
+    %1 = pto.make_tensor_view %arg1, shape = [%c128], strides = [%c1] : !pto.tensor_view<128xf32>
+    %2 = pto.partition_view %0, offsets = [%c0], sizes = [%c128] : !pto.tensor_view<128xf32>
+    %3 = pto.partition_view %1, offsets = [%c0], sizes = [%c128] : !pto.tensor_view<128xf32>
+    %4 = pto.make_prefetch_async_context(%arg2 : !pto.ptr<i8>) -> !pto.prefetch_async_context
+    %5 = pto.tprefetch_async(%2, %4 : !pto.partition_tensor_view<128xf32>, !pto.prefetch_async_context) -> !pto.async_event
+    %6 = pto.get_prefetch_async_session %4 : !pto.prefetch_async_context -> !pto.async_session
+    %7 = pto.comm.wait_async_event(%5, %6 : !pto.async_event, !pto.async_session) -> i1
+    %8 = pto.alloc_tile : !pto.tile_buf<vec, 1x128xf32>
+    pto.tload ins(%2 : !pto.partition_tensor_view<128xf32>) outs(%8 : !pto.tile_buf<vec, 1x128xf32>)
+    pto.tstore ins(%8 : !pto.tile_buf<vec, 1x128xf32>) outs(%3 : !pto.partition_tensor_view<128xf32>)
     return
   }
 }
-
