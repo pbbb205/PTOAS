@@ -9705,7 +9705,7 @@ struct PrepareVPTOLLVMLoweringPass final
   }
 };
 
-llvm::StringSet<llvm::BumpPtrAllocator>
+static llvm::StringSet<llvm::BumpPtrAllocator>
 collectSimtEntryFunctionNames(ModuleOp module) {
   llvm::StringSet<llvm::BumpPtrAllocator> simtEntries;
   module.walk([&](func::FuncOp funcOp) {
@@ -9820,7 +9820,7 @@ static LogicalResult runPipeline(ModuleOp module, llvm::raw_ostream &diagOS,
 
 } // namespace
 
-LogicalResult lowerVPTOModuleToLLVMModules(
+LogicalResult lowerVPTOModuleToLLVMModulesBeta1(
     ModuleOp module, const VPTOEmissionOptions &options,
     EmittedLLVMModule &cubeModule, EmittedLLVMModule &vectorModule,
     llvm::raw_ostream &diagOS) {

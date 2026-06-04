@@ -9,11 +9,15 @@
 #ifndef PTOAS_H
 #define PTOAS_H
 
+#include "ObjectEmission.h"
 #include "PTO/Transforms/VPTOLLVMEmitter.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/MLIRContext.h"
 #include "mlir/Support/LogicalResult.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/CommandLine.h"
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace mlir {
@@ -41,6 +45,46 @@ enum class PTOASCompileResultKind {
   MixedObject,
 };
 
+class PTOASContext {
+public:
+  PTOASContext(DialectRegistry &registry, llvm::StringRef outputPath, int argc,
+               char **argv);
+  ~PTOASContext();
+
+  LogicalResult initializeEnvironment(bool requiresToolchain,
+                                      llvm::raw_ostream &diagOS);
+  void initializeMLIRContext();
+
+  MLIRContext &getMLIRContext();
+
+  void setArch(std::string value);
+  llvm::StringRef getArch() const;
+
+  int getArgc() const;
+  char **getArgv() const;
+
+  llvm::StringRef getOutputPath() const;
+  std::string allocModuleId();
+
+  const CANNToolchain *getToolchain(llvm::raw_ostream &diagOS) const;
+  llvm::StringRef getCANNVersionOrDefault() const;
+
+  TempFileRegistry &getTempFiles();
+  LogicalResult createTempPath(llvm::StringRef prefix, llvm::StringRef suffix,
+                               std::string &path);
+
+private:
+  MLIRContext mlirContext;
+  std::string outputPath;
+  std::string arch;
+  int argc = 0;
+  char **argv = nullptr;
+  std::optional<CANNToolchain> toolchain;
+  TempFileRegistry tempFiles;
+
+  LogicalResult initializeToolchain(llvm::raw_ostream &diagOS);
+};
+
 struct PTOASCompileResult {
   void reset() {
     textOutput.clear();
@@ -57,8 +101,8 @@ struct PTOASCompileResult {
   EmittedLLVMModule vptoVectorModule;
 };
 
-int compilePTOASModule(OwningOpRef<ModuleOp> &module, llvm::StringRef arch,
-                       PTOBackend backend, int argc, char **argv,
+int compilePTOASModule(OwningOpRef<ModuleOp> &module,
+                       PTOASContext &context, PTOBackend backend,
                        PTOASCompileResult &result,
                        bool emitVPTOHostStub = true);
 void registerPTOASDialects(DialectRegistry &registry);

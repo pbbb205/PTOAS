@@ -14,6 +14,8 @@
 
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Support/LLVM.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
 
 namespace mlir {
 class ModuleOp;
@@ -34,6 +36,7 @@ struct VPTOEmissionOptions {
   std::string aicoreArch;
   std::string defaultTargetCPU;
   std::string defaultTargetFeatures;
+  std::string cannVersion = "9.0.0-beta.1";
 };
 
 struct EmittedLLVMModule {
@@ -47,6 +50,16 @@ struct EmittedLLVMModule {
 };
 
 LogicalResult lowerVPTOModuleToLLVMModules(
+    ModuleOp module, const VPTOEmissionOptions &options,
+    EmittedLLVMModule &cubeModule, EmittedLLVMModule &vectorModule,
+    llvm::raw_ostream &diagOS);
+
+LogicalResult lowerVPTOModuleToLLVMModulesBeta1(
+    ModuleOp module, const VPTOEmissionOptions &options,
+    EmittedLLVMModule &cubeModule, EmittedLLVMModule &vectorModule,
+    llvm::raw_ostream &diagOS);
+
+LogicalResult lowerVPTOModuleToLLVMModulesCANN900(
     ModuleOp module, const VPTOEmissionOptions &options,
     EmittedLLVMModule &cubeModule, EmittedLLVMModule &vectorModule,
     llvm::raw_ostream &diagOS);
