@@ -393,6 +393,8 @@ static FailureOr<StringRef> buildLaneTypedCallee(MLIRContext *context,
 static std::string getCANN900VectorElementFragment(Type type) {
   if (type.isF16())
     return "f16";
+  if (type.isBF16())
+    return "bf16";
   if (type.isF32())
     return "f32";
   if (auto intType = dyn_cast<IntegerType>(type))
@@ -410,7 +412,7 @@ static std::string getCANN900VectorTypeFragment(Type vectorType) {
 }
 
 static std::string getCANN900SignednessFragment(Type elemType) {
-  if (elemType.isF16() || elemType.isF32())
+  if (elemType.isF16() || elemType.isBF16() || elemType.isF32())
     return "s";
   if (auto intType = dyn_cast<IntegerType>(elemType))
     return intType.isUnsigned() ? "u" : "s";
@@ -2045,7 +2047,7 @@ static FailureOr<StringRef> buildVbrCallee(MLIRContext *context,
   std::string vec = getCANN900VectorTypeFragment(resultType);
   if (vec.empty())
     return failure();
-  return StringAttr::get(context, "llvm.hivm.vbr.v210." + vec).getValue();
+  return StringAttr::get(context, "llvm.hivm.vbr." + vec).getValue();
 }
 
 static FailureOr<StringRef> buildPstuCallee(MLIRContext *context, pto::PstuOp op) {
@@ -2809,10 +2811,7 @@ static StringRef getReductionUnaryStem() {
 
 template <typename ReductionOp>
 static constexpr bool usesSignedReductionCANN900Callee() {
-  return !std::is_same_v<ReductionOp, pto::VcgaddOp> &&
-         !std::is_same_v<ReductionOp, pto::VcgmaxOp> &&
-         !std::is_same_v<ReductionOp, pto::VcgminOp> &&
-         !std::is_same_v<ReductionOp, pto::VcpaddOp>;
+  return !std::is_same_v<ReductionOp, pto::VcpaddOp>;
 }
 
 static FailureOr<StringRef> buildCopyGmToUbCallee(MLIRContext *context,
@@ -3393,17 +3392,18 @@ static FailureOr<StringRef> buildVtrcCallee(MLIRContext *context, Type resultTyp
 static FailureOr<StringRef> buildVexpdifCallee(MLIRContext *context,
                                                Type inputType,
                                                Type resultType) {
-  std::string srcVec =
-      getElementTypeFragment(getElementTypeFromVectorLike(inputType));
+  Type inputElem = getElementTypeFromVectorLike(inputType);
+  Type resultElem = getElementTypeFromVectorLike(resultType);
   auto srcLanes = getElementCountFromVectorLike(inputType);
-  std::string dstElem =
-      getElementTypeFragment(getElementTypeFromVectorLike(resultType));
-  if (srcVec.empty() || dstElem.empty() || !srcLanes)
+  if (!srcLanes)
     return failure();
-  return StringAttr::get(context, "llvm.hivm.vexpdif.v" +
-                                      std::to_string(*srcLanes) + srcVec +
-                                      dstElem)
-      .getValue();
+  if (inputElem.isF16() && resultElem.isF32() && *srcLanes == 128)
+    return StringAttr::get(context,
+                           "llvm.hivm.vexpdif.interleave.v128f16")
+        .getValue();
+  if (inputElem.isF32() && resultElem.isF32() && *srcLanes == 64)
+    return StringAttr::get(context, "llvm.hivm.vexpdif.v64f32").getValue();
+  return failure();
 }
 
 static FailureOr<StringRef> buildVbitsortCallee(MLIRContext *context,
@@ -5388,12 +5388,11 @@ public:
         rewriter, op.getLoc(), scalar,
         cast<pto::VRegType>(op.getResult().getType()).getElementType());
 
-    Value mode = getI32Constant(rewriter, op.getLoc(), 0);
-    auto funcType = rewriter.getFunctionType(TypeRange{scalar.getType(), mode.getType()},
+    auto funcType = rewriter.getFunctionType(TypeRange{scalar.getType()},
                                              TypeRange{resultType});
     auto call = rewriter.create<func::CallOp>(op.getLoc(), *calleeName,
                                               TypeRange{resultType},
-                                              ValueRange{scalar, mode});
+                                              ValueRange{scalar});
     state.plannedDecls.push_back(PlannedDecl{calleeName->str(), funcType});
     rewriter.replaceOp(op, call.getResults());
     return success();
@@ -6809,21 +6808,6 @@ public:
       return rewriter.notifyMatchFailure(op, "unsupported vci callee");
 
     Value indexValue = adaptor.getIndex();
-    Type resultElemType =
-        cast<pto::VRegType>(op.getResult().getType()).getElementType();
-    if (auto intType = dyn_cast<IntegerType>(resultElemType)) {
-      if (intType.getWidth() == 8) {
-        Type loweredIndexType = rewriter.getI16Type();
-        if (intType.isUnsigned())
-          indexValue = rewriter.create<arith::ExtUIOp>(op.getLoc(),
-                                                       loweredIndexType,
-                                                       indexValue);
-        else
-          indexValue = rewriter.create<arith::ExtSIOp>(op.getLoc(),
-                                                       loweredIndexType,
-                                                       indexValue);
-      }
-    }
 
     Value orderValue = getI32Constant(rewriter, op.getLoc(), *order);
     auto funcType = rewriter.getFunctionType(
