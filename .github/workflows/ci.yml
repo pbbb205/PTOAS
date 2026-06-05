@@ -373,7 +373,7 @@ jobs:
         run: |
           set -euo pipefail
           missing_tools=()
-          for tool in python3 git cmake ninja make clang; do
+          for tool in python3 git cmake ninja make; do
             if ! command -v "${tool}" >/dev/null 2>&1; then
               missing_tools+=("${tool}")
             fi
@@ -455,6 +455,19 @@ jobs:
         run: |
           set -euo pipefail
 
+          resolve_default_clang_c() {
+            local fallback_dir="$1"
+            if command -v clang >/dev/null 2>&1; then
+              command -v clang
+              return 0
+            fi
+            if [[ -n "${fallback_dir}" && -x "${fallback_dir}/clang" ]]; then
+              printf '%s\n' "${fallback_dir}/clang"
+              return 0
+            fi
+            return 1
+          }
+
           resolve_default_clang_cxx() {
             if command -v clang++ >/dev/null 2>&1; then
               command -v clang++
@@ -462,6 +475,7 @@ jobs:
             fi
 
             local clang_bin="$1"
+            local fallback_dir="$2"
             local clang_dir clang_name versioned_cxx
             clang_dir="$(dirname "${clang_bin}")"
             clang_name="$(basename "${clang_bin}")"
@@ -478,11 +492,22 @@ jobs:
               printf '%s\n' "${versioned_cxx}"
               return 0
             fi
+
+            if [[ -n "${fallback_dir}" && -x "${fallback_dir}/clang++" ]]; then
+              printf '%s\n' "${fallback_dir}/clang++"
+              return 0
+            fi
+
+            versioned_cxx="$(find "${fallback_dir}" -maxdepth 1 -type f -name 'clang++-*' | sort -V | tail -n 1 || true)"
+            if [[ -n "${versioned_cxx}" && -x "${versioned_cxx}" ]]; then
+              printf '%s\n' "${versioned_cxx}"
+              return 0
+            fi
             return 1
           }
 
-          clang_c="$(command -v clang)"
-          clang_cxx="$(resolve_default_clang_cxx "${clang_c}")"
+          clang_c="$(resolve_default_clang_c "${LLVM_DIR}/bin")"
+          clang_cxx="$(resolve_default_clang_cxx "${clang_c}" "${LLVM_DIR}/bin")"
           echo "PTOAS_CMAKE_C_COMPILER=${clang_c}" >> "${GITHUB_ENV}"
           echo "PTOAS_CMAKE_CXX_COMPILER=${clang_cxx}" >> "${GITHUB_ENV}"
           "${clang_c}" --version | head -n 1
