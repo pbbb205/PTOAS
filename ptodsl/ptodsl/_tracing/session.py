@@ -18,10 +18,11 @@ from .control_flow import (
     yield_carry_loop_state,
 )
 from .._surface_values import unwrap_surface_value, wrap_like_surface_value
+from .._types import _strip_integer_signedness
 
 from mlir.dialects import arith, func
 from mlir.dialects import pto as _pto
-from mlir.ir import InsertionPoint, IntegerType, UnitAttr
+from mlir.ir import FlatSymbolRefAttr, IndexType, InsertionPoint, IntegerType, Operation, UnitAttr
 
 
 @dataclass(frozen=True)
@@ -157,6 +158,27 @@ class TraceSession:
 
     def lower_simt_helper_subkernel(self, subkernel, *args, **kwargs):
         """Lower one ``@pto.simt`` call through a dedicated helper function."""
+        helper_fn, arg_templates = self._get_or_create_simt_helper_function(subkernel, *args, **kwargs)
+
+        i32 = IntegerType.get_signless(32)
+        dim_z = arith.ConstantOp(i32, 1).result
+        dim_y = arith.ConstantOp(i32, 1).result
+        dim_x = arith.ConstantOp(i32, 1).result
+        _pto.StoreVfSimtInfoOp(dim_z, dim_y, dim_x)
+        func.CallOp(helper_fn, [unwrap_surface_value(arg) for arg in arg_templates])
+
+    def lower_simt_launch_subkernel(self, subkernel, *args, dims, **kwargs):
+        """Lower one explicit ``pto.simt_launch`` call through a SIMT helper."""
+        helper_fn, arg_templates = self._get_or_create_simt_helper_function(subkernel, *args, **kwargs)
+        dim_x, dim_y, dim_z = _coerce_simt_launch_dims(dims)
+        Operation.create(
+            "pto.simt_launch",
+            attributes={"callee": FlatSymbolRefAttr.get(subkernel.spec.symbol_name)},
+            operands=[dim_x, dim_y, dim_z, *[unwrap_surface_value(arg) for arg in arg_templates]],
+        )
+
+    def _get_or_create_simt_helper_function(self, subkernel, *args, **kwargs):
+        """Return the reusable ``pto.simt_entry`` helper for *subkernel*."""
         outer_frame = self.current_subkernel
         if outer_frame is not None and outer_frame.role == "simt":
             raise RuntimeError("@pto.simt helper lowering does not support nested SIMT helper calls")
@@ -180,12 +202,7 @@ class TraceSession:
                 subkernel.emit_body(*wrapped_args, **kwargs)
                 func.ReturnOp([])
 
-        i32 = IntegerType.get_signless(32)
-        dim_z = arith.ConstantOp(i32, 1).result
-        dim_y = arith.ConstantOp(i32, 1).result
-        dim_x = arith.ConstantOp(i32, 1).result
-        _pto.StoreVfSimtInfoOp(dim_z, dim_y, dim_x)
-        func.CallOp(helper_fn, [unwrap_surface_value(arg) for arg in arg_templates])
+        return helper_fn, arg_templates
 
     def lookup_helper(self, symbol_name: str):
         """Return a previously declared helper function, or ``None``."""
@@ -216,6 +233,34 @@ class TraceSession:
             raise RuntimeError("PTODSL trace-session exited with an open subkernel lowering frame")
         if self._carry_loop_stack:
             raise RuntimeError("PTODSL trace-session exited with an open loop-carry lowering frame")
+
+
+def _coerce_simt_launch_dims(dims):
+    if not isinstance(dims, (tuple, list)) or len(dims) != 3:
+        raise TypeError("pto.simt_launch(..., dims=...) expects a 3-item (dim_x, dim_y, dim_z) tuple")
+    return tuple(
+        _coerce_i32_dim(dim, context=f"pto.simt_launch(..., dims[{index}])")
+        for index, dim in enumerate(dims)
+    )
+
+
+def _coerce_i32_dim(value, *, context: str):
+    raw_value = unwrap_surface_value(value)
+    i32 = IntegerType.get_signless(32)
+    if isinstance(raw_value, bool):
+        raise TypeError(f"{context} does not accept bool values")
+    if isinstance(raw_value, int):
+        if raw_value < 0:
+            raise ValueError(f"{context} expects a non-negative i32 launch dimension, got {raw_value}")
+        return arith.ConstantOp(i32, raw_value).result
+    if IndexType.isinstance(raw_value.type):
+        return arith.IndexCastOp(i32, raw_value).result
+    if IntegerType.isinstance(raw_value.type):
+        width = IntegerType(raw_value.type).width
+        if width != 32:
+            raise TypeError(f"{context} expects i32 launch dimension, got {raw_value.type}")
+        return _strip_integer_signedness(raw_value)
+    raise TypeError(f"{context} expects i32 launch dimension, got {raw_value.type}")
 
 
 __all__ = [

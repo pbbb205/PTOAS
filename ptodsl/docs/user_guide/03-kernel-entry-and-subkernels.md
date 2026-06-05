@@ -580,6 +580,44 @@ it efficient for per-element operations.
 **Invocation modes**: can be called from `@pto.jit` in either mode, or used
 inline with `with pto.simt():` (Section 3.4).
 
+#### Explicit SIMT launch dimensions
+
+Calling a decorated SIMT helper directly uses the default launch descriptor
+emitted by the tracer. Use `pto.simt_launch` when the launch dimensions must be
+authored explicitly.
+
+```python
+pto.simt_launch(body, *args, dims=(dim_x, dim_y, dim_z))
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `body` | `@pto.simt` function | SIMT entry body to launch |
+| `*args` | PTO values | Arguments passed to the SIMT body; types must match the body signature |
+| `dims` | tuple of 3 `i32`-compatible values | Launch dimensions in `x, y, z` order |
+
+`pto.simt_launch` follows the source-level `x, y, z` launch order. The lower
+level `pto.store_vfsimt_info(dim_z, dim_y, dim_x)` wrapper is also available
+for direct VPTO authoring, but its operand order follows the backend launch
+descriptor order.
+
+#### SIMT query ops
+
+SIMT query ops are nullary micro-op wrappers. They return PTO scalar values
+visible to the current SIMT work-item.
+
+| API | Return | Description |
+|-----|--------|-------------|
+| `pto.get_tid_x()` / `pto.get_tid_y()` / `pto.get_tid_z()` | `i32` | Current work-item coordinate |
+| `pto.get_block_dim_x()` / `pto.get_block_dim_y()` / `pto.get_block_dim_z()` | `i32` | Block dimension in the selected axis |
+| `pto.get_grid_dim_x()` / `pto.get_grid_dim_y()` / `pto.get_grid_dim_z()` | `i32` | Grid dimension in the selected axis |
+| `pto.get_block_idx_x()` / `pto.get_block_idx_y()` / `pto.get_block_idx_z()` | `i32` | Block index in the selected axis |
+| `pto.get_veccoreid()` | `i32` | Vector-core id visible to the work-item |
+| `pto.get_clock32()` | `i32` | 32-bit clock sample |
+| `pto.get_clock64()` | `i64` | 64-bit clock sample |
+| `pto.get_laneid()` | `i32` | Physical SIMT lane id |
+| `pto.get_lanemask_eq()` / `pto.get_lanemask_le()` / `pto.get_lanemask_lt()` / `pto.get_lanemask_ge()` / `pto.get_lanemask_gt()` | `i32` | Lane masks derived from the current lane id |
+
 ## 3.4 Inline context manager syntax
 
 In addition to the decorator form, each sub-kernel unit provides a context

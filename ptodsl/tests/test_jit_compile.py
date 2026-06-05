@@ -400,6 +400,31 @@ def simt_tid_probe():
     pto.get_tid_z()
 
 
+@pto.simt
+def simt_query_probe():
+    pto.get_tid_x()
+    pto.get_tid_y()
+    pto.get_tid_z()
+    pto.get_block_dim_x()
+    pto.get_block_dim_y()
+    pto.get_block_dim_z()
+    pto.get_grid_dim_x()
+    pto.get_grid_dim_y()
+    pto.get_grid_dim_z()
+    pto.get_block_idx_x()
+    pto.get_block_idx_y()
+    pto.get_block_idx_z()
+    pto.get_veccoreid()
+    pto.get_clock32()
+    pto.get_clock64()
+    pto.get_laneid()
+    pto.get_lanemask_eq()
+    pto.get_lanemask_le()
+    pto.get_lanemask_lt()
+    pto.get_lanemask_ge()
+    pto.get_lanemask_gt()
+
+
 @pto.simd
 def ast_subkernel_runtime_for_helper(rows: pto.i32):
     for row in range(0, rows, 1):
@@ -411,6 +436,11 @@ def ast_subkernel_runtime_for_helper(rows: pto.i32):
 def simt_helper_lowering_probe(*, TRACE_TOKEN: pto.const_expr = 0):
     simt_tid_probe()
     simt_tid_probe()
+
+
+@pto.jit(target="a5")
+def simt_explicit_launch_probe(*, TRACE_TOKEN: pto.constexpr = 0):
+    pto.simt_launch(simt_query_probe, dims=(32, 2, 1))
 
 
 @pto.jit(target="a5")
@@ -2468,6 +2498,41 @@ def main() -> None:
     expect("pto.get_tid_x" in simt_text, "SIMT helper body should contain pto.get_tid_x")
     expect("pto.get_tid_y" in simt_text, "SIMT helper body should contain pto.get_tid_y")
     expect("pto.get_tid_z" in simt_text, "SIMT helper body should contain pto.get_tid_z")
+
+    simt_launch_text = simt_explicit_launch_probe.compile(TRACE_TOKEN=1).mlir_text()
+    expect_parse_roundtrip_and_verify(simt_launch_text, "explicit simt launch specialization")
+    expect(
+        "pto.simt_launch @simt_query_probe<<<" in simt_launch_text,
+        "pto.simt_launch(...) should emit VPTO simt_launch sugar",
+    )
+    expect(
+        "func.func @simt_query_probe() attributes {pto.simt_entry}" in simt_launch_text,
+        "explicit pto.simt_launch should materialize a reusable pto.simt_entry helper",
+    )
+    for op_name in (
+        "pto.get_tid_x",
+        "pto.get_tid_y",
+        "pto.get_tid_z",
+        "pto.get_block_dim_x",
+        "pto.get_block_dim_y",
+        "pto.get_block_dim_z",
+        "pto.get_grid_dim_x",
+        "pto.get_grid_dim_y",
+        "pto.get_grid_dim_z",
+        "pto.get_block_idx_x",
+        "pto.get_block_idx_y",
+        "pto.get_block_idx_z",
+        "pto.get_veccoreid",
+        "pto.get_clock32",
+        "pto.get_clock64",
+        "pto.get_laneid",
+        "pto.get_lanemask_eq",
+        "pto.get_lanemask_le",
+        "pto.get_lanemask_lt",
+        "pto.get_lanemask_ge",
+        "pto.get_lanemask_gt",
+    ):
+        expect(op_name in simt_launch_text, f"SIMT query body should contain {op_name}")
 
     ast_subkernel_runtime_for_text = ast_subkernel_runtime_for_probe.compile().mlir_text()
     expect_parse_roundtrip_and_verify(
