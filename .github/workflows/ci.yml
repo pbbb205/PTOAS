@@ -202,14 +202,52 @@ jobs:
             llvm-project/llvm/build-assert
           key: llvm-${{ runner.os }}-${{ env.LLVM_SOURCE_SHA }}-${{ env.LLVM_CACHE_FLAVOR }}
 
+      - name: Resolve default clang toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          resolve_default_clang_cxx() {
+            if command -v clang++ >/dev/null 2>&1; then
+              command -v clang++
+              return 0
+            fi
+
+            local clang_bin="$1"
+            local clang_dir clang_name versioned_cxx
+            clang_dir="$(dirname "${clang_bin}")"
+            clang_name="$(basename "${clang_bin}")"
+            if [[ "${clang_name}" =~ ^clang-([0-9.]+)$ ]]; then
+              versioned_cxx="${clang_dir}/clang++-${BASH_REMATCH[1]}"
+              if [[ -x "${versioned_cxx}" ]]; then
+                printf '%s\n' "${versioned_cxx}"
+                return 0
+              fi
+            fi
+
+            versioned_cxx="$(find "${clang_dir}" -maxdepth 1 -type f -name 'clang++-*' | sort -V | tail -n 1 || true)"
+            if [[ -n "${versioned_cxx}" && -x "${versioned_cxx}" ]]; then
+              printf '%s\n' "${versioned_cxx}"
+              return 0
+            fi
+            return 1
+          }
+
+          clang_c="$(command -v clang)"
+          clang_cxx="$(resolve_default_clang_cxx "${clang_c}")"
+          echo "PTOAS_CMAKE_C_COMPILER=${clang_c}" >> "${GITHUB_ENV}"
+          echo "PTOAS_CMAKE_CXX_COMPILER=${clang_cxx}" >> "${GITHUB_ENV}"
+          "${clang_c}" --version | head -n 1
+          "${clang_cxx}" --version | head -n 1
+
       - name: Build PTOAS
         run: |
           rm -rf "${PTO_BUILD_DIR}"
           rm -rf "${PTO_INSTALL_DIR}"
           # LLVM_BUILD_DIR is the env var read by the build backend (_ptoas_build_backend.py).
           LLVM_BUILD_DIR="${LLVM_DIR}" \
-          CMAKE_C_COMPILER=clang \
-          CMAKE_CXX_COMPILER=clang++ \
+          CMAKE_C_COMPILER="${PTOAS_CMAKE_C_COMPILER}" \
+          CMAKE_CXX_COMPILER="${PTOAS_CMAKE_CXX_COMPILER}" \
             PTO_INSTALL_DIR="${PTO_INSTALL_DIR}" \
             python3 -m pip install . --no-build-isolation --no-deps --ignore-installed --prefix "${PTO_INSTALL_DIR}"
 
@@ -335,7 +373,7 @@ jobs:
         run: |
           set -euo pipefail
           missing_tools=()
-          for tool in python3 git cmake ninja make clang clang++; do
+          for tool in python3 git cmake ninja make clang; do
             if ! command -v "${tool}" >/dev/null 2>&1; then
               missing_tools+=("${tool}")
             fi
@@ -412,6 +450,44 @@ jobs:
 
           ninja -C llvm/build-shared
 
+      - name: Resolve default clang toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          resolve_default_clang_cxx() {
+            if command -v clang++ >/dev/null 2>&1; then
+              command -v clang++
+              return 0
+            fi
+
+            local clang_bin="$1"
+            local clang_dir clang_name versioned_cxx
+            clang_dir="$(dirname "${clang_bin}")"
+            clang_name="$(basename "${clang_bin}")"
+            if [[ "${clang_name}" =~ ^clang-([0-9.]+)$ ]]; then
+              versioned_cxx="${clang_dir}/clang++-${BASH_REMATCH[1]}"
+              if [[ -x "${versioned_cxx}" ]]; then
+                printf '%s\n' "${versioned_cxx}"
+                return 0
+              fi
+            fi
+
+            versioned_cxx="$(find "${clang_dir}" -maxdepth 1 -type f -name 'clang++-*' | sort -V | tail -n 1 || true)"
+            if [[ -n "${versioned_cxx}" && -x "${versioned_cxx}" ]]; then
+              printf '%s\n' "${versioned_cxx}"
+              return 0
+            fi
+            return 1
+          }
+
+          clang_c="$(command -v clang)"
+          clang_cxx="$(resolve_default_clang_cxx "${clang_c}")"
+          echo "PTOAS_CMAKE_C_COMPILER=${clang_c}" >> "${GITHUB_ENV}"
+          echo "PTOAS_CMAKE_CXX_COMPILER=${clang_cxx}" >> "${GITHUB_ENV}"
+          "${clang_c}" --version | head -n 1
+          "${clang_cxx}" --version | head -n 1
+
       - name: Build PTOAS
         shell: bash
         run: |
@@ -420,8 +496,8 @@ jobs:
           rm -rf "${PTO_INSTALL_DIR}"
           # LLVM_BUILD_DIR is the env var read by the build backend (_ptoas_build_backend.py).
           LLVM_BUILD_DIR="${LLVM_DIR}" \
-          CMAKE_C_COMPILER=clang \
-          CMAKE_CXX_COMPILER=clang++ \
+          CMAKE_C_COMPILER="${PTOAS_CMAKE_C_COMPILER}" \
+          CMAKE_CXX_COMPILER="${PTOAS_CMAKE_CXX_COMPILER}" \
             PTO_INSTALL_DIR="${PTO_INSTALL_DIR}" \
             python3 -m pip install . --no-build-isolation --no-deps --ignore-installed --prefix "${PTO_INSTALL_DIR}"
 
