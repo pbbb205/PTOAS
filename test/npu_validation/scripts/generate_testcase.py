@@ -2230,9 +2230,9 @@ def generate_testcase(
         INCLUDE_REPLACEMENT
         + "\n"
         "#if defined(__CCE_AICORE__)\n"
-        f"__global__ AICORE void {kernel_name}({', '.join(raw_params)});\n"
+        f"extern \"C\" __global__ AICORE void {kernel_name}({', '.join(raw_params)});\n"
         "#else\n"
-        f"__global__ AICORE void {kernel_name}({', '.join(raw_params_host)});\n"
+        f"extern \"C\" __global__ AICORE void {kernel_name}({', '.join(raw_params_host)});\n"
         "#endif\n\n"
         f"void {launch_name}({launch_fn_params}) {{\n"
         "#if defined(__CCE_AICORE__)\n"
@@ -2386,6 +2386,7 @@ if(ENABLE_SIM_GOLDEN)
     target_link_directories({testcase}_sim PUBLIC
         ${{ASCEND_HOME_PATH}}/lib64
         ${{ASCEND_HOME_PATH}}/aarch64-linux/simulator/${{SOC_VERSION}}/lib
+        ${{ASCEND_HOME_PATH}}/x86_64-linux/simulator/${{SOC_VERSION}}/lib
         ${{ASCEND_HOME_PATH}}/simulator/${{SOC_VERSION}}/lib
         ${{ASCEND_HOME_PATH}}/tools/simulator/${{SOC_VERSION}}/lib
     )

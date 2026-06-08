@@ -77,6 +77,7 @@ if [[ -n "${ASCEND_HOME_PATH:-}" ]]; then
 
   for d in \
     "${ASCEND_HOME_PATH}/aarch64-linux/simulator/${SIM_SOC_VERSION}/lib" \
+    "${ASCEND_HOME_PATH}/x86_64-linux/simulator/${SIM_SOC_VERSION}/lib" \
     "${ASCEND_HOME_PATH}/simulator/${SIM_SOC_VERSION}/lib" \
     "${ASCEND_HOME_PATH}/tools/simulator/${SIM_SOC_VERSION}/lib"; do
     [[ -d "$d" ]] && LD_LIBRARY_PATH_SIM="$d:${LD_LIBRARY_PATH_SIM}"
