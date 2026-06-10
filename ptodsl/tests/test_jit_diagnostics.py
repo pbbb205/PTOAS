@@ -14,6 +14,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "ptodsl"))
 
 from ptodsl import pto
+from ptodsl._ast_rewrite import PTODSLAstRewriteError
 from ptodsl._host_tensors import inspect_host_tensor_metadata
 
 
@@ -33,13 +34,13 @@ def expect_raises(callback, exc_type, *message_fragments: str) -> None:
         raise AssertionError(f"expected {exc_type.__name__} to be raised")
 
 
-@pto.jit(target="a5")
+@pto.jit(target="a5", ast_rewrite=False)
 def native_python_if_runtime_const_probe():
     if pto.const(1):
         pto.pipe_barrier(pto.Pipe.ALL)
 
 
-@pto.jit(target="a5")
+@pto.jit(target="a5", ast_rewrite=False)
 def native_python_range_runtime_metadata_probe(rows: pto.i32):
     for _ in range(rows):
         pto.pipe_barrier(pto.Pipe.ALL)
@@ -148,6 +149,110 @@ def define_legacy_tensor_spec_entry_probe():
     @pto.jit(target="a5")
     def bad_probe(A: pto.tensor_spec(rank=2, dtype=pto.f32)):
         pto.pipe_barrier(pto.Pipe.ALL)
+
+    return bad_probe
+
+
+def define_frontend_options_conflict_probe():
+    @pto.jit(target="a5", ast_rewrite=False, frontend_options={"ast_rewrite": True})
+    def bad_probe():
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+    return bad_probe
+
+
+def define_frontend_options_scalar_rewrite_probe():
+    @pto.jit(target="a5", frontend_options={"rewrite_part": {"control_flow", "scalar"}})
+    def bad_probe():
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+    return bad_probe
+
+
+def define_frontend_options_dump_source_probe():
+    @pto.jit(target="a5", frontend_options={"dump_rewritten_source": True})
+    def bad_probe():
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+    return bad_probe
+
+
+def define_ast_if_undefined_old_value_probe():
+    @pto.jit(target="a5")
+    def bad_probe():
+        cond = pto.const(1, dtype=pto.i1)
+        lhs = pto.const(4, dtype=pto.i32)
+        if cond:
+            value = lhs
+        _ = value
+
+    return bad_probe
+
+
+def define_ast_for_else_probe():
+    @pto.jit(target="a5")
+    def bad_probe(rows: pto.i32):
+        for _ in range(rows):
+            pto.pipe_barrier(pto.Pipe.ALL)
+        else:
+            pto.mem_bar(pto.BarrierType.VST_VLD)
+
+    return bad_probe
+
+
+def define_ast_for_non_range_probe():
+    @pto.jit(target="a5")
+    def bad_probe():
+        for _ in [0, 1]:
+            pto.pipe_barrier(pto.Pipe.ALL)
+
+    return bad_probe
+
+
+def define_ast_for_tuple_target_probe():
+    @pto.jit(target="a5")
+    def bad_probe(rows: pto.i32):
+        for _, other in range(rows):
+            _ = other
+
+    return bad_probe
+
+
+def define_ast_for_break_probe():
+    @pto.jit(target="a5")
+    def bad_probe(rows: pto.i32):
+        for _ in range(rows):
+            break
+
+    return bad_probe
+
+
+def define_ast_runtime_for_constexpr_break_probe():
+    @pto.jit(target="a5")
+    def bad_probe(rows: pto.i32):
+        for _ in range(rows):
+            if pto.const_expr(True):
+                break
+
+    return bad_probe
+
+
+def define_ast_for_last_value_probe():
+    @pto.jit(target="a5")
+    def bad_probe(rows: pto.i32):
+        for i in range(rows):
+            last = i
+        _ = last
+
+    return bad_probe
+
+
+def define_ast_for_loop_target_live_after_probe():
+    @pto.jit(target="a5")
+    def bad_probe(rows: pto.i32):
+        for i in range(rows):
+            pto.pipe_barrier(pto.Pipe.ALL)
+        _ = i
 
     return bad_probe
 
@@ -334,6 +439,66 @@ def main() -> None:
         "@pto.jit positional parameter 'A' still uses legacy host-tensor entry annotation",
         "no longer accepts pto.tensor_spec(...)",
         "pto.make_tensor_view(...)",
+    )
+    expect_raises(
+        define_frontend_options_conflict_probe,
+        ValueError,
+        "ast_rewrite conflicts with frontend_options",
+    )
+    expect_raises(
+        define_frontend_options_scalar_rewrite_probe,
+        ValueError,
+        "rewrite_part",
+        "currently only supports",
+        "scalar",
+    )
+    expect_raises(
+        define_frontend_options_dump_source_probe,
+        ValueError,
+        "dump_rewritten_source",
+        "reserved but not implemented",
+    )
+    expect_raises(
+        lambda: define_ast_if_undefined_old_value_probe().compile(),
+        NameError,
+        "value",
+    )
+    expect_raises(
+        lambda: define_ast_for_else_probe().compile(),
+        PTODSLAstRewriteError,
+        "does not support for-else",
+    )
+    expect_raises(
+        lambda: define_ast_for_non_range_probe().compile(),
+        PTODSLAstRewriteError,
+        "only rewrites for-loops over range(...)",
+    )
+    expect_raises(
+        lambda: define_ast_for_tuple_target_probe().compile(),
+        PTODSLAstRewriteError,
+        "runtime for-loops require a simple name target",
+    )
+    expect_raises(
+        lambda: define_ast_for_break_probe().compile(),
+        PTODSLAstRewriteError,
+        "does not support break/continue",
+    )
+    expect_raises(
+        lambda: define_ast_runtime_for_constexpr_break_probe().compile(),
+        PTODSLAstRewriteError,
+        "does not support break/continue",
+    )
+    expect_raises(
+        lambda: define_ast_for_last_value_probe().compile(),
+        PTODSLAstRewriteError,
+        "cannot expose last-iteration-only values yet",
+        "last",
+    )
+    expect_raises(
+        lambda: define_ast_for_loop_target_live_after_probe().compile(),
+        PTODSLAstRewriteError,
+        "cannot expose the loop induction variable outside the loop yet",
+        "i",
     )
     expect_raises(
         make_tensor_view_missing_metadata_probe.compile,

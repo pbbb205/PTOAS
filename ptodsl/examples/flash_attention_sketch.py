@@ -51,9 +51,10 @@ Design rules illustrated here:
    Hiding these dependencies with in-place aliases makes the algorithm harder
    to read and obscures what the DSL needs to express.
 
-Because this demo targets a tracing-style frontend, any control flow that
-must reach MLIR is expressed with structured DSL constructs such as
-``pto.for_`` instead of native Python ``for`` loops.
+Because PTODSL rewrites JIT function ASTs by default, runtime Python
+``if`` / ``for range(...)`` in this demo lowers to structured MLIR control
+flow. Use ``pto.const_expr`` / ``pto.static_range`` only for intentionally
+compile-time control flow.
 
 Scalar literals and simple index/integer conversions are also written in the
 authored PTODSL surface. The current frontend lowers these through tracing
@@ -286,7 +287,7 @@ def flash_attention_kernel(
     meta_tile = pto.alloc_tile(shape=[1, 8], dtype=pto.i32, valid_shape=[1, 3])
     meta_ptr = meta_tile.as_ptr()
 
-    with pto.for_(0, q_blocks, step=1) as qi:
+    for qi in range(0, q_blocks, 1):
         q_rows = _block_valid_extent(seq_q, qi, Br)
         q_part = pto.partition_view(q_head, offsets=[0, qi * Br, 0, 0], sizes=[1, q_rows, 1, dim])
         o_part = pto.partition_view(o_head, offsets=[0, qi * Br, 0, 0], sizes=[1, q_rows, 1, dim])
@@ -313,16 +314,10 @@ def flash_attention_kernel(
         l_prev_tile.fill(0.0)
         o_prev_tile.fill(0.0)
 
-        kv_loop = pto.for_(0, kv_blocks, step=1).carry(
-            m=m_prev_tile,
-            l=l_prev_tile,
-            o=o_prev_tile,
-        )
-        with kv_loop:
-            kj = kv_loop.iv
-            m_cur = kv_loop.m
-            l_cur = kv_loop.l
-            o_cur = kv_loop.o
+        m_cur = m_prev_tile
+        l_cur = l_prev_tile
+        o_cur = o_prev_tile
+        for kj in range(0, kv_blocks, 1):
             kv_rows = _block_valid_extent(seq_k, kj, Bc)
             k_part = pto.partition_view(k_head, offsets=[0, kj * Bc, 0, 0], sizes=[1, kv_rows, 1, dim])
             v_part = pto.partition_view(v_head, offsets=[0, kj * Bc, 0, 0], sizes=[1, kv_rows, 1, dim])
@@ -364,16 +359,13 @@ def flash_attention_kernel(
                 meta_ptr,
             )
 
-            # Loop-carried state is still explicit, but the authored surface no
-            # longer mirrors raw scf.iter_args / scf.yield spellings.
-            kv_loop.update(
-                m=m_next_tile,
-                l=l_next_tile,
-                o=o_next_tile,
-            )
+            # Loop-carried state stays visible in Python while AST rewrite
+            # lowers it to scf.iter_args / scf.yield.
+            m_cur = m_next_tile
+            l_cur = l_next_tile
+            o_cur = o_next_tile
 
-        o_final_tile = kv_loop.final("o")
-        pto.tile.store(o_final_tile, o_part)
+        pto.tile.store(o_cur, o_part)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -467,7 +459,7 @@ def online_softmax_rows(
     ``alpha`` and ``beta`` are kept explicitly because the output update needs
     both the old accumulator and the newly computed ``P @ V`` contribution.
     """
-    with pto.for_(row_start, row_stop, step=1) as row:
+    for row in range(row_start, row_stop, 1):
         col_mask = pto.make_mask(pto.f32, valid_cols)
 
         s_row = pto.vlds(s_tile[row, 0:])
@@ -515,11 +507,11 @@ def blend_output_rows(
     while the final blend is expressed here as explicit scalar work-items over
     the tile domain.
     """
-    with pto.for_(row_start, row_stop, step=1) as row:
+    for row in range(row_start, row_stop, 1):
         alpha = scalar.load(alpha_tile[row, 0])
         beta = scalar.load(beta_tile[row, 0])
 
-        with pto.for_(0, valid_dim, step=1) as col:
+        for col in range(0, valid_dim, 1):
             o_prev = scalar.load(o_prev_tile[row, col])
             pv_val = scalar.load(pv_tile[row, col])
 

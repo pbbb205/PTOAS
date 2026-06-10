@@ -4,14 +4,17 @@ PTODSL uses a **tracing** compilation model. When you call `kernel.compile(...)`
 
 This has one critical implication for how you write loops and branches:
 
-- **Python native `for`/`if`** runs at trace time. A `for i in range(4)` loop gets unrolled — the device code contains four copies of the body, not a loop instruction. An `if` condition is evaluated at trace time, and only the taken branch is recorded.
+- **Python native `for`/`if`** is rewritten to device-side control flow by default in `@pto.jit` bodies and named `@pto.cube` / `@pto.simd` / `@pto.simt` sub-kernels. A `for i in range(rows)` loop records a device loop, and a runtime `if` records both branches.
+- **`pto.const_expr` / `pto.static_range`** keep compile-time Python behavior when you want trace-time specialization or unrolling.
 - **`pto.for_` / `pto.if_`** produce device-side control flow. The loop bound or branch condition can be a runtime value, and the hardware will execute the loop or take the branch dynamically.
 
-**Simple rule: Python control flow = trace time (compile-time). `pto.*` control flow = device-side (runtime).**
+**Simple rule: Python control flow = device-side by default. Use `pto.const_expr` / `pto.static_range` for compile-time control flow.**
 
-## 5.1 Python native `for` — trace-time unrolling
+## 5.1 Trace-time unrolling
 
-When you write a plain Python `for` loop inside a kernel body, Python executes it immediately during tracing. Each iteration records its instructions separately, so the device code gets a linear sequence with the body repeated:
+Use `pto.static_range(...)` when a loop should execute during tracing. Each
+iteration records its instructions separately, so the device code gets a linear
+sequence with the body repeated:
 
 ```python
 @pto.jit(target="a5")
@@ -19,9 +22,9 @@ def unrolled_kernel(A, O, *, N: pto.constexpr):
     a_view = pto.make_tensor_view(A, shape=[N], strides=A.strides)
     o_view = pto.make_tensor_view(O, shape=[N], strides=O.strides)
 
-    # N is constexpr, so range(N) is known at trace time.
+    # N is constexpr, so static_range(N) is known at trace time.
     # The loop unrolls: the device gets N copies of the body.
-    for i in range(N):
+    for i in pto.static_range(N):
         a_part = pto.partition_view(a_view, offsets=[i], sizes=[1])
         o_part = pto.partition_view(o_view, offsets=[i], sizes=[1])
         a_tile = pto.alloc_tile(shape=[1], dtype=pto.f32)
@@ -31,7 +34,9 @@ def unrolled_kernel(A, O, *, N: pto.constexpr):
         pto.tile.store(o_tile, o_part)
 ```
 
-This works when the loop bound is a compile-time constant (like a `constexpr` parameter). But if `N` comes from a tensor shape and varies per launch, `range(N)` would trace a different number of iterations each time — you would get a cache miss and recompilation on every new value. For dynamic bounds, use `pto.for_`.
+This works when the loop bound is a compile-time constant, such as a
+`constexpr` parameter. For dynamic bounds, use native `range(...)` in the
+default AST rewrite mode or use explicit `pto.for_`.
 
 ## 5.2 `pto.for_` — device-side loops
 
@@ -54,7 +59,7 @@ Compare the two approaches:
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"control_flow.compare_loops","symbol":"control_flow_compare_loops_probe","compile":{"BLOCK":8}} -->
 ```python
 # Trace-time unrolling — BLOCK must be constexpr
-for i in range(BLOCK):
+for i in pto.static_range(BLOCK):
     pto.tile.load(pto.partition_view(a_view, offsets=[0, 0], sizes=[1, cols]), tile)
 
 # Device-side loop — num_blocks can be dynamic
@@ -224,15 +229,14 @@ def kernel(
     num_blocks = (N + BLOCK - 1) // BLOCK
 
     # N and num_blocks are runtime values derived from tensor metadata.
-    # They can drive device-side control flow such as pto.for_(...),
-    # but they are not Python integers and cannot be used in range(...).
+    # They can drive native range(...) loops in the default AST rewrite mode.
     with pto.for_(0, num_blocks, step=1) as i:
         ...
 
-    if UNROLL:
+    if pto.const_expr(UNROLL):
         # Trace-time: UNROLL and NUM_BLOCKS are both known during tracing.
         # Each iteration records separately, so the loop is fully unrolled.
-        for i in range(NUM_BLOCKS):
+        for i in pto.static_range(NUM_BLOCKS):
             ...
     else:
         # The non-unrolled path can still use a device-side loop whose bound
@@ -243,12 +247,293 @@ def kernel(
 
 This lets you write a single kernel that specializes into different strategies based on constexpr knobs, while still using runtime tensor metadata for device-side control flow.
 
-## 5.5 Summary
+## 5.5 Native Python control-flow rewrite
+
+`@pto.jit` rewrites supported native Python control flow before tracing. In the
+default mode, plain Python `if` and `for range(...)` in the rewritten scope
+become device-side control flow. Use `pto.const_expr(...)` and
+`pto.static_range(...)` when you want trace-time behavior.
+
+### Runtime branches
+
+By default, a native Python `if` becomes a device-side conditional:
+
+<!-- ptodsl-doc-test: {"mode":"compile","symbol":"ast_rewrite_branch_kernel","compile":{}} -->
+```python
+@pto.jit(target="a5")
+def ast_rewrite_branch_kernel():
+    lhs = pto.const(4, dtype=pto.i32)
+    rhs = pto.const(2, dtype=pto.i32)
+
+    if lhs > rhs:
+        total = lhs + rhs
+    else:
+        total = rhs + lhs
+
+    _ = total
+```
+
+The assigned value `total` is live after the branch, so PTODSL rewrites the
+branch into a `pto.if_` with automatic merge.
+
+If a live-out value is assigned in only one branch, PTODSL keeps the old value
+on the missing branch:
+
+<!-- ptodsl-doc-test: {"mode":"compile","symbol":"ast_rewrite_old_value_branch_kernel","compile":{}} -->
+```python
+@pto.jit(target="a5")
+def ast_rewrite_old_value_branch_kernel():
+    lhs = pto.const(4, dtype=pto.i32)
+    rhs = pto.const(2, dtype=pto.i32)
+    total = rhs
+
+    if lhs > rhs:
+        total = lhs + rhs
+
+    _ = total
+```
+
+Side-effect-only branches are also supported:
+
+<!-- ptodsl-doc-test: {"mode":"compile","symbol":"ast_rewrite_side_effect_kernel","compile":{}} -->
+```python
+@pto.jit(target="a5")
+def ast_rewrite_side_effect_kernel():
+    cond = pto.const(1, dtype=pto.i1)
+    if cond:
+        pto.pipe_barrier(pto.Pipe.ALL)
+```
+
+### Runtime loops
+
+Native `range(...)` loops become device-side loops:
+
+<!-- ptodsl-doc-test: {"mode":"compile","symbol":"ast_rewrite_loop_kernel","compile":{}} -->
+```python
+@pto.jit(target="a5")
+def ast_rewrite_loop_kernel(rows: pto.i32):
+    for row in range(0, rows, 1):
+        _ = row
+        pto.pipe_barrier(pto.Pipe.ALL)
+```
+
+The supported range forms are:
+
+```python
+range(stop)
+range(start, stop)
+range(start, stop, step)
+```
+
+The loop target must be a simple name.
+
+### Loop-carried values
+
+Accumulator-style loops are rewritten through `pto.for_(...).carry(...)`:
+
+<!-- ptodsl-doc-test: {"mode":"compile","symbol":"ast_rewrite_accumulator_kernel","compile":{}} -->
+```python
+@pto.jit(target="a5")
+def ast_rewrite_accumulator_kernel(rows: pto.i32):
+    one = pto.const(1, dtype=pto.i32)
+    acc = pto.const(0, dtype=pto.i32)
+
+    for _ in range(rows):
+        acc = acc + one
+
+    _ = acc
+```
+
+This lowers to an `scf.for` with `iter_args`.
+
+The first implementation requires a carried value to have an initial value and
+to be read before it is reassigned in the loop body. If you need a more complex
+loop state pattern, use the explicit API:
+
+```python
+loop = pto.for_(0, rows, step=1).carry(acc=acc)
+with loop:
+    acc = loop.acc
+    acc = acc + one
+    loop.update(acc=acc)
+acc = loop.final("acc")
+```
+
+### Compile-time control flow
+
+In the default AST rewrite mode, plain `if` and `range(...)` are runtime
+control flow. Use explicit compile-time helpers when you want trace-time
+behavior.
+
+Use `pto.const_expr(...)` for trace-time branches:
+
+<!-- ptodsl-doc-test: {"mode":"compile","symbol":"ast_rewrite_static_branch_kernel","compile":{"ENABLE":true}} -->
+```python
+@pto.jit(target="a5")
+def ast_rewrite_static_branch_kernel(*, ENABLE: pto.constexpr = True):
+    if pto.const_expr(ENABLE):
+        pto.pipe_barrier(pto.Pipe.ALL)
+```
+
+Use `pto.static_range(...)` for trace-time unrolling:
+
+<!-- ptodsl-doc-test: {"mode":"compile","symbol":"ast_rewrite_static_loop_kernel","compile":{}} -->
+```python
+@pto.jit(target="a5")
+def ast_rewrite_static_loop_kernel():
+    for _ in pto.static_range(2):
+        pto.pipe_barrier(pto.Pipe.ALL)
+```
+
+`pto.static_range(...)` keeps Python `for` semantics. The loop target remains
+available after the loop:
+
+<!-- ptodsl-doc-test: {"mode":"compile","symbol":"ast_rewrite_static_loop_target_kernel","compile":{}} -->
+```python
+@pto.jit(target="a5")
+def ast_rewrite_static_loop_target_kernel():
+    for stage in pto.static_range(2):
+        pto.pipe_barrier(pto.Pipe.ALL)
+    _ = stage
+```
+
+### Compatibility and nested helpers
+
+AST rewrite defaults to `True` on `@pto.jit` and named sub-kernel decorators.
+
+Explicit control-flow APIs continue to work alongside rewritten Python control
+flow:
+
+```python
+with pto.if_(cond) as br:
+    ...
+
+with pto.for_(0, rows, step=1) as row:
+    ...
+```
+
+For `@pto.jit`, the rewrite runs when a specialization is compiled, so Python
+closure values are read at compile time rather than when the decorator is
+evaluated. Named sub-kernel decorators use the same source rewrite semantics
+when their body is traced.
+
+Nested Python helper bodies follow the same rule as the outer kernel body:
+their supported Python `if` and `for range(...)` statements are rewritten to
+runtime control flow by default.
+
+Functions created by `exec`, REPLs, notebooks, or other dynamic generators may
+not expose retrievable Python source through `inspect.getsource(...)`. In that
+case, or when the source cannot be matched back to a unique function
+definition, PTODSL falls back to the original trace-time Python function
+instead of rewriting it. Use source-backed functions for native Python runtime
+`if` / `for range(...)`; fallback tracing still only supports ordinary Python
+compile-time control flow.
+
+<!-- ptodsl-doc-test: {"mode":"compile","symbol":"ast_rewrite_nested_helper_kernel","compile":{}} -->
+```python
+@pto.jit(target="a5")
+def ast_rewrite_nested_helper_kernel():
+    cond = pto.const(1, dtype=pto.i1)
+
+    def helper(enabled):
+        if enabled:
+            for _ in range(2):
+                pto.pipe_barrier(pto.Pipe.ALL)
+
+    helper(cond)
+```
+
+Helper-local compile-time control flow still uses `pto.const_expr(...)` and
+`pto.static_range(...)`.
+Plain Python boolean guards also remain trace-time branches. This keeps
+constexpr comparisons such as `if BLOCK == 128:` and boolean flags such as
+`if ENABLE:` compatible with the default rewrite mode. Device-side conditions
+must be PTO scalar values and lower through rewritten Python `if` or explicit
+`pto.if_`.
+
+### Debugging legacy tracing
+
+`ast_rewrite=False` is a developer/debug escape hatch. It restores legacy
+trace-time Python control flow for a specific `@pto.jit` kernel or named
+sub-kernel so you can isolate rewrite issues while developing PTODSL itself.
+It is not the recommended user-facing mode for new examples or kernels.
+
+```python
+@pto.jit(target="a5", ast_rewrite=False)
+def debug_kernel(*, BLOCK: pto.constexpr = 4):
+    for _ in range(BLOCK):
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+
+@pto.simd(ast_rewrite=False)
+def debug_simd_helper():
+    if pto.const_expr(True):
+        pto.pipe_barrier(pto.Pipe.ALL)
+```
+
+The same switch is available through `frontend_options`:
+
+```python
+@pto.jit(
+    target="a5",
+    frontend_options={
+        "ast_rewrite": False,
+    },
+)
+def debug_options_disable_rewrite_kernel(*, BLOCK: pto.constexpr = 4):
+    for _ in range(BLOCK):
+        pto.pipe_barrier(pto.Pipe.ALL)
+```
+
+Do not pass conflicting values through both spellings. For example,
+`@pto.jit(ast_rewrite=False, frontend_options={"ast_rewrite": True})` is
+rejected.
+
+When this mode is disabled for a function, native Python `if` / `for` executes
+while tracing that function. Runtime device-side control flow should still use
+the default rewrite mode, or explicit `pto.if_` / `pto.for_` APIs when you need
+manual control.
+
+The structured `frontend_options` argument is reserved for frontend rewrite
+debugging and future rewrite passes. Today it accepts the same AST rewrite
+switch plus a rewrite-part selector:
+
+```python
+@pto.jit(
+    target="a5",
+    frontend_options={
+        "ast_rewrite": True,
+        "rewrite_part": {"control_flow"},
+        "dump_rewritten_source": False,
+    },
+)
+def debug_frontend_options_kernel():
+    pto.pipe_barrier(pto.Pipe.ALL)
+```
+
+`rewrite_part` currently only accepts `"control_flow"`. Future frontend
+rewrite passes should add their selector names here. `dump_rewritten_source`
+is reserved for debugging output and currently must remain `False`.
+
+### Unsupported patterns
+
+The first version does not support:
+
+- `break` or `continue` in rewritten runtime loops;
+- `for ... else`;
+- runtime loops over iterables other than `range(...)`;
+- tuple/list loop targets;
+- using the runtime loop induction variable after the loop;
+- last-iteration-only loop values without an initial carried value.
+
+Use explicit `pto.if_` / `pto.for_` if a kernel needs one of those patterns.
+
+## 5.6 Summary
 
 | Construct | When evaluated | Use for |
 |-----------|---------------|---------|
-| Python `for` | Trace time | Bounds known at compile time (constexpr), deliberate unrolling |
-| Python `if` | Trace time | Conditions known at compile time, variant selection |
+| Python `for` / `if` | Device-side | Native syntax for dynamic loops and branches |
+| `pto.const_expr` / `pto.static_range` | Trace time | Compile-time branches and unrolling |
 | `pto.for_` | Device-side | Dynamic bounds, runtime loop counts |
 | `pto.for_(...).carry(...)` | Device-side | Loops with accumulated state across iterations |
 | `pto.if_` | Device-side | Runtime conditions, data-dependent branching |

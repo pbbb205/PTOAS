@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Mapping
 
 from ._diagnostics import invalid_jit_mode_error
 from ._kernel_compilation import CompiledKernelHandle, KernelCompiler
@@ -24,6 +25,8 @@ from mlir.ir import InsertionPoint
 
 
 _MODULE_ATTRS = ("pto.target_arch", "pto.kernel_kind", "pto.mode")
+_SUPPORTED_FRONTEND_OPTION_KEYS = {"ast_rewrite", "rewrite_part", "dump_rewritten_source"}
+_SUPPORTED_REWRITE_PARTS = {"control_flow"}
 
 
 def _normalize_mode(mode: str, *, fn=None) -> str:
@@ -50,6 +53,49 @@ def _normalize_mode(mode: str, *, fn=None) -> str:
 def _module_attr_map(module):
     attrs = module.operation.attributes
     return {name: str(attrs[name]) for name in _MODULE_ATTRS if name in attrs}
+
+
+def _normalize_frontend_options(*, ast_rewrite, frontend_options):
+    if frontend_options is None:
+        return True if ast_rewrite is None else bool(ast_rewrite)
+    if not isinstance(frontend_options, Mapping):
+        raise TypeError("@pto.jit frontend_options must be a mapping")
+
+    unknown = set(frontend_options) - _SUPPORTED_FRONTEND_OPTION_KEYS
+    if unknown:
+        raise ValueError(f"@pto.jit frontend_options has unsupported keys: {sorted(unknown)!r}")
+
+    option_ast_rewrite = frontend_options.get("ast_rewrite")
+    if option_ast_rewrite is not None and not isinstance(option_ast_rewrite, bool):
+        raise TypeError("@pto.jit frontend_options['ast_rewrite'] must be a bool")
+    if ast_rewrite is not None and option_ast_rewrite is not None and bool(ast_rewrite) != option_ast_rewrite:
+        raise ValueError("@pto.jit ast_rewrite conflicts with frontend_options['ast_rewrite']")
+
+    enabled = option_ast_rewrite if option_ast_rewrite is not None else (True if ast_rewrite is None else bool(ast_rewrite))
+
+    rewrite_part = frontend_options.get("rewrite_part", {"control_flow"})
+    if isinstance(rewrite_part, str):
+        rewrite_parts = {rewrite_part}
+    else:
+        try:
+            rewrite_parts = set(rewrite_part)
+        except TypeError as exc:
+            raise TypeError("@pto.jit frontend_options['rewrite_part'] must be a string or iterable of strings") from exc
+    unsupported_parts = rewrite_parts - _SUPPORTED_REWRITE_PARTS
+    if unsupported_parts:
+        raise ValueError(
+            "@pto.jit frontend_options['rewrite_part'] currently only supports "
+            f"{sorted(_SUPPORTED_REWRITE_PARTS)!r}; got unsupported parts: {sorted(unsupported_parts)!r}"
+        )
+    if enabled and "control_flow" not in rewrite_parts:
+        raise ValueError("@pto.jit ast_rewrite=True requires rewrite_part to include 'control_flow'")
+
+    dump_rewritten_source = frontend_options.get("dump_rewritten_source", False)
+    if not isinstance(dump_rewritten_source, bool):
+        raise TypeError("@pto.jit frontend_options['dump_rewritten_source'] must be a bool")
+    if dump_rewritten_source:
+        raise ValueError("@pto.jit frontend_options['dump_rewritten_source']=True is reserved but not implemented yet")
+    return enabled
 
 
 def merge_jit_modules(*kernels: KernelHandle):
@@ -89,6 +135,8 @@ def jit(
     kernel_kind: str = "vector",
     mode: str = "auto",
     insert_sync: bool | None = None,
+    ast_rewrite: bool | None = None,
+    frontend_options: Mapping | None = None,
 ):
     """
     Decorator that wraps a Python function as a PTODSL JIT kernel template.
@@ -102,6 +150,14 @@ def jit(
     insert_sync: ``True``/``False`` to explicitly control PTOAS sync insertion
                  for launch builds. ``None`` keeps the mode-based default
                  behavior.
+    ast_rewrite:
+                 ``True`` enables AST rewriting of Python ``if`` /
+                 ``for range(...)`` into device-side PTODSL control flow.
+                 Defaults to ``True``. ``False`` is intended for frontend
+                 debugging and trace-time compatibility checks.
+    frontend_options:
+                 Reserved structured frontend options. Currently supports
+                 ``ast_rewrite`` and ``rewrite_part={"control_flow"}``.
 
     The decorated function is replaced by a :class:`KernelHandle` that:
 
@@ -111,6 +167,10 @@ def jit(
       default specialization for convenience.
     - emits a flat aicore launch-entry module by default.
     """
+    normalized_ast_rewrite = _normalize_frontend_options(
+        ast_rewrite=ast_rewrite,
+        frontend_options=frontend_options,
+    )
 
     def decorator(fn):
         fn_name = name or fn.__name__
@@ -135,6 +195,7 @@ def jit(
             ),
             kernel_signature,
             fn,
+            ast_rewrite=normalized_ast_rewrite,
         )
         return KernelHandle(fn.__name__, compiler)
 

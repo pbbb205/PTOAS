@@ -17,6 +17,8 @@ Public API
                           – ``scf.for`` with optional named carry state via ``.carry(...)``
 ``if_(cond)``             – ``scf.if`` via explicit branch handle + automatic named merge
 ``yield_(*vals)``         – ``scf.yield``
+``static_range(...)``     – trace-time ``range(...)`` escape hatch for AST rewrite
+``const_expr(value)``     – trace-time ``if`` escape hatch for AST rewrite
 """
 
 from ._bootstrap import make_context  # noqa: F401
@@ -47,6 +49,18 @@ class _VecScopeCM:
 def vecscope() -> _VecScopeCM:
     """Return a context manager that emits ``pto.vecscope { … }``."""
     return _VecScopeCM()
+
+
+# ── compile-time control-flow helpers ─────────────────────────────────────────
+
+def static_range(*args):
+    """Return ``range(*args)`` for trace-time unrolling under AST rewrite."""
+    return range(*args)
+
+
+def const_expr(value):
+    """Return Python truthiness for trace-time branches under AST rewrite."""
+    return bool(value)
 
 
 # ── for_ ──────────────────────────────────────────────────────────────────────
@@ -573,6 +587,6 @@ def yield_(*vals):
 
 
 __all__ = [
-    "vecscope", "LoopHandle", "BranchHandle",
+    "vecscope", "static_range", "const_expr", "LoopHandle", "BranchHandle",
     "for_", "if_", "yield_",
 ]

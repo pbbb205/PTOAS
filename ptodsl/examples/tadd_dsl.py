@@ -20,7 +20,7 @@ The Python code maps 1-to-1 to the MLIR IR lines:
       …
       pto.simd {                              # with pto.simd():
         %0 = pto.castptr %c4096_i64 …        #   pto.castptr(c4096_i64, …)
-        scf.for %arg0 = %c0 to %c16 … {      #   with pto.for_(c0, c16, step=c1) as i:
+        scf.for %arg0 = %c0 to %c16 … {      #   for i in range(c0, c16, c1):
           %mask, _ = pto.plt_b32 …           #     pto.plt_b32(c64_i32)
           …
         }
@@ -49,7 +49,7 @@ def TADD():
         ptr_src      = pto.castptr(c4096_i64, ptr_f32_ub)
         ptr_dst      = pto.castptr(c0_i64,    ptr_f32_ub)
 
-        with pto.for_(c0, c16, step=c1) as tile_idx:
+        for tile_idx in range(c0, c16, c1):
             mask, _      = pto.plt_b32(c64_i32)
             tile_off     = s.muli(tile_idx, c64)
             va           = pto.vlds(pto.addptr(ptr_src, tile_off), c0, vf32)

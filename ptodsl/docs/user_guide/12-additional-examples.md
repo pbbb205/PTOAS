@@ -31,9 +31,9 @@ def mat_add(
     num_m = (M + BLOCK_M - 1) // BLOCK_M
     num_n = (N_ + BLOCK_N - 1) // BLOCK_N
 
-    with pto.for_(0, num_m, step=1) as mi:
+    for mi in range(0, num_m, 1):
         m_off = mi * BLOCK_M
-        with pto.for_(0, num_n, step=1) as ni:
+        for ni in range(0, num_n, 1):
             n_off = ni * BLOCK_N
 
             a_part = pto.partition_view(a_view, offsets=[block_idx, m_off, n_off], sizes=[1, BLOCK_M, BLOCK_N])
@@ -83,19 +83,15 @@ def add_rows_with_tail(a_tile: pto.Tile, b_tile: pto.Tile, o_tile: pto.Tile,
                        rows: pto.i32, cols: pto.i32):
     VEC = pto.elements_per_vreg(pto.f32)          # 64 for f32
 
-    with pto.for_(0, rows, step=1) as r:
-        col_loop = pto.for_(0, cols, step=VEC).carry(remained=cols)
-        with col_loop:
-            c = col_loop.iv
-            remained = col_loop.remained
+    for r in range(0, rows, 1):
+        remained = cols
+        for c in range(0, cols, VEC):
             mask, remained = pto.make_mask(pto.f32, remained)
 
             a_vec = pto.vlds(a_tile[r, c:])       # load under mask
             b_vec = pto.vlds(b_tile[r, c:])
             o_vec = pto.vadd(a_vec, b_vec, mask)  # compute under mask
             pto.vsts(o_vec, o_tile[r, c:], mask)  # store under mask
-
-            col_loop.update(remained=remained)
 ```
 
 The pattern:
@@ -103,7 +99,7 @@ The pattern:
 1. **Chunk**: Each iteration processes `VEC` elements (one vector register's worth).
 2. **Mask**: `make_mask` returns a predicate and the updated remainder. On the last iteration, where `remained < VEC`, the mask has `remained` valid lanes followed by inactive lanes.
 3. **Guard**: `vlds`, `vadd`, and `vsts` all accept the mask — inactive lanes are neither loaded, computed, nor stored.
-4. **Carry**: `.carry(remained=cols)` carries the remaining column count across iterations. `col_loop.update(remained=remained)` feeds the updated count to the next iteration.
+4. **Carry**: assigning `remained` in the Python loop body makes it loop-carried state after AST rewrite.
 
 ### 12.2.2 Tile-level tail handling
 
@@ -130,7 +126,7 @@ def vec_add_with_tail(
 
     num_blocks = (N + BLOCK - 1) // BLOCK
 
-    with pto.for_(0, num_blocks, step=1) as i:
+    for i in range(0, num_blocks, 1):
         offset = i * BLOCK
         this_block = scalar.min(BLOCK, N - offset)
 
@@ -221,16 +217,16 @@ def gemm(
     num_n = (N_ + BLOCK_N - 1) // BLOCK_N
     num_k = (K_ + BLOCK_K - 1) // BLOCK_K
 
-    with pto.for_(0, num_m, step=1) as mi:
+    for mi in range(0, num_m, 1):
         m_off = mi * BLOCK_M
-        with pto.for_(0, num_n, step=1) as ni:
+        for ni in range(0, num_n, 1):
             n_off = ni * BLOCK_N
             o_part = pto.partition_view(o_view, offsets=[m_off, n_off],
                                         sizes=[BLOCK_M, BLOCK_N])
 
             o_tile.fill(0.0)
 
-            with pto.for_(0, num_k, step=1) as ki:
+            for ki in range(0, num_k, 1):
                 k_off = ki * BLOCK_K
 
                 a_part = pto.partition_view(a_view, offsets=[m_off, k_off],
@@ -311,42 +307,34 @@ def online_layernorm(
     num_blocks = (N + BLOCK - 1) // BLOCK
 
     # Pass 1: running Welford state across blocks.
-    stats_loop = pto.for_(0, num_blocks, step=1).carry(
-        mu=pto.f32(0.0), n=pto.f32(0.0), m2=pto.f32(0.0)
-    )
-    with stats_loop:
-        i = stats_loop.iv
+    mu = pto.f32(0.0)
+    n = pto.f32(0.0)
+    m2 = pto.f32(0.0)
+    for i in range(0, num_blocks, 1):
         offset = i * BLOCK
         this_block = scalar.min(BLOCK, N - offset)
         x_part = pto.partition_view(x_view, offsets=[offset], sizes=[this_block])
         pto.tile.load(x_part, x_tile)
         x_tile.valid_shape = [this_block]
 
-        elem_loop = pto.for_(0, this_block, step=1).carry(
-            mu=stats_loop.mu, n=stats_loop.n, m2=stats_loop.m2
-        )
-        with elem_loop:
-            j = elem_loop.iv
+        for j in range(0, this_block, 1):
             x = scalar.load(x_tile.as_ptr(), j)
-            n_next = elem_loop.n + 1.0
-            delta = x - elem_loop.mu
-            mu_next = elem_loop.mu + delta / n_next
+            n_next = n + 1.0
+            delta = x - mu
+            mu_next = mu + delta / n_next
             delta2 = x - mu_next
-            m2_next = elem_loop.m2 + delta * delta2
-            elem_loop.update(mu=mu_next, n=n_next, m2=m2_next)
+            m2_next = m2 + delta * delta2
 
-        stats_loop.update(
-            mu=elem_loop.final("mu"),
-            n=elem_loop.final("n"),
-            m2=elem_loop.final("m2"),
-        )
+            mu = mu_next
+            n = n_next
+            m2 = m2_next
 
-    mean = stats_loop.final("mu")
-    count = stats_loop.final("n")
-    inv_std = 1.0 / scalar.sqrt(stats_loop.final("m2") / count + pto.f32(1.0e-5))
+    mean = mu
+    count = n
+    inv_std = 1.0 / scalar.sqrt(m2 / count + pto.f32(1.0e-5))
 
     # Pass 2: apply (x - mean) / sqrt(var + eps) block by block.
-    with pto.for_(0, num_blocks, step=1) as i:
+    for i in range(0, num_blocks, 1):
         offset = i * BLOCK
         this_block = scalar.min(BLOCK, N - offset)
         x_part = pto.partition_view(x_view, offsets=[offset], sizes=[this_block])
@@ -356,7 +344,7 @@ def online_layernorm(
         x_tile.valid_shape = [this_block]
         o_tile.valid_shape = [this_block]
 
-        with pto.for_(0, this_block, step=1) as j:
+        for j in range(0, this_block, 1):
             x = scalar.load(x_tile.as_ptr(), j)
             y = (x - mean) * inv_std
             scalar.store(y, o_tile.as_ptr(), j)
@@ -366,10 +354,10 @@ def online_layernorm(
 
 **Key points**:
 
-- **Carry state**: `.carry(mu=..., n=..., m2=...)` on both loops keeps the running Welford state in SSA form. The outer loop carries state across blocks; the inner loop carries state across elements inside one block.
+- **Carry state**: assigning `mu`, `n`, and `m2` inside the Python loops makes them loop-carried state after AST rewrite. The outer loop carries state across blocks; the inner loop carries state across elements inside one block.
 - **Tail handling**: `scalar.min(BLOCK, N - offset)` computes the live width of the current block, and `tile.valid_shape = [this_block]` keeps the tile contract aligned with that tail.
 - **No special tile op required**: the normalization pass is written explicitly with `scalar.load(...)`, scalar arithmetic, `scalar.sqrt(...)`, and `scalar.store(...)`. There is no dependency on a dedicated `tnormalize` op.
-- **Compare to flash attention**: the flash attention carry in Chapter 11 moves several tiles through ping-pong buffers. Here the carried state is only three scalars, so the same `.carry(...)` surface reads more like a conventional streaming reduction.
+- **Compare to flash attention**: the flash attention carry in Chapter 11 moves several tiles through ping-pong buffers. Here the carried state is only three scalars, so the rewritten Python surface reads like a conventional streaming reduction.
 
 ## 12.5 Design guidelines
 

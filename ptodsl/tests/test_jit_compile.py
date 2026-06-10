@@ -56,6 +56,16 @@ def expect_parse_roundtrip_and_verify(text: str, label: str) -> None:
     )
 
 
+def mlir_op_sequence(text: str) -> list[str]:
+    ops = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        match = re.search(r"(?:%[\w#]+(?:\s*:\s*[^=]+)?\s*=\s*)?([a-z][\w]*\.[\w_]+)", stripped)
+        if match is not None:
+            ops.append(match.group(1))
+    return ops
+
+
 expect_raises(
     TypeError,
     lambda: pto.for_(0, 1, step=1, iter_args=(0,)),
@@ -305,10 +315,22 @@ def simt_tid_probe():
     pto.get_tid_z()
 
 
+@pto.simd
+def ast_subkernel_runtime_for_helper(rows: pto.i32):
+    for row in range(0, rows, 1):
+        _ = row
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+
 @pto.jit(target="a5")
 def simt_helper_lowering_probe(*, TRACE_TOKEN: pto.constexpr = 0):
     simt_tid_probe()
     simt_tid_probe()
+
+
+@pto.jit(target="a5")
+def ast_subkernel_runtime_for_probe(rows: pto.i32):
+    ast_subkernel_runtime_for_helper(rows)
 
 
 @pto.jit(target="a5")
@@ -324,15 +346,18 @@ def carry_loop_lowering_probe(*, BLOCK: pto.constexpr = 128):
     l_prev.fill(0.0)
     o_prev.fill(0.0)
 
-    kv_loop = pto.for_(0, 4, step=1).carry(m=m_prev, l=l_prev, o=o_prev)
-    with kv_loop:
-        kv_loop.m.fill(1.0)
-        kv_loop.l.fill(2.0)
-        kv_loop.o.fill(3.0)
-        kv_loop.update(m=m_next, l=l_next, o=o_next)
+    m = m_prev
+    l = l_prev
+    o = o_prev
+    for _ in range(0, 4, 1):
+        m.fill(1.0)
+        l.fill(2.0)
+        o.fill(3.0)
+        m = m_next
+        l = l_next
+        o = o_next
 
-    final_o = kv_loop.final("o")
-    final_o.fill(4.0)
+    o.fill(4.0)
 
 
 @pto.jit(target="a5")
@@ -367,6 +392,372 @@ def branch_handle_merge_probe():
     diff = br.diff
     merged = total + diff
     _ = merged
+
+
+@pto.jit(target="a5")
+def ast_if_side_effect_probe():
+    cond = pto.const(1, dtype=pto.i1)
+    if cond:
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+
+@pto.jit(target="a5")
+def ast_if_merge_probe():
+    lhs = pto.const(4, dtype=pto.i32)
+    rhs = pto.const(2, dtype=pto.i32)
+    if lhs > rhs:
+        total = lhs + rhs
+        diff = lhs - rhs
+    else:
+        total = rhs + lhs
+        diff = rhs - lhs
+    merged = total + diff
+    _ = merged
+
+
+@pto.jit(target="a5")
+def ast_if_old_value_merge_probe():
+    lhs = pto.const(4, dtype=pto.i32)
+    rhs = pto.const(2, dtype=pto.i32)
+    total = rhs
+    if lhs > rhs:
+        total = lhs + rhs
+    merged = total + rhs
+    _ = merged
+
+
+@pto.jit(target="a5")
+def ast_if_branch_local_temp_liveness_probe():
+    c0 = pto.const(0, dtype=pto.i1)
+    c1 = pto.const(1, dtype=pto.i1)
+    one = pto.const(1, dtype=pto.i32)
+    zero = pto.const(0, dtype=pto.i32)
+
+    if c0:
+        tmp = one
+        _ = tmp
+
+    if c1:
+        tmp = one
+        out = tmp + one
+    else:
+        out = zero
+
+    _ = out
+
+
+@pto.jit(target="a5")
+def ast_nested_with_if_merge_probe():
+    lhs = pto.const(4, dtype=pto.i32)
+    rhs = pto.const(2, dtype=pto.i32)
+    with pto.simt():
+        if lhs > rhs:
+            value = lhs + rhs
+        else:
+            value = rhs + lhs
+    merged = value + rhs
+    _ = merged
+
+
+@pto.jit(target="a5")
+def ast_runtime_for_probe(rows: pto.i32):
+    for row in range(0, rows, 1):
+        _ = row
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+
+@pto.jit(target="a5")
+def ast_runtime_for_carry_probe(rows: pto.i32):
+    one = pto.const(1, dtype=pto.i32)
+    acc = pto.const(0, dtype=pto.i32)
+    for _ in range(rows):
+        acc = acc + one
+    _ = acc
+
+
+@pto.jit(target="a5")
+def ast_runtime_for_augassign_carry_probe(rows: pto.i32):
+    one = pto.const(1, dtype=pto.i32)
+    acc = pto.const(0, dtype=pto.i32)
+    for _ in range(rows):
+        acc += one
+    _ = acc
+
+
+@pto.jit(target="a5")
+def ast_runtime_for_branch_local_temp_probe(rows: pto.i32):
+    cond = pto.const(1, dtype=pto.i1)
+    one = pto.const(1, dtype=pto.i32)
+    zero = pto.const(0, dtype=pto.i32)
+
+    for _ in range(rows):
+        if cond:
+            tmp = one
+            out = tmp + one
+        else:
+            tmp = zero
+            out = tmp + zero
+        _ = out
+
+
+@pto.jit(target="a5", ast_rewrite=False)
+def ast_rewrite_disabled_nested_helper_python_control_probe():
+    def helper(enabled):
+        if enabled:
+            for _ in range(2):
+                pto.pipe_barrier(pto.Pipe.ALL)
+
+    helper(True)
+
+
+@pto.jit(target="a5")
+def ast_nested_helper_ast_rewrite_probe(rows: pto.i32):
+    cond = pto.const(1, dtype=pto.i1)
+
+    def helper(limit, enabled):
+        one = pto.const(1, dtype=pto.i32)
+        acc = pto.const(0, dtype=pto.i32)
+        for _ in range(limit):
+            acc += one
+        if enabled:
+            acc = acc + one
+        return acc
+
+    value = helper(rows, cond)
+    _ = value
+
+
+@pto.jit(target="a5")
+def ast_nested_helper_freevar_if_merge_probe():
+    lhs = pto.const(4, dtype=pto.i32)
+    rhs = pto.const(2, dtype=pto.i32)
+
+    if lhs > rhs:
+        x = lhs + rhs
+    else:
+        x = rhs + lhs
+
+    def helper():
+        return x + rhs
+
+    y = helper()
+    _ = y
+
+
+@pto.jit(target="a5")
+def ast_nested_helper_name_store_liveness_probe():
+    lhs = pto.const(4, dtype=pto.i32)
+    rhs = pto.const(2, dtype=pto.i32)
+
+    if lhs > rhs:
+        helper = lhs
+    else:
+        helper = rhs
+
+    def helper():
+        return lhs + rhs
+
+    y = helper()
+    _ = y
+
+
+@pto.jit(target="a5", name="ast_control_flow_equiv_explicit")
+def ast_control_flow_equiv_explicit_probe(rows: pto.i32):
+    one = pto.const(1, dtype=pto.i32)
+    acc = pto.const(0, dtype=pto.i32)
+
+    def helper(limit, initial):
+        total = initial
+        loop = pto.for_(0, limit, step=1).carry(total=total)
+        with loop:
+            i = loop.iv
+            total = loop.total
+            cond = i > pto.const(0)
+            with pto.if_(cond) as br:
+                with br.then_:
+                    br.assign(total=total + one)
+                with br.else_:
+                    br.assign(total=total)
+            total = br.total
+            loop.update(total=total)
+        return loop.final("total")
+
+    acc = helper(rows, acc)
+    _ = acc
+
+
+@pto.jit(target="a5", name="ast_control_flow_equiv_native")
+def ast_control_flow_equiv_native_probe(rows: pto.i32):
+    one = pto.const(1, dtype=pto.i32)
+    acc = pto.const(0, dtype=pto.i32)
+
+    def helper(limit, initial):
+        total = initial
+        for i in range(limit):
+            if i > pto.const(0):
+                total = total + one
+        return total
+
+    acc = helper(rows, acc)
+    _ = acc
+
+
+def make_ast_closure_kernel(limit: int):
+    @pto.jit(target="a5")
+    def ast_closure_kernel():
+        for _ in pto.static_range(limit):
+            pto.pipe_barrier(pto.Pipe.ALL)
+
+    return ast_closure_kernel
+
+
+ast_closure_kernel_probe = make_ast_closure_kernel(3)
+
+
+def make_ast_rebound_closure_kernel():
+    limit = 2
+
+    @pto.jit(target="a5")
+    def ast_rebound_closure_kernel():
+        for _ in pto.static_range(limit):
+            pto.pipe_barrier(pto.Pipe.ALL)
+
+    limit = 4
+    return ast_rebound_closure_kernel
+
+
+ast_rebound_closure_kernel_probe = make_ast_rebound_closure_kernel()
+
+
+def make_ast_mutable_closure_cache_kernel():
+    limit = 2
+
+    @pto.jit(target="a5")
+    def ast_mutable_closure_cache_kernel():
+        for _ in pto.static_range(limit):
+            pto.pipe_barrier(pto.Pipe.ALL)
+
+    def set_limit(value: int):
+        nonlocal limit
+        limit = value
+
+    return ast_mutable_closure_cache_kernel, set_limit
+
+
+ast_mutable_closure_cache_kernel_probe, set_ast_mutable_closure_cache_limit = (
+    make_ast_mutable_closure_cache_kernel()
+)
+
+
+def make_ast_signature_closure_default_kernel(limit: int):
+    @pto.jit(target="a5")
+    def ast_signature_closure_default_kernel(*, BLOCK: pto.constexpr = limit):
+        for _ in pto.static_range(BLOCK):
+            pto.pipe_barrier(pto.Pipe.ALL)
+
+    return ast_signature_closure_default_kernel
+
+
+ast_signature_closure_default_kernel_probe = make_ast_signature_closure_default_kernel(2)
+
+
+def make_ast_rebound_subkernel_probe():
+    limit = 2
+
+    @pto.simd
+    def helper():
+        for _ in pto.static_range(limit):
+            pto.pipe_barrier(pto.Pipe.ALL)
+
+    limit = 4
+
+    @pto.jit(target="a5")
+    def ast_rebound_subkernel_probe(*, TRACE_TOKEN: pto.constexpr = 0):
+        helper()
+
+    return ast_rebound_subkernel_probe
+
+
+ast_rebound_subkernel_probe = make_ast_rebound_subkernel_probe()
+
+
+def make_sourceless_ast_rewrite_kernel():
+    namespace = {"pto": pto}
+    exec(
+        """
+@pto.jit(target="a5")
+def sourceless_ast_rewrite_kernel():
+    if True:
+        pto.pipe_barrier(pto.Pipe.ALL)
+""",
+        namespace,
+    )
+    return namespace["sourceless_ast_rewrite_kernel"]
+
+
+sourceless_ast_rewrite_kernel_probe = make_sourceless_ast_rewrite_kernel()
+
+
+def make_sourceless_subkernel_entry():
+    namespace = {"pto": pto}
+    exec(
+        """
+@pto.simd
+def sourceless_subkernel_helper():
+    if True:
+        pto.pipe_barrier(pto.Pipe.ALL)
+""",
+        namespace,
+    )
+    helper = namespace["sourceless_subkernel_helper"]
+
+    @pto.jit(target="a5")
+    def sourceless_subkernel_entry_probe(*, TRACE_TOKEN: pto.constexpr = 0):
+        helper()
+
+    return sourceless_subkernel_entry_probe
+
+
+sourceless_subkernel_entry_probe = make_sourceless_subkernel_entry()
+
+
+@pto.jit(target="a5")
+def ast_static_control_flow_probe(*, ENABLE: pto.constexpr = True):
+    if pto.const_expr(ENABLE):
+        for _ in pto.static_range(2):
+            pto.pipe_barrier(pto.Pipe.ALL)
+
+
+@pto.jit(target="a5")
+def ast_python_bool_guard_probe(
+    *,
+    BLOCK: pto.constexpr = 128,
+    ENABLE: pto.constexpr = True,
+):
+    if BLOCK == 128:
+        pto.pipe_barrier(pto.Pipe.ALL)
+    if ENABLE:
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+
+@pto.jit(target="a5")
+def ast_static_range_loop_target_live_after_probe():
+    for stage in pto.static_range(3):
+        pto.pipe_barrier(pto.Pipe.ALL)
+    _ = stage
+
+
+@pto.jit(target="a5")
+def ast_static_range_break_continue_probe():
+    for stage in pto.static_range(4):
+        if pto.const_expr(stage == 2):
+            break
+        pto.pipe_barrier(pto.Pipe.ALL)
+
+    for stage in pto.static_range(4):
+        if pto.const_expr(stage % 2 == 0):
+            continue
+        pto.pipe_barrier(pto.Pipe.ALL)
 
 
 @pto.jit(target="a5")
@@ -453,7 +844,7 @@ def tile_slice_vector_probe(inp_tile: pto.Tile, out_tile: pto.Tile, row: pto.ind
 def tile_slice_surface_probe(*, BLOCK: pto.constexpr = 128):
     inp_tile = pto.alloc_tile(shape=[2, BLOCK], dtype=pto.f32)
     out_tile = pto.alloc_tile(shape=[2, BLOCK], dtype=pto.f32)
-    with pto.for_(0, 1, step=1) as row:
+    for row in range(0, 1, 1):
         tile_slice_vector_probe(inp_tile, out_tile, row)
 
 
@@ -502,12 +893,10 @@ def tile_valid_shape_update_1d_probe(
 def make_mask_index_roundtrip_probe(
     cols: pto.i32,
 ):
-    col_loop = pto.for_(0, cols, step=64).carry(remained=cols)
-    with col_loop:
-        remained = col_loop.remained
-        mask, remained_after_pack = pto.make_mask(pto.f32, remained)
+    remained = cols
+    for _ in range(0, cols, 64):
+        mask, remained = pto.make_mask(pto.f32, remained)
         _ = mask
-        col_loop.update(remained=remained_after_pack)
 
 
 @pto.jit(target="a5")
@@ -515,8 +904,8 @@ def integer_loop_bound_probe(*, BLOCK: pto.constexpr = 8):
     row_start = pto.const(0, dtype=pto.i32)
     row_stop = pto.const(BLOCK, dtype=pto.i32)
     valid_dim = pto.const(BLOCK // 2, dtype=pto.i32)
-    with pto.for_(row_start, row_stop, step=1) as row:
-        with pto.for_(0, valid_dim, step=1) as col:
+    for row in range(row_start, row_stop, 1):
+        for col in range(0, valid_dim, 1):
             _ = row
             _ = col
 
@@ -1784,6 +2173,20 @@ def main() -> None:
     expect("pto.get_tid_y" in simt_text, "SIMT helper body should contain pto.get_tid_y")
     expect("pto.get_tid_z" in simt_text, "SIMT helper body should contain pto.get_tid_z")
 
+    ast_subkernel_runtime_for_text = ast_subkernel_runtime_for_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_subkernel_runtime_for_text,
+        "AST-rewritten subkernel runtime for specialization",
+    )
+    expect(
+        ast_subkernel_runtime_for_text.count("scf.for") == 1,
+        "@pto.simd helper should rewrite Python range(...) loops into runtime scf.for",
+    )
+    expect(
+        "pto.barrier <PIPE_ALL>" in ast_subkernel_runtime_for_text,
+        "rewritten @pto.simd helper body should lower inside the caller trace",
+    )
+
     carry_text = carry_loop_lowering_probe.compile(BLOCK=32).mlir_text()
     expect_parse_roundtrip_and_verify(carry_text, "carry loop specialization")
     expect("scf.for" in carry_text, "carry loop should lower to scf.for")
@@ -1824,6 +2227,320 @@ def main() -> None:
     expect(
         "arith.addi" in branch_merge_text and "arith.subi" in branch_merge_text,
         "merged branch values should remain usable as ordinary runtime scalars after the conditional",
+    )
+
+    ast_if_side_effect_text = ast_if_side_effect_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(ast_if_side_effect_text, "AST-rewritten side-effect if specialization")
+    expect(
+        ast_if_side_effect_text.count("scf.if") == 1,
+        "ast_rewrite=True Python if should lower to one scf.if for runtime conditions",
+    )
+    expect(
+        "pto.barrier <PIPE_ALL>" in ast_if_side_effect_text,
+        "ast_rewrite=True if body should lower into the scf.if then branch",
+    )
+
+    ast_if_merge_text = ast_if_merge_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(ast_if_merge_text, "AST-rewritten if-merge specialization")
+    expect(
+        re.search(r"scf\.if %\d+ -> \(i32, i32\)", ast_if_merge_text) is not None,
+        "ast_rewrite=True Python if/else live-outs should lower to scf.if results",
+    )
+    expect(
+        ast_if_merge_text.count("scf.yield") >= 2,
+        "ast_rewrite=True Python if/else live-outs should materialize branch yields",
+    )
+
+    ast_if_old_value_merge_text = ast_if_old_value_merge_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(ast_if_old_value_merge_text, "AST-rewritten old-value if-merge specialization")
+    expect(
+        re.search(r"scf\.if %\d+ -> \(i32\)", ast_if_old_value_merge_text) is not None,
+        "ast_rewrite=True one-sided Python if assignment should merge the old value through scf.if",
+    )
+    expect(
+        ast_if_old_value_merge_text.count("scf.yield") >= 2,
+        "ast_rewrite=True old-value if merge should yield from both branches",
+    )
+
+    ast_if_branch_local_temp_liveness_text = ast_if_branch_local_temp_liveness_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_if_branch_local_temp_liveness_text,
+        "AST-rewritten if branch-local temp liveness specialization",
+    )
+    expect(
+        "old_tmp" not in ast_if_branch_local_temp_liveness_text,
+        "branch-local temporaries should not be merged as old live-out values",
+    )
+
+    ast_nested_with_if_merge_text = ast_nested_with_if_merge_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(ast_nested_with_if_merge_text, "AST-rewritten nested with if-merge specialization")
+    expect(
+        re.search(r"scf\.if %\d+ -> \(i32\)", ast_nested_with_if_merge_text) is not None,
+        "ast_rewrite=True nested with block should preserve outer live-out liveness for if merge",
+    )
+
+    ast_runtime_for_text = ast_runtime_for_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(ast_runtime_for_text, "AST-rewritten runtime for specialization")
+    expect(
+        ast_runtime_for_text.count("scf.for") == 1,
+        "ast_rewrite=True Python range(...) should lower to one scf.for",
+    )
+
+    ast_runtime_for_carry_text = ast_runtime_for_carry_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(ast_runtime_for_carry_text, "AST-rewritten runtime carry for specialization")
+    expect(
+        "iter_args(" in ast_runtime_for_carry_text and "scf.yield" in ast_runtime_for_carry_text,
+        "ast_rewrite=True accumulator loops should lower through scf.for iter_args",
+    )
+
+    ast_runtime_for_augassign_carry_text = ast_runtime_for_augassign_carry_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_runtime_for_augassign_carry_text,
+        "AST-rewritten augassign runtime carry for specialization",
+    )
+    expect(
+        "iter_args(" in ast_runtime_for_augassign_carry_text and "scf.yield" in ast_runtime_for_augassign_carry_text,
+        "ast_rewrite=True accumulator loops using += should lower through scf.for iter_args",
+    )
+
+    ast_runtime_for_branch_local_temp_text = ast_runtime_for_branch_local_temp_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_runtime_for_branch_local_temp_text,
+        "AST-rewritten runtime for branch-local temp specialization",
+    )
+    expect(
+        "iter_args(" not in ast_runtime_for_branch_local_temp_text,
+        "branch-local temporaries should not be inferred as loop-carried state",
+    )
+
+    ast_rewrite_disabled_nested_helper_python_control_text = (
+        ast_rewrite_disabled_nested_helper_python_control_probe.compile().mlir_text()
+    )
+    expect_parse_roundtrip_and_verify(
+        ast_rewrite_disabled_nested_helper_python_control_text,
+        "AST rewrite disabled nested Python helper control specialization",
+    )
+    expect(
+        "scf.if" not in ast_rewrite_disabled_nested_helper_python_control_text
+        and "scf.for" not in ast_rewrite_disabled_nested_helper_python_control_text,
+        "ast_rewrite=False should keep nested helper function bodies as trace-time Python",
+    )
+    expect(
+        ast_rewrite_disabled_nested_helper_python_control_text.count("pto.barrier <PIPE_ALL>") == 2,
+        "nested Python helper should keep trace-time if/range behavior",
+    )
+
+    ast_nested_helper_ast_rewrite_text = ast_nested_helper_ast_rewrite_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_nested_helper_ast_rewrite_text,
+        "AST-rewritten nested helper function specialization",
+    )
+    expect(
+        ast_nested_helper_ast_rewrite_text.count("scf.for") == 1,
+        "default AST rewrite should rewrite range(...) loops inside nested helpers",
+    )
+    expect(
+        ast_nested_helper_ast_rewrite_text.count("scf.if") == 1,
+        "default AST rewrite should rewrite runtime if statements inside nested helpers",
+    )
+    expect(
+        "iter_args(" in ast_nested_helper_ast_rewrite_text and "scf.yield" in ast_nested_helper_ast_rewrite_text,
+        "rewritten nested helpers should preserve loop-carried and branch live-out values",
+    )
+
+    ast_nested_helper_freevar_if_merge_text = ast_nested_helper_freevar_if_merge_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_nested_helper_freevar_if_merge_text,
+        "AST-rewritten nested helper freevar if-merge specialization",
+    )
+    expect(
+        re.search(r"scf\.if %\d+ -> \(i32\)", ast_nested_helper_freevar_if_merge_text) is not None,
+        "nested helper free variables should keep outer branch assignments live for SSA merge",
+    )
+
+    ast_nested_helper_name_store_liveness_text = ast_nested_helper_name_store_liveness_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_nested_helper_name_store_liveness_text,
+        "AST-rewritten nested helper name-store liveness specialization",
+    )
+    expect(
+        re.search(r"scf\.if %\d+ ->", ast_nested_helper_name_store_liveness_text) is None,
+        "nested function definitions should store their function name and kill earlier liveness",
+    )
+
+    ast_control_flow_equiv_explicit_text = ast_control_flow_equiv_explicit_probe.compile().mlir_text()
+    ast_control_flow_equiv_native_text = ast_control_flow_equiv_native_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_control_flow_equiv_explicit_text,
+        "explicit control-flow integration specialization",
+    )
+    expect_parse_roundtrip_and_verify(
+        ast_control_flow_equiv_native_text,
+        "native AST-rewritten control-flow integration specialization",
+    )
+    expect(
+        mlir_op_sequence(ast_control_flow_equiv_native_text) == mlir_op_sequence(ast_control_flow_equiv_explicit_text),
+        "native Python for/if rewrite should emit the same operation sequence as explicit pto.for_/pto.if_",
+    )
+    for pattern in ("scf.for", "scf.if", "iter_args(", "scf.yield", "arith.addi"):
+        expect(
+            ast_control_flow_equiv_native_text.count(pattern) == ast_control_flow_equiv_explicit_text.count(pattern),
+            f"native AST rewrite should match explicit control-flow count for {pattern}",
+        )
+
+    ast_closure_kernel_text = ast_closure_kernel_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(ast_closure_kernel_text, "AST-rewritten closure kernel specialization")
+    expect(
+        ast_closure_kernel_text.count("pto.barrier <PIPE_ALL>") == 3,
+        "ast_rewrite=True factory kernels should preserve captured Python closure values",
+    )
+
+    ast_rebound_closure_kernel_text = ast_rebound_closure_kernel_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_rebound_closure_kernel_text,
+        "AST-rewritten rebound closure kernel specialization",
+    )
+    expect(
+        ast_rebound_closure_kernel_text.count("pto.barrier <PIPE_ALL>") == 4,
+        "ast_rewrite=True should read nonlocal closure values at compile time",
+    )
+
+    ast_mutable_closure_cache_first = ast_mutable_closure_cache_kernel_probe.compile()
+    ast_mutable_closure_cache_first_text = ast_mutable_closure_cache_first.mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_mutable_closure_cache_first_text,
+        "AST-rewritten mutable closure cache first specialization",
+    )
+    expect(
+        ast_mutable_closure_cache_first_text.count("pto.barrier <PIPE_ALL>") == 2,
+        "first mutable closure specialization should use the initial nonlocal value",
+    )
+    set_ast_mutable_closure_cache_limit(4)
+    ast_mutable_closure_cache_second = ast_mutable_closure_cache_kernel_probe.compile()
+    ast_mutable_closure_cache_second_text = ast_mutable_closure_cache_second.mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_mutable_closure_cache_second_text,
+        "AST-rewritten mutable closure cache second specialization",
+    )
+    expect(
+        ast_mutable_closure_cache_second is not ast_mutable_closure_cache_first,
+        "AST rewrite closure changes should participate in the specialization cache key",
+    )
+    expect(
+        ast_mutable_closure_cache_second_text.count("pto.barrier <PIPE_ALL>") == 4,
+        "changed mutable closure specialization should recompile with the new nonlocal value",
+    )
+
+    ast_signature_closure_default_text = ast_signature_closure_default_kernel_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_signature_closure_default_text,
+        "AST-rewritten signature closure default specialization",
+    )
+    expect(
+        ast_signature_closure_default_text.count("pto.barrier <PIPE_ALL>") == 2,
+        "ast_rewrite=True should resolve closure names used by signature defaults",
+    )
+
+    ast_rebound_subkernel_text = ast_rebound_subkernel_probe.compile(TRACE_TOKEN=1).mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_rebound_subkernel_text,
+        "AST-rewritten rebound subkernel specialization",
+    )
+    expect(
+        ast_rebound_subkernel_text.count("pto.barrier <PIPE_ALL>") == 4,
+        "named subkernels should read nonlocal closure values when traced",
+    )
+
+    sourceless_ast_rewrite_text = sourceless_ast_rewrite_kernel_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        sourceless_ast_rewrite_text,
+        "source-less AST rewrite fallback specialization",
+    )
+    expect(
+        sourceless_ast_rewrite_text.count("pto.barrier <PIPE_ALL>") == 1,
+        "source-less kernels should fall back to original trace-time Python execution",
+    )
+
+    sourceless_subkernel_text = sourceless_subkernel_entry_probe.compile(TRACE_TOKEN=1).mlir_text()
+    expect_parse_roundtrip_and_verify(
+        sourceless_subkernel_text,
+        "source-less subkernel AST rewrite fallback specialization",
+    )
+    expect(
+        sourceless_subkernel_text.count("pto.barrier <PIPE_ALL>") == 1,
+        "source-less subkernels should fall back to original trace-time Python execution",
+    )
+
+    ast_python_bool_guard_enabled_text = ast_python_bool_guard_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_python_bool_guard_enabled_text,
+        "AST Python bool guard enabled specialization",
+    )
+    expect(
+        "scf.if" not in ast_python_bool_guard_enabled_text,
+        "Python bool guards should remain trace-time branches under ast_rewrite=True",
+    )
+    expect(
+        ast_python_bool_guard_enabled_text.count("pto.barrier <PIPE_ALL>") == 2,
+        "Python bool guards should execute enabled trace-time branches",
+    )
+    ast_python_bool_guard_disabled_text = ast_python_bool_guard_probe.compile(
+        BLOCK=64,
+        ENABLE=False,
+    ).mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_python_bool_guard_disabled_text,
+        "AST Python bool guard disabled specialization",
+    )
+    expect(
+        "scf.if" not in ast_python_bool_guard_disabled_text,
+        "disabled Python bool guards should not lower to runtime branches",
+    )
+    expect(
+        "pto.barrier <PIPE_ALL>" not in ast_python_bool_guard_disabled_text,
+        "disabled Python bool guards should skip their trace-time branches",
+    )
+
+    ast_static_enabled_text = ast_static_control_flow_probe.compile(ENABLE=True).mlir_text()
+    expect_parse_roundtrip_and_verify(ast_static_enabled_text, "AST static control-flow enabled specialization")
+    expect(
+        "scf.if" not in ast_static_enabled_text and "scf.for" not in ast_static_enabled_text,
+        "pto.const_expr/pto.static_range should keep compile-time control flow under ast_rewrite=True",
+    )
+    expect(
+        ast_static_enabled_text.count("pto.barrier <PIPE_ALL>") == 2,
+        "pto.static_range(2) should unroll at trace time under ast_rewrite=True",
+    )
+    ast_static_range_loop_target_live_after_text = ast_static_range_loop_target_live_after_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_static_range_loop_target_live_after_text,
+        "AST static_range loop target live-after specialization",
+    )
+    expect(
+        "scf.for" not in ast_static_range_loop_target_live_after_text,
+        "pto.static_range(...) should keep Python loop semantics under ast_rewrite=True",
+    )
+    expect(
+        ast_static_range_loop_target_live_after_text.count("pto.barrier <PIPE_ALL>") == 3,
+        "pto.static_range(...) should allow the Python loop target to remain live after unrolling",
+    )
+    ast_static_range_break_continue_text = ast_static_range_break_continue_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        ast_static_range_break_continue_text,
+        "AST static_range break/continue specialization",
+    )
+    expect(
+        "scf.for" not in ast_static_range_break_continue_text,
+        "pto.static_range(...) break/continue should stay in trace-time Python control flow",
+    )
+    expect(
+        ast_static_range_break_continue_text.count("pto.barrier <PIPE_ALL>") == 4,
+        "pto.static_range(...) should preserve Python break/continue behavior under ast_rewrite=True",
+    )
+    ast_static_disabled_text = ast_static_control_flow_probe.compile(ENABLE=False).mlir_text()
+    expect(
+        "pto.barrier <PIPE_ALL>" not in ast_static_disabled_text,
+        "pto.const_expr(False) should skip the trace-time branch under ast_rewrite=True",
     )
 
     runtime_scalar_text = runtime_scalar_operator_probe.compile(BLOCK=8).mlir_text()

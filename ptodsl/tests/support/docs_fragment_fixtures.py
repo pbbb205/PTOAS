@@ -303,7 +303,7 @@ FRAGMENT_FIXTURES = {
             a_view = pto.make_tensor_view(A_ptr, shape=[rows, cols], strides=[cols, 1])
             o_view = pto.make_tensor_view(O_ptr, shape=[rows, cols], strides=[cols, 1])
             tile = pto.alloc_tile(shape=[1, BLOCK], dtype=pto.f32)
-            with pto.for_(0, rows, step=1) as row:
+            for row in range(0, rows, 1):
                 a_part = pto.partition_view(a_view, offsets=[row, 0], sizes=[1, cols])
                 o_part = pto.partition_view(o_view, offsets=[row, 0], sizes=[1, cols])
                 pto.tile.load(a_part, tile)
@@ -506,7 +506,7 @@ FRAGMENT_FIXTURES = {
             cols = pto.const(BLOCK, dtype=pto.i32)
             tile = pto.alloc_tile(shape=[1, BLOCK], dtype=pto.f32)
             out_tile = pto.alloc_tile(shape=[1, BLOCK], dtype=pto.f32)
-            with pto.for_(0, 1, step=1) as r:
+            for r in pto.static_range(1):
                 {SNIPPET_PLACEHOLDER}
         """
     ),
@@ -697,7 +697,7 @@ FRAGMENT_FIXTURES = {
             b_tile: pto.Tile,
             o_tile: pto.Tile,
         ):
-            with pto.for_(0, 1, step=1) as r:
+            for r in range(0, 1, 1):
                 c = pto.const(0, dtype=pto.index)
                 mask, _ = pto.make_mask(pto.f32, pto.const(16, dtype=pto.i32))
                 {SNIPPET_PLACEHOLDER}
@@ -720,7 +720,7 @@ FRAGMENT_FIXTURES = {
             beta_tile: pto.Tile,
             o_next_tile: pto.Tile,
         ):
-            with pto.for_(0, 1, step=1) as row:
+            for row in range(0, 1, 1):
                 col = pto.const(0, dtype=pto.index)
                 o_prev = scalar.load(o_prev_tile[row, col])
                 pv_val = scalar.load(pv_tile[row, col])
@@ -1058,7 +1058,7 @@ FRAGMENT_FIXTURES = {
         ):
             tile = pto.alloc_tile(shape=[2, BLOCK], dtype=pto.f32)
             col = 0
-            with pto.for_(0, 1, step=1) as row:
+            for row in range(0, 1, 1):
                 {SNIPPET_PLACEHOLDER}
         """
     ),
@@ -1119,7 +1119,7 @@ FRAGMENT_FIXTURES = {
         def compute_ops_vector_probe(*, BLOCK: pto.constexpr = 128):
             inp_tile = pto.alloc_tile(shape=[2, BLOCK], dtype=pto.f32)
             out_tile = pto.alloc_tile(shape=[2, BLOCK], dtype=pto.f32)
-            with pto.for_(0, 1, step=1) as row:
+            for row in range(0, 1, 1):
                 compute_ops_vector_helper(inp_tile, out_tile, row)
         """
     ),
@@ -1642,7 +1642,7 @@ FRAGMENT_FIXTURES = {
             row_stop: pto.i32,
             valid_cols: pto.i32,
         ):
-            with pto.for_(row_start, row_stop, step=1) as row:
+            for row in range(row_start, row_stop, 1):
                 col_mask = pto.make_mask(pto.f32, valid_cols)
                 s_row = pto.vlds(s_tile[row, 0:])
                 m_prev = scalar.load(m_prev_tile[row, 0])
@@ -1686,7 +1686,7 @@ FRAGMENT_FIXTURES = {
             row_stop: pto.i32,
             valid_cols: pto.i32,
         ):
-            with pto.for_(row_start, row_stop, step=1) as row:
+            for row in range(row_start, row_stop, 1):
                 col_mask = pto.make_mask(pto.f32, valid_cols)
                 p_row = pto.vexp(pto.vlds(s_tile[row, 0:]), col_mask)
                 m_next = scalar.load(m_prev_tile[row, 0])

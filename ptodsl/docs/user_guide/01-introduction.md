@@ -176,15 +176,17 @@ PTODSL uses a **tracing** compilation model. When you call `kernel.compile(...)`
 
 This has one critical implication for how you write control flow and scalar logic:
 
-- **Python native control flow** (`for`, `if`, Python arithmetic) runs at trace time. A `for i in range(4)` loop gets unrolled — the device code contains four copies of the body, not a loop instruction. An `if` branch condition is evaluated at trace time, and only the taken branch is recorded.
+- **Python native control flow** (`for`, `if`) is rewritten to device-side control flow by default. A `for i in range(rows)` loop records a device loop, and a runtime `if` records both branches.
 
 - **`pto.for_` / `pto.if_`** are recorded as structured control-flow IR. They preserve loop and branch semantics into the compiler pipeline, where the PTOAS compiler may further optimize them — unrolling, folding, or keeping them as runtime control flow depending on what is known at compile time.
+
+- **`pto.const_expr` / `pto.static_range`** keep control flow at trace time for compile-time specialization and deliberate unrolling.
 
 - **Python scalar expressions** (`alpha * x`, `1.0 / sqrt(d)`) are evaluated at trace time and their results are baked into the IR as constants — the compiler never sees the original expression.
 
 - **PTO scalar instructions** (`scalar.load(...)`, `scalar.max(...)`, `scalar.exp(...)`) are recorded as scalar IR and enter the compiler pipeline, where they may be constant-folded or lowered to runtime scalar operations depending on whether their inputs are compile-time known.
 
-A simple rule of thumb: **Python constructs are resolved before the compiler sees them. PTO constructs are recorded into IR and the compiler decides.**
+A simple rule of thumb: **Python control flow becomes IR by default; use explicit compile-time helpers when you want trace-time behavior. PTO scalar constructs are recorded into IR and the compiler decides.**
 
 Chapter 5 (Control Flow) and Chapter 6 (Scalar & Pointer Operations) cover this in detail.
 

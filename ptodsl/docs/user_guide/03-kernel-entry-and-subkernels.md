@@ -235,7 +235,7 @@ def my_kernel(
     b_tile = pto.alloc_tile(shape=[1, BLOCK], dtype=pto.f32)
     o_tile = pto.alloc_tile(shape=[1, BLOCK], dtype=pto.f32)
 
-    with pto.for_(0, rows, step=1) as row:
+    for row in range(0, rows, 1):
         a_part = pto.partition_view(a_view, offsets=[row, 0], sizes=[1, cols])
         b_part = pto.partition_view(b_view, offsets=[row, 0], sizes=[1, cols])
         o_part = pto.partition_view(o_view, offsets=[row, 0], sizes=[1, cols])
@@ -266,18 +266,14 @@ def add_rows(
     cols: pto.i32,
 ):
     VEC = pto.elements_per_vreg(pto.f32)
-    initial_remained = cols
-    with pto.for_(0, rows, step=1) as r:
-        col_loop = pto.for_(0, cols, step=VEC).carry(remained=initial_remained)
-        with col_loop:
-            c = col_loop.iv
-            remained = col_loop.remained
+    for r in range(0, rows, 1):
+        remained = cols
+        for c in range(0, cols, VEC):
             mask, remained = pto.make_mask(pto.f32, remained)
             a_vec = pto.vlds(a_tile[r, c:])
             b_vec = pto.vlds(b_tile[r, c:])
             o_vec = pto.vadd(a_vec, b_vec, mask)
             pto.vsts(o_vec, o_tile[r, c:], mask)
-            col_loop.update(remained=remained)
 
 @pto.jit(target="a5", mode="auto")
 def my_kernel(
@@ -297,7 +293,7 @@ def my_kernel(
     b_tile = pto.alloc_tile(shape=[1, BLOCK], dtype=pto.f32)
     o_tile = pto.alloc_tile(shape=[1, BLOCK], dtype=pto.f32)
 
-    with pto.for_(0, rows, step=1) as row:
+    for row in range(0, rows, 1):
         a_part = pto.partition_view(a_view, offsets=[row, 0], sizes=[1, cols])
         b_part = pto.partition_view(b_view, offsets=[row, 0], sizes=[1, cols])
         o_part = pto.partition_view(o_view, offsets=[row, 0], sizes=[1, cols])
@@ -424,13 +420,17 @@ in two ways:
 2. **As context managers** (`with pto.cube():`, etc.) — inline blocks for
    one-off snippets (see Section 3.4).
 
+Named sub-kernel decorators use the same default AST rewrite model as
+`@pto.jit`: supported Python `if` and `for range(...)` statements lower to
+device-side control flow.
+
 ### 3.3.1 `@pto.cube` — Cube unit
 
 **Role**: `@pto.cube` marks a function that executes on the Cube unit (matrix
 multiplication engine). It consumes UB-resident tiles and explicit cube-local
 scratch buffers.
 
-**Signature**:
+**Signature**: `@pto.cube(fn=None, *, name=None, target="a5")`
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"kernel_entry.cube_signature","symbol":"kernel_entry_cube_signature_probe","compile":{"BLOCK_M":16,"BLOCK_K":16,"BLOCK_N":16}} -->
 ```python
@@ -486,7 +486,7 @@ engine). It operates on vector registers (`vreg`) loaded from UB tiles and
 stores results back to UB tiles. Vector registers are local to the function
 and never cross its boundary.
 
-**Signature**:
+**Signature**: `@pto.simd(fn=None, *, name=None, target="a5")`
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"kernel_entry.simd_signature","symbol":"kernel_entry_simd_signature_probe","compile":{"BLOCK":128}} -->
 ```python
@@ -512,18 +512,14 @@ constants.
 def add_rows(a_tile: pto.Tile, b_tile: pto.Tile, o_tile: pto.Tile,
              rows: pto.i32, cols: pto.i32):
     VEC = pto.elements_per_vreg(pto.f32)
-    initial_remained = cols
-    with pto.for_(0, rows, step=1) as r:
-        col_loop = pto.for_(0, cols, step=VEC).carry(remained=initial_remained)
-        with col_loop:
-            c = col_loop.iv
-            remained = col_loop.remained
+    for r in range(0, rows, 1):
+        remained = cols
+        for c in range(0, cols, VEC):
             mask, remained = pto.make_mask(pto.f32, remained)
             a_vec = pto.vlds(a_tile[r, c:])
             b_vec = pto.vlds(b_tile[r, c:])
             o_vec = pto.vadd(a_vec, b_vec, mask)
             pto.vsts(o_vec, o_tile[r, c:], mask)
-            col_loop.update(remained=remained)
 ```
 
 The boundary contract: `vreg` values (`a_vec`, `b_vec`, `o_vec`) are local to
@@ -543,7 +539,7 @@ instruction appears to operate on a single element (`lds`, `sts`, `a + b`),
 but the same instruction is issued across a large number of work-items
 simultaneously.
 
-**Signature**:
+**Signature**: `@pto.simt(fn=None, *, name=None, target="a5")`
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"kernel_entry.simt_signature","symbol":"kernel_entry_simt_signature_probe","compile":{"BLOCK":8}} -->
 ```python
@@ -567,10 +563,10 @@ def blend_output_rows(
     o_next_tile: pto.Tile,
     row_start: pto.i32, row_stop: pto.i32, valid_dim: pto.i32,
 ):
-    with pto.for_(row_start, row_stop, step=1) as row:
+    for row in range(row_start, row_stop, 1):
         alpha = scalar.load(alpha_tile[row, 0])
         beta = scalar.load(beta_tile[row, 0])
-        with pto.for_(0, valid_dim, step=1) as col:
+        for col in range(0, valid_dim, 1):
             o_prev = scalar.load(o_prev_tile[row, col])
             pv_val = scalar.load(pv_tile[row, col])
             o_next = alpha * o_prev + beta * pv_val

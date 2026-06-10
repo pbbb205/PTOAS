@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 import json
+import linecache
 import re
 import shutil
 import subprocess
@@ -269,8 +270,11 @@ def execute_source(
     }
     if extra_namespace is not None:
         namespace.update(extra_namespace)
+    filename = f"{block.path}::codeblock:{block.start_line}"
+    source_lines = source.splitlines(keepends=True)
+    linecache.cache[filename] = (len(source), None, source_lines, filename)
     try:
-        exec(compile(source, str(block.path), "exec"), namespace, namespace)
+        exec(compile(source, filename, "exec"), namespace, namespace)
     except Exception as exc:
         raise AssertionError(
             f"{block_label(block, symbol)}: snippet execution failed: {exc.__class__.__name__}: {exc}"

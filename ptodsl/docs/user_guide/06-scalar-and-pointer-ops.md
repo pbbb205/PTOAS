@@ -116,10 +116,10 @@ def blend_output_rows(
     o_next_tile: pto.Tile,
     row_start: pto.i32, row_stop: pto.i32, valid_dim: pto.i32,
 ):
-    with pto.for_(row_start, row_stop, step=1) as row:
+    for row in range(row_start, row_stop, 1):
         alpha = scalar.load(alpha_tile[row, 0])
         beta = scalar.load(beta_tile[row, 0])
-        with pto.for_(0, valid_dim, step=1) as col:
+        for col in range(0, valid_dim, 1):
             o_prev = scalar.load(o_prev_tile[row, col])
             pv_val = scalar.load(pv_tile[row, col])
             o_next = alpha * o_prev + beta * pv_val
@@ -367,13 +367,13 @@ This is the standard stride for chunking column loops in SIMD kernels:
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"scalar_ops.chunk_loop","symbol":"scalar_ops_chunk_loop_probe","compile":{"BLOCK":128}} -->
 ```python
 VEC = pto.elements_per_vreg(pto.f32)
-with pto.for_(0, cols, step=VEC) as c:
+for c in range(0, cols, VEC):
     ...
 ```
 
 ## 6.6 Per-element tile traversal in @pto.simt
 
-`@pto.simt` kernels are the natural home for per-element scalar work. A typical pattern uses nested `pto.for_` loops to walk over a tile row by row, column by column:
+`@pto.simt` kernels are the natural home for per-element scalar work. A typical pattern uses nested Python `for range(...)` loops to walk over a tile row by row, column by column; the default AST rewrite lowers them to runtime loops:
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"scalar_ops.simt_scale","symbol":"scalar_ops_simt_scale_probe","compile":{"BLOCK":8}} -->
 ```python
@@ -385,8 +385,8 @@ def elementwise_scale(
     rows: pto.i32,
     cols: pto.i32,
 ):
-    with pto.for_(0, rows, step=1) as r:
-        with pto.for_(0, cols, step=1) as c:
+    for r in range(0, rows, 1):
+        for c in range(0, cols, 1):
             val = scalar.load(src_tile[r, c])
             scaled = val * scale
             scalar.store(scaled, dst_tile[r, c])
@@ -408,10 +408,10 @@ def blend_with_per_row_coeffs(
     rows: pto.i32,
     cols: pto.i32,
 ):
-    with pto.for_(0, rows, step=1) as r:
+    for r in range(0, rows, 1):
         alpha = scalar.load(alpha_tile[r, 0])   # read once per row
         beta = scalar.load(beta_tile[r, 0])     # read once per row
-        with pto.for_(0, cols, step=1) as c:
+        for c in range(0, cols, 1):
             o_prev = scalar.load(o_prev_tile[r, c])
             pv_val = scalar.load(pv_tile[r, c])
             o_next = alpha * o_prev + beta * pv_val

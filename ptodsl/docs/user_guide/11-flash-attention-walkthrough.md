@@ -270,7 +270,7 @@ row-major padded physical width just to satisfy row-byte alignment.
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"flash_attention.l1_loop_body","symbol":"flash_attention_l1_loop_body_probe","compile":{"BLOCK_Q":128,"BLOCK_KV":128,"HEAD_DIM":128,"CAUSAL":false,"NUM_STAGES":2}} -->
 ```python
-with pto.for_(0, q_blocks, step=1) as qi:
+for qi in range(0, q_blocks, 1):
     q_rows = _block_valid_extent(seq_q, qi, Br)
     q_part = pto.partition_view(q_head, offsets=[0, qi * Br, 0, 0],
                                 sizes=[1, q_rows, 1, dim])
@@ -296,14 +296,10 @@ with pto.for_(0, q_blocks, step=1) as qi:
     l_prev_tile.fill(0.0)
     o_prev_tile.fill(0.0)
 
-    kv_loop = pto.for_(0, kv_blocks, step=1).carry(
-        m=m_prev_tile, l=l_prev_tile, o=o_prev_tile,
-    )
-    with kv_loop:
-        kj = kv_loop.iv
-        m_cur = kv_loop.m
-        l_cur = kv_loop.l
-        o_cur = kv_loop.o
+    m_cur = m_prev_tile
+    l_cur = l_prev_tile
+    o_cur = o_prev_tile
+    for kj in range(0, kv_blocks, 1):
         kv_rows = _block_valid_extent(seq_k, kj, Bc)
         k_part = pto.partition_view(k_head,
                     offsets=[0, kj * Bc, 0, 0], sizes=[1, kv_rows, 1, dim])
@@ -332,10 +328,11 @@ with pto.for_(0, q_blocks, step=1) as qi:
             meta_ptr,
         )
 
-        kv_loop.update(m=m_next_tile, l=l_next_tile, o=o_next_tile)
+        m_cur = m_next_tile
+        l_cur = l_next_tile
+        o_cur = o_next_tile
 
-    o_final_tile = kv_loop.final("o")
-    pto.tile.store(o_final_tile, o_part)
+    pto.tile.store(o_cur, o_part)
 ```
 
 Key points:
@@ -343,7 +340,7 @@ Key points:
 - **Static physical shape, dynamic valid extent**: `alloc_tile(shape=...)` stays constexpr. Tail handling is expressed by updating `valid_shape` before each block load and sub-kernel call.
 - **`tile.load` at the kernel entry boundary**: Q is loaded once per Q block using a tile op into the MAT-backed bridge tile `q_mat`. The compiler auto-inserts the necessary `set_flag`/`wait_flag` pairs.
 - **State initialization**: `fill(float("-inf"))` and `fill(0.0)` initialize the online-softmax accumulators before the first KV block.
-- **Carry state**: the inner `kv_loop` carries three ping-pong tiles (`m`, `l`, `o`) across iterations using `.carry(...)` / `.update(...)` / `.final(...)`. After each KV block, the loop updates the carried values to the `_next` tiles. After the loop, `.final("o")` extracts the final output accumulator.
+- **Carry state**: the inner Python loop carries three ping-pong tiles (`m_cur`, `l_cur`, `o_cur`) across iterations. After each KV block, assignments to the `_next` tiles become loop-carried state after AST rewrite. After the loop, `o_cur` is the final output accumulator.
 - **`tile.store` at the kernel entry boundary**: writes the final result for this Q block back to GM.
 
 ## 11.4 Explicit orchestration
@@ -511,11 +508,11 @@ def online_softmax_rows(
 ):
 ```
 
-The simd kernel iterates over rows with `pto.for_`, processing one row per iteration:
+The simd kernel iterates over rows with Python `for range(...)`, and AST rewrite lowers the loop to runtime IR:
 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"flash_attention.online_softmax_loop","symbol":"flash_attention_online_softmax_loop_probe","compile":{"BLOCK":16}} -->
 ```python
-with pto.for_(row_start, row_stop, step=1) as row:
+for row in range(row_start, row_stop, 1):
     col_mask = pto.make_mask(pto.f32, valid_cols)
 
     s_row   = pto.vlds(s_tile[row, 0:])
@@ -593,11 +590,11 @@ Three scalar stores write the loop bounds into the metadata buffer. `meta_ptr` i
 @pto.simt
 def blend_output_rows(o_prev_tile, pv_tile, alpha_tile, beta_tile,
                       o_next_tile, row_start, row_stop, valid_dim):
-    with pto.for_(row_start, row_stop, step=1) as row:
+    for row in range(row_start, row_stop, 1):
         alpha = scalar.load(alpha_tile[row, 0])
         beta  = scalar.load(beta_tile[row, 0])
 
-        with pto.for_(0, valid_dim, step=1) as col:
+        for col in range(0, valid_dim, 1):
             o_prev = scalar.load(o_prev_tile[row, col])
             pv_val = scalar.load(pv_tile[row, col])
             o_next = alpha * o_prev + beta * pv_val
@@ -654,7 +651,7 @@ After all KV blocks: the top-level kernel issues `tile.store(o_final_tile, o_par
 
 ## 11.9 Design patterns in this sketch
 
-**Ping-pong state for online accumulators**: `m_prev`/`m_next`, `l_prev`/`l_next`, `o_prev`/`o_next` make the state transition explicit. After each KV block, the caller swaps the ping-pong pair (via `kv_loop.update(...)`) rather than aliasing in place.
+**Ping-pong state for online accumulators**: `m_prev`/`m_next`, `l_prev`/`l_next`, `o_prev`/`o_next` make the state transition explicit. After each KV block, the caller swaps the ping-pong pair by assigning the `_next` tiles to the loop-carried Python variables rather than aliasing in place.
 
 **Scratch reuse**: `rhs_l0b` serves both `K` (in `qk_matmul`) and `V` (in `pv_matmul`). `pv_acc_tile` reuses the accumulator from QK^T. The caller (top-level kernel) allocates once; the explicit-mode body passes them to both cube sub-kernels.
 

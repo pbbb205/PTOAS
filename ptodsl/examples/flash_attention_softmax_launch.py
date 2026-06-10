@@ -119,22 +119,13 @@ def _make_softmax_kernel(name: str, *, rows: int, seq: int):
         pto.wait_flag("MTE2", "V", event_id=0)
 
         with pto.simd():
-            row_loop = pto.for_(0, runtime_rows, step=lane_num).carry(remained=runtime_rows)
-            with row_loop:
-                row_base = row_loop.iv
-                remaining_rows = row_loop.remained
+            remaining_rows = runtime_rows
+            for row_base in range(0, runtime_rows, lane_num):
                 active_rows, remaining_after_pack = pto.make_mask(pto.f32, remaining_rows)
                 running_max = pto.vlds(scores_tile[0, row_base:])
                 running_sum = pto.vbr(1.0)
 
-                softmax_loop = pto.for_(1, runtime_seq, step=1).carry(
-                    running_max=running_max,
-                    running_sum=running_sum,
-                )
-                with softmax_loop:
-                    col = softmax_loop.iv
-                    running_max = softmax_loop.running_max
-                    running_sum = softmax_loop.running_sum
+                for col in range(1, runtime_seq, 1):
                     col_vec = pto.vlds(scores_tile[col, row_base:])
                     merged_max = pto.vmax(running_max, col_vec, active_rows)
                     running_delta = pto.vsub(running_max, merged_max, active_rows)
@@ -142,20 +133,20 @@ def _make_softmax_kernel(name: str, *, rows: int, seq: int):
                     running_sum_scaled = pto.vmul(scaled_running, running_sum, active_rows)
                     col_delta = pto.vsub(col_vec, merged_max, active_rows)
                     col_exp = pto.vexp(col_delta, active_rows)
-                    merged_sum = pto.vadd(running_sum_scaled, col_exp, active_rows)
-                    softmax_loop.update(running_max=merged_max, running_sum=merged_sum)
+                    running_sum = pto.vadd(running_sum_scaled, col_exp, active_rows)
+                    running_max = merged_max
 
-                final_max = softmax_loop.final("running_max")
-                final_sum = softmax_loop.final("running_sum")
+                final_max = running_max
+                final_sum = running_sum
 
-                with pto.for_(0, runtime_seq, step=1) as col:
+                for col in range(0, runtime_seq, 1):
                     col_vec = pto.vlds(scores_tile[col, row_base:])
                     out_delta = pto.vsub(col_vec, final_max, active_rows)
                     exp_vec = pto.vexp(out_delta, active_rows)
                     out_vec = pto.vdiv(exp_vec, final_sum, active_rows)
                     pto.vsts(out_vec, out_tile[col, row_base:], active_rows)
 
-                row_loop.update(remained=remaining_after_pack)
+                remaining_rows = remaining_after_pack
 
         pto.set_flag("V", "MTE3", event_id=0)
         pto.wait_flag("V", "MTE3", event_id=0)

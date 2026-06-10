@@ -21,6 +21,7 @@ from ._diagnostics import (
     subkernel_host_tensor_boundary_error,
     subkernel_signature_boundary_error,
 )
+from ._ast_rewrite import rewrite_jit_function
 from ._host_tensors import TensorSpec, looks_like_host_tensor
 from ._surface_values import unwrap_surface_value
 from ._tracing import current_runtime, current_session
@@ -44,16 +45,18 @@ class SubkernelSpec:
 class SubkernelTemplate:
     """Callable decorated PTODSL subkernel surface."""
 
-    def __init__(self, spec: SubkernelSpec, py_fn):
+    def __init__(self, spec: SubkernelSpec, py_fn, *, ast_rewrite: bool = True):
         self.spec = spec
         self.py_fn = py_fn
+        self._ast_rewrite = ast_rewrite
         self.signature = inspect.signature(py_fn)
         self._validate_definition()
         update_wrapper(self, py_fn)
 
     def emit_body(self, *args, **kwargs):
         """Emit this subkernel body into the currently active trace."""
-        result = self.py_fn(*args, **kwargs)
+        py_fn = rewrite_jit_function(self.py_fn) if self._ast_rewrite else self.py_fn
+        result = py_fn(*args, **kwargs)
         self._validate_result(result)
         return result
 
@@ -130,10 +133,18 @@ def _validate_subkernel_placement(role: KernelRole, outer_frame, *, inline: bool
 class _SubkernelSurface:
     """Dual-use surface that supports both decorators and inline context-manager scopes."""
 
-    def __init__(self, role: KernelRole, *, name: str | None = None, target: str = "a5"):
+    def __init__(
+        self,
+        role: KernelRole,
+        *,
+        name: str | None = None,
+        target: str = "a5",
+        ast_rewrite: bool = True,
+    ):
         self._role = role
         self._name = name
         self._target = target
+        self._ast_rewrite = ast_rewrite
         self._session_cm = None
 
     def __call__(self, fn):
@@ -144,6 +155,7 @@ class _SubkernelSurface:
                 target=self._target,
             ),
             fn,
+            ast_rewrite=self._ast_rewrite,
         )
 
     def __enter__(self):
@@ -172,26 +184,39 @@ class _SubkernelSurface:
             self._session_cm = None
 
 
-def _subkernel_decorator(role: KernelRole, *, name: str | None = None, target: str = "a5"):
-    return _SubkernelSurface(role, name=name, target=target)
+def _subkernel_decorator(
+    role: KernelRole,
+    *,
+    name: str | None = None,
+    target: str = "a5",
+    ast_rewrite: bool = True,
+):
+    return _SubkernelSurface(role, name=name, target=target, ast_rewrite=ast_rewrite)
 
 
-def _decorate_subkernel(role: KernelRole, fn=None, *, name: str | None = None, target: str = "a5"):
+def _decorate_subkernel(
+    role: KernelRole,
+    fn=None,
+    *,
+    name: str | None = None,
+    target: str = "a5",
+    ast_rewrite: bool = True,
+):
     if fn is not None:
-        return _subkernel_decorator(role, name=name, target=target)(fn)
-    return _subkernel_decorator(role, name=name, target=target)
+        return _subkernel_decorator(role, name=name, target=target, ast_rewrite=ast_rewrite)(fn)
+    return _subkernel_decorator(role, name=name, target=target, ast_rewrite=ast_rewrite)
 
 
-def cube(fn=None, *, name: str | None = None, target: str = "a5"):
-    return _decorate_subkernel(KernelRole.CUBE, fn, name=name, target=target)
+def cube(fn=None, *, name: str | None = None, target: str = "a5", ast_rewrite: bool = True):
+    return _decorate_subkernel(KernelRole.CUBE, fn, name=name, target=target, ast_rewrite=ast_rewrite)
 
 
-def simd(fn=None, *, name: str | None = None, target: str = "a5"):
-    return _decorate_subkernel(KernelRole.SIMD, fn, name=name, target=target)
+def simd(fn=None, *, name: str | None = None, target: str = "a5", ast_rewrite: bool = True):
+    return _decorate_subkernel(KernelRole.SIMD, fn, name=name, target=target, ast_rewrite=ast_rewrite)
 
 
-def simt(fn=None, *, name: str | None = None, target: str = "a5"):
-    return _decorate_subkernel(KernelRole.SIMT, fn, name=name, target=target)
+def simt(fn=None, *, name: str | None = None, target: str = "a5", ast_rewrite: bool = True):
+    return _decorate_subkernel(KernelRole.SIMT, fn, name=name, target=target, ast_rewrite=ast_rewrite)
 
 
 __all__ = [

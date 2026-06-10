@@ -9,6 +9,9 @@
 
 from __future__ import annotations
 
+import inspect
+
+from ._ast_rewrite import rewrite_jit_function
 from ._runtime.launch import LaunchHandle, parse_launch_spec
 from ._tracing import ModuleArtifact, SignatureTracingRuntime
 
@@ -52,18 +55,33 @@ class CompiledKernelHandle(ModuleArtifact):
 class KernelCompiler:
     """Per-kernel specialization cache and module builder."""
 
-    def __init__(self, py_name: str, module_spec, kernel_signature, callback):
+    def __init__(
+        self,
+        py_name: str,
+        module_spec,
+        kernel_signature,
+        callback,
+        *,
+        ast_rewrite=True,
+    ):
         self._py_name = py_name
         self._module_spec = module_spec
         self._kernel_signature = kernel_signature
         self._callback = callback
         self._kernel_identity = id(callback)
+        self._ast_rewrite = ast_rewrite
         self._compiled_cache = {}
 
     def compile(self, **constexpr_bindings):
         normalized_bindings = self._kernel_signature.bind_constexpr_bindings(constexpr_bindings)
+        kernel_identity = self._kernel_identity
+        if self._ast_rewrite:
+            kernel_identity = (
+                kernel_identity,
+                _closure_cache_signature(self._callback),
+            )
         specialization_key = self._kernel_signature.specialization_key(
-            self._kernel_identity,
+            kernel_identity,
             normalized_bindings,
         )
 
@@ -71,10 +89,11 @@ class KernelCompiler:
         if cached is not None:
             return cached
 
+        callback = rewrite_jit_function(self._callback) if self._ast_rewrite else self._callback
         runtime = SignatureTracingRuntime(
             self._module_spec,
             self._kernel_signature,
-            self._callback,
+            callback,
             constexpr_bindings=normalized_bindings,
         )
         compiled = CompiledKernelHandle(
@@ -91,6 +110,49 @@ class KernelCompiler:
 
     def cached_specializations(self):
         return tuple(self._compiled_cache.values())
+
+
+def _closure_cache_signature(fn):
+    try:
+        closure_vars = inspect.getclosurevars(fn)
+    except TypeError:
+        return ()
+    return tuple(
+        (name, _cache_signature_atom(value))
+        for name, value in sorted(closure_vars.nonlocals.items())
+    )
+
+
+def _cache_signature_atom(value):
+    try:
+        hash(value)
+    except TypeError:
+        if isinstance(value, dict):
+            items = (
+                (_cache_signature_atom(key), _cache_signature_atom(item))
+                for key, item in value.items()
+            )
+            return (
+                "dict",
+                tuple(sorted(items, key=repr)),
+            )
+        if isinstance(value, (list, tuple)):
+            return (
+                type(value).__name__,
+                tuple(_cache_signature_atom(item) for item in value),
+            )
+        if isinstance(value, set):
+            return (
+                "set",
+                tuple(
+                    sorted(
+                        (_cache_signature_atom(item) for item in value),
+                        key=repr,
+                    )
+                ),
+            )
+        return (type(value).__name__, repr(value))
+    return value
 
 
 __all__ = [

@@ -45,15 +45,12 @@ The recommended front door for creating masks is `pto.make_mask`. It dispatches 
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"tail.chunked_inner_loop","symbol":"tail_chunked_inner_loop_probe","compile":{"BLOCK":128}} -->
 ```python
 VEC = pto.elements_per_vreg(pto.f32)
-col_loop = pto.for_(0, cols, step=VEC).carry(remained=cols)
-with col_loop:
-    c = col_loop.iv
-    remained = col_loop.remained
+remained = cols
+for c in range(0, cols, VEC):
     mask, remained = pto.make_mask(pto.f32, remained)
     vec = pto.vlds(tile[r, c:])
     # ... operate under mask ...
     pto.vsts(vec, out_tile[r, c:], mask)
-    col_loop.update(remained=remained)
 ```
 
 `make_mask` generates a tail mask from the remaining count: the first `min(remained, VL)` lanes are active, and `remained` is decremented by `VL` for the next iteration. On the final partial chunk, fewer than `VL` lanes are active. PTODSL handles the hardware `i32` tail-mask operand internally, so loop-carried `index` metadata can flow through `make_mask` without manual casts.
@@ -367,21 +364,17 @@ The mask granularity must match the vector element type. Using a `mask_b16` with
 <!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"tail.vector_pattern","symbol":"tail_vector_pattern_probe","compile":{"BLOCK":128}} -->
 ```python
 VEC = pto.elements_per_vreg(pto.f32)
-with pto.for_(0, rows, step=1) as r:
-    col_loop = pto.for_(0, cols, step=VEC).carry(remained=cols)
-    with col_loop:
-        c = col_loop.iv
-        remained = col_loop.remained
+for r in range(0, rows, 1):
+    remained = cols
+    for c in range(0, cols, VEC):
         mask, remained = pto.make_mask(pto.f32, remained)
 
         vec = pto.vlds(tile[r, c:])
         vec = pto.vexp(vec, mask)
         pto.vsts(vec, out_tile[r, c:], mask)
-
-        col_loop.update(remained=remained)
 ```
 
-The `mask` gates the `vexp` (masked-off lanes produce 0) and the `vsts` (masked-off lanes are not written). `col_loop` carries the remaining count across iterations, so the final partial chunk correctly masks only the valid tail elements.
+The `mask` gates the `vexp` (masked-off lanes produce 0) and the `vsts` (masked-off lanes are not written). The `remained` assignment makes the remaining count loop-carried after AST rewrite, so the final partial chunk correctly masks only the valid tail elements.
 
 ---
 

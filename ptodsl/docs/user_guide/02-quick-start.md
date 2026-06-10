@@ -121,7 +121,7 @@ def blocked_copy(
 
     tile = pto.alloc_tile(shape=[1, BLOCK], dtype=pto.f32)
 
-    with pto.for_(0, rows, step=1) as row:
+    for row in range(0, rows, 1):
         a_part = pto.partition_view(a_view, offsets=[row, 0], sizes=[1, cols])
         o_part = pto.partition_view(o_view, offsets=[row, 0], sizes=[1, cols])
 
@@ -129,7 +129,7 @@ def blocked_copy(
         pto.tile.store(tile, o_part)
 ```
 
-Here `rows` and `cols` are dynamic launch-time scalars. The loop bound depends on `rows`, so `pto.for_` records a structured loop in the IR rather than unrolling at trace time. The `BLOCK` parameter stays `constexpr` because it is a tuning knob, not data-dependent. Chapter 5 covers this distinction in detail.
+Here `rows` and `cols` are dynamic launch-time scalars. The loop bound depends on `rows`, so the default AST rewrite records a structured loop in the IR rather than unrolling at trace time. The `BLOCK` parameter stays `constexpr` because it is a tuning knob, not data-dependent. Chapter 5 covers this distinction in detail.
 
 ## 2.3 Compile and launch
 
@@ -196,17 +196,14 @@ switch that kernel to `mode="explicit"`:
 def add_rows(a_tile: pto.Tile, b_tile: pto.Tile, o_tile: pto.Tile,
              rows: pto.index, cols: pto.index):
     VEC = pto.elements_per_vreg(pto.f32)
-    with pto.for_(0, rows, step=1) as r:
-        col_loop = pto.for_(0, cols, step=VEC).carry(remained=cols)
-        with col_loop:
-            c = col_loop.iv
-            remained = col_loop.remained
+    for r in range(0, rows, 1):
+        remained = cols
+        for c in range(0, cols, VEC):
             mask, remained = pto.make_mask(pto.f32, remained)
             a_vec = pto.vlds(a_tile[r, c:])
             b_vec = pto.vlds(b_tile[r, c:])
             o_vec = pto.vadd(a_vec, b_vec, mask)
             pto.vsts(o_vec, o_tile[r, c:], mask)
-            col_loop.update(remained=remained)
 
 # Single kernel entry in explicit mode — micro-instruction staging plus SIMD sub-kernel.
 @pto.jit(target="a5", mode="explicit")
@@ -227,7 +224,7 @@ def vec_add_micro(
     o_tile = pto.alloc_tile(shape=[1, BLOCK], dtype=pto.f32)
 
     num_blocks = (N + BLOCK - 1) // BLOCK
-    with pto.for_(0, num_blocks, step=1) as i:
+    for i in range(0, num_blocks, 1):
         offset = i * BLOCK
         this_block = scalar.min(N - offset, BLOCK)
         a_part = pto.partition_view(a_view, offsets=[offset], sizes=[this_block])
@@ -253,8 +250,8 @@ def vec_add_micro(
   for the row-wise vector work while keeping instruction staging in the
   explicit entry body.
 
-- **Inside `@pto.simd`**: the outer `pto.for_` iterates over rows, the inner
-  `pto.for_` iterates over column chunks of the hardware vector width
+- **Inside `@pto.simd`**: the outer Python `for range(...)` iterates over rows,
+  and the inner Python `for range(...)` iterates over column chunks of the hardware vector width
   (`elements_per_vreg`). Each iteration loads a vector-width slice into a
   `vreg`, does the addition under a mask (for tail elements), and stores the
   result back. Both loops are recorded as structured control flow IR — the

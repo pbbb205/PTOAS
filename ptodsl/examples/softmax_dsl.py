@@ -9,10 +9,10 @@
 """
 Row-wise softmax kernel – compile-only DSL builder.
 
-This sample mirrors the launchable softmax demo. It uses a transposed logical
-GM view so each UB row holds one score column, then processes 64 rows in
-parallel with the online-softmax recurrence using only public PTODSL surface
-syntax.
+This sample mirrors the launchable softmax demo. It uses native Python
+``if`` / ``for range(...)`` in the JIT body; the default PTODSL AST rewrite
+turns those into runtime control flow. Use ``pto.const_expr`` /
+``pto.static_range`` only when a branch or loop is intentionally compile-time.
 """
 
 from pathlib import Path
@@ -56,80 +56,68 @@ def _make_softmax_kernel(name: str, *, rows: int, seq: int):
         scores_tile_bytes = seq * physical_rows * pto.bytewidth(pto.f32)
         has_rows = runtime_rows > 0
 
-        with pto.if_(has_rows) as has_rows_br:
-            with has_rows_br.then_:
-                scores_view = pto.make_tensor_view(
-                    scores_ptr,
-                    shape=[seq, rows],
-                    strides=[1, seq],
-                )
-                out_view = pto.make_tensor_view(
-                    out_ptr,
-                    shape=[seq, rows],
-                    strides=[1, seq],
-                )
-                scores_tile = pto.alloc_tile(
-                    shape=[seq, physical_rows],
-                    dtype=pto.float32,
-                    addr=pto.const(0, dtype=pto.i64),
-                    valid_shape=[runtime_seq, runtime_rows],
-                )
-                out_tile = pto.alloc_tile(
-                    shape=[seq, physical_rows],
-                    dtype=pto.float32,
-                    addr=pto.const(scores_tile_bytes, dtype=pto.i64),
-                    valid_shape=[runtime_seq, runtime_rows],
-                )
+        if has_rows:
+            scores_view = pto.make_tensor_view(
+                scores_ptr,
+                shape=[seq, rows],
+                strides=[1, seq],
+            )
+            out_view = pto.make_tensor_view(
+                out_ptr,
+                shape=[seq, rows],
+                strides=[1, seq],
+            )
+            scores_tile = pto.alloc_tile(
+                shape=[seq, physical_rows],
+                dtype=pto.float32,
+                addr=pto.const(0, dtype=pto.i64),
+                valid_shape=[runtime_seq, runtime_rows],
+            )
+            out_tile = pto.alloc_tile(
+                shape=[seq, physical_rows],
+                dtype=pto.float32,
+                addr=pto.const(scores_tile_bytes, dtype=pto.i64),
+                valid_shape=[runtime_seq, runtime_rows],
+            )
 
-                pto.tile.load(scores_view, scores_tile)
+            pto.tile.load(scores_view, scores_tile)
 
-                pto.set_flag("MTE2", "V", event_id=0)
-                pto.wait_flag("MTE2", "V", event_id=0)
+            pto.set_flag("MTE2", "V", event_id=0)
+            pto.wait_flag("MTE2", "V", event_id=0)
 
-                with pto.simd():
-                    row_loop = pto.for_(0, runtime_rows, step=packed_rows).carry(remained=runtime_rows)
-                    with row_loop:
-                        row_base = row_loop.iv
-                        remaining_rows = row_loop.remained
-                        active_rows, remaining_after_pack = pto.make_mask(pto.f32, remaining_rows)
-                        running_max = pto.vlds(scores_tile[0, row_base:])
-                        running_sum = pto.vbr(1.0)
+            with pto.simd():
+                remaining_rows = runtime_rows
+                for row_base in range(0, runtime_rows, packed_rows):
+                    active_rows, remaining_rows = pto.make_mask(pto.f32, remaining_rows)
+                    running_max = pto.vlds(scores_tile[0, row_base:])
+                    running_sum = pto.vbr(1.0)
 
-                        softmax_loop = pto.for_(1, runtime_seq, step=1).carry(
-                            running_max=running_max,
-                            running_sum=running_sum,
-                        )
-                        with softmax_loop:
-                            col = softmax_loop.iv
-                            running_max = softmax_loop.running_max
-                            running_sum = softmax_loop.running_sum
-                            col_vec = pto.vlds(scores_tile[col, row_base:])
-                            merged_max = pto.vmax(running_max, col_vec, active_rows)
-                            running_delta = pto.vsub(running_max, merged_max, active_rows)
-                            scaled_running = pto.vexp(running_delta, active_rows)
-                            running_sum_scaled = pto.vmul(scaled_running, running_sum, active_rows)
-                            col_delta = pto.vsub(col_vec, merged_max, active_rows)
-                            col_exp = pto.vexp(col_delta, active_rows)
-                            merged_sum = pto.vadd(running_sum_scaled, col_exp, active_rows)
-                            softmax_loop.update(running_max=merged_max, running_sum=merged_sum)
+                    for col in range(1, runtime_seq, 1):
+                        col_vec = pto.vlds(scores_tile[col, row_base:])
+                        merged_max = pto.vmax(running_max, col_vec, active_rows)
+                        running_delta = pto.vsub(running_max, merged_max, active_rows)
+                        scaled_running = pto.vexp(running_delta, active_rows)
+                        running_sum_scaled = pto.vmul(scaled_running, running_sum, active_rows)
+                        col_delta = pto.vsub(col_vec, merged_max, active_rows)
+                        col_exp = pto.vexp(col_delta, active_rows)
+                        running_sum = pto.vadd(running_sum_scaled, col_exp, active_rows)
+                        running_max = merged_max
 
-                        final_max = softmax_loop.final("running_max")
-                        final_sum = softmax_loop.final("running_sum")
+                    final_max = running_max
+                    final_sum = running_sum
 
-                        with pto.for_(0, runtime_seq, step=1) as col:
-                            col_vec = pto.vlds(scores_tile[col, row_base:])
-                            out_delta = pto.vsub(col_vec, final_max, active_rows)
-                            exp_vec = pto.vexp(out_delta, active_rows)
-                            out_vec = pto.vdiv(exp_vec, final_sum, active_rows)
-                            pto.vsts(out_vec, out_tile[col, row_base:], active_rows)
+                    for col in range(0, runtime_seq, 1):
+                        col_vec = pto.vlds(scores_tile[col, row_base:])
+                        out_delta = pto.vsub(col_vec, final_max, active_rows)
+                        exp_vec = pto.vexp(out_delta, active_rows)
+                        out_vec = pto.vdiv(exp_vec, final_sum, active_rows)
+                        pto.vsts(out_vec, out_tile[col, row_base:], active_rows)
 
-                        row_loop.update(remained=remaining_after_pack)
+            pto.set_flag("V", "MTE3", event_id=0)
+            pto.wait_flag("V", "MTE3", event_id=0)
 
-                pto.set_flag("V", "MTE3", event_id=0)
-                pto.wait_flag("V", "MTE3", event_id=0)
-
-                pto.tile.store(out_tile, out_view)
-                pto.pipe_barrier(pto.Pipe.ALL)
+            pto.tile.store(out_tile, out_view)
+            pto.pipe_barrier(pto.Pipe.ALL)
 
     return kernel
 
