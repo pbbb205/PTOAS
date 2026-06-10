@@ -166,6 +166,17 @@ step = (N + BLOCK - 1) // BLOCK               # Python int arithmetic (trace-tim
 
 When both operands are PTO scalars (loaded from device memory or produced by another device-side op), `+`, `-`, `*`, `/` produce device-side arithmetic instructions. When one operand is a Python scalar (trace-time constant), the tracer embeds it as an immediate.
 
+### Bitwise operators
+
+PTO integer scalars support Python bitwise operators `&`, `|`, and `^`. Runtime `index` values, such as loop induction variables produced by `pto.for_` or by AST-rewritten `for range(...)` loops, also support these operators for low-bit masks and parity checks.
+
+The common use case is double-buffering or flag-slot selection:
+
+- `i & 1` selects an alternating slot from a runtime loop index.
+- The result of an `index` bitwise expression remains index-like, so it can be passed to APIs that accept runtime index values, such as dynamic synchronization `event_id`.
+
+For fixed-width bit manipulation where the exact integer width matters, cast to an explicit integer type first and keep the expression in that integer domain.
+
 ### Math functions: `scalar.*`
 
 Non-trivial scalar math functions live under the top-level `scalar` namespace (imported as `from ptodsl import scalar`). They are intentionally separate from the `pto.*` namespace:

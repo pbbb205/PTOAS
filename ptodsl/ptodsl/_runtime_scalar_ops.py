@@ -262,11 +262,6 @@ def emit_runtime_compare(op_name: str, lhs, rhs):
 def emit_runtime_bitwise_op(op_name: str, lhs, rhs):
     """Lower one authored runtime scalar bitwise operator."""
     lhs, rhs, kind = normalize_runtime_binary_operands(lhs, rhs)
-    if kind != "integer":
-        raise TypeError(
-            f"runtime scalar bitwise operator '{op_name}' expects integer-like operands, got {lhs.type} and {rhs.type}"
-        )
-
     op_cls = {
         "and": arith.AndIOp,
         "or": arith.OrIOp,
@@ -274,6 +269,14 @@ def emit_runtime_bitwise_op(op_name: str, lhs, rhs):
     }.get(op_name)
     if op_cls is None:
         raise TypeError(f"unsupported runtime scalar bitwise operator '{op_name}'")
+
+    if kind == "index":
+        return op_cls(lhs, rhs).result
+
+    if kind != "integer":
+        raise TypeError(
+            f"runtime scalar bitwise operator '{op_name}' expects integer-like operands, got {lhs.type} and {rhs.type}"
+        )
 
     authored_type = lhs.type
     result = op_cls(_strip_integer_signedness(lhs), _strip_integer_signedness(rhs)).result

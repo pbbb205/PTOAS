@@ -57,6 +57,16 @@ In PTODSL, `event_id` may be either:
 
 Events are per-pipeline-pair: the same `event_id=0` used between `MTE2 → V` is independent from `event_id=0` used between `MTE3 → V`.
 
+Runtime loop indices can be used to select alternating event slots. This is useful for double-buffered pipelines:
+
+<!-- ptodsl-doc-test: {"mode":"compile_fragment","fixture":"sync_ops.basic","symbol":"sync_ops_basic_probe","compile":{}} -->
+```python
+with pto.for_(0, 4, step=1) as stage:
+    event = stage & 1
+    pto.set_flag(pto.Pipe.MTE2, pto.Pipe.V, event_id=event)
+    pto.wait_flag(pto.Pipe.MTE2, pto.Pipe.V, event_id=event)
+```
+
 ---
 
 ## 10.2 Pipeline synchronization: `set_flag`, `wait_flag`, `pipe_barrier`
