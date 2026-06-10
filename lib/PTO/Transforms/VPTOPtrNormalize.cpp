@@ -682,6 +682,18 @@ struct ConvertAccStoreUbOperandPattern
   }
 };
 
+struct ConvertMteUbGmOperandPattern
+    : public OpConversionPattern<pto::MteUbGmOp> {
+  using OpConversionPattern::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(pto::MteUbGmOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    return rewriteBufferLikeBoundaryOp(op, adaptor, rewriter, "mte_ub_gm source",
+                                       "mte_ub_gm destination");
+  }
+};
+
 struct ConvertLoadOperandToPtrPattern : public OpConversionPattern<pto::PTOLoadOp> {
   using OpConversionPattern::OpConversionPattern;
 
@@ -872,6 +884,10 @@ struct VPTOPtrNormalizePass
       return isa<pto::PtrType>(op.getSource().getType()) &&
              isa<pto::PtrType>(op.getDestination().getType());
     });
+    target.addDynamicallyLegalOp<pto::MteUbGmOp>([](pto::MteUbGmOp op) {
+      return isa<pto::PtrType>(op.getSource().getType()) &&
+             isa<pto::PtrType>(op.getDestination().getType());
+    });
     target.addDynamicallyLegalOp<pto::PTOLoadOp>(
         [](pto::PTOLoadOp op) { return isa<pto::PtrType>(op.getPtr().getType()); });
     target.addDynamicallyLegalOp<pto::PTOStoreOp>(
@@ -907,6 +923,7 @@ struct VPTOPtrNormalizePass
                  ConvertAccStoreOperandPattern,
                  ConvertAccStoreGmOperandPattern,
                  ConvertAccStoreUbOperandPattern,
+                 ConvertMteUbGmOperandPattern,
                  ConvertLoadOperandToPtrPattern,
                  ConvertStoreOperandToPtrPattern,
                  ConvertPtrNormalizeUnrealizedCastOp>(
