@@ -5078,9 +5078,17 @@ def reserve_buffer(name, *, size, location, auto=True, base=None):
 def import_reserved_buffer(name, *, peer_func):
     """``pto.import_reserved_buffer(name, peer_func=...)``."""
     if not isinstance(peer_func, str):
-        peer_func = getattr(getattr(peer_func, "spec", None), "symbol_name", None) \
-            or getattr(peer_func, "__name__", None) \
-            or str(peer_func)
+        spec = getattr(peer_func, "spec", None)
+        role = getattr(spec, "role", None)
+        role_value = getattr(role, "value", role)
+        if role_value == "simt":
+            from ._tracing.active import require_active_session
+            session = require_active_session("pto.import_reserved_buffer")
+            peer_func = session.resolve_simt_peer_symbol(peer_func)
+        else:
+            peer_func = getattr(spec, "symbol_name", None) \
+                or getattr(peer_func, "__name__", None) \
+                or str(peer_func)
     op = _pto.ImportReservedBufferOp(name, peer_func)
     return wrap_surface_value(op.result)
 

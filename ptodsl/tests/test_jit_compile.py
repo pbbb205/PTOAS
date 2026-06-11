@@ -1232,6 +1232,17 @@ def simt_pointer_offset_helper(meta_ptr: pto.ptr(pto.i32, pto.MemorySpace.UB)):
     scalar.store(9, meta_ptr + 1)
 
 
+@pto.simt
+def simt_reserved_buffer_peer():
+    pto.reserve_buffer("simt_c2v_fifo", size=8192, location="vec")
+
+
+@pto.simt
+def simt_reserved_buffer_ambiguous_peer(ptr):
+    _ = ptr
+    pto.reserve_buffer("simt_c2v_fifo", size=8192, location="vec")
+
+
 @pto.jit(target="a5")
 def simt_pointer_offset_probe():
     meta_tile = pto.alloc_tile(shape=[1, 8], dtype=pto.i32, valid_shape=[1, 2])
@@ -1240,6 +1251,23 @@ def simt_pointer_offset_probe():
     second = scalar.load(meta_tile.as_ptr() + 1)
     _ = first
     _ = second
+
+
+@pto.jit(target="a5")
+def simt_reserved_buffer_peer_probe():
+    simt_reserved_buffer_peer()
+    imported = pto.import_reserved_buffer("simt_c2v_fifo", peer_func=simt_reserved_buffer_peer)
+    _ = imported
+
+
+@pto.jit(target="a5")
+def simt_reserved_buffer_ambiguous_peer_probe(
+    gm_i32: pto.ptr(pto.i32, "gm"),
+    gm_f32: pto.ptr(pto.f32, "gm"),
+):
+    simt_reserved_buffer_ambiguous_peer(gm_i32)
+    simt_reserved_buffer_ambiguous_peer(gm_f32)
+    pto.import_reserved_buffer("simt_c2v_fifo", peer_func=simt_reserved_buffer_ambiguous_peer)
 
 
 @pto.jit(target="a5")
@@ -3332,6 +3360,23 @@ def main() -> None:
     expect(
         re.search(r"pto\.load %\d+\[%c1(?:_\d+)?\]", simt_pointer_offset_text) is not None,
         "@pto.simt pointer helper probe should preserve ptr+offset load syntax on the caller side",
+    )
+    simt_reserved_buffer_peer_text = simt_reserved_buffer_peer_probe.compile().mlir_text()
+    expect_parse_roundtrip_and_verify(
+        simt_reserved_buffer_peer_text,
+        "simt reserved-buffer peer specialization",
+    )
+    expect(
+        re.search(
+            r"pto\.import_reserved_buffer\{[^}]*peer_func = @simt_reserved_buffer_peer__simt_\d+",
+            simt_reserved_buffer_peer_text,
+        ) is not None,
+        "import_reserved_buffer(peer_func=@pto.simt helper) should reference the materialized helper symbol",
+    )
+    expect_raises(
+        RuntimeError,
+        lambda: simt_reserved_buffer_ambiguous_peer_probe.compile().mlir_text(),
+        "multiple specializations",
     )
 
     scalar_store_coercion_text = scalar_store_element_coercion_probe.compile().mlir_text()

@@ -729,6 +729,9 @@ def reduce_lane_value(dst: pto.ptr(pto.i32, "gm")):
     pto.vote_uni(pred)
     pto.vote_ballot(pred)
 
+    pto.shuffle_idx(lane, lane, width=32)
+    pto.shuffle_up(lane, 1, width=32)
+    pto.shuffle_down(lane, 1, width=32)
     value = pto.shuffle_bfly(lane, 1, width=32)
     total = pto.redux_add(value, signedness="signed")
     maximum = pto.redux_max(total, signedness="signed")
@@ -780,6 +783,14 @@ def update_counter(counter: pto.ptr(pto.i32, "gm")):
     idx = scalar.index_cast(tid)
     value = pto.ldg(counter, idx, l1cache="cache", l2cache="nmfv")
     old = pto.atomic_add(counter, value, l2cache="nmfv", signedness="signed")
+    pto.atomic_exch(counter, value, signedness="signed")
+    pto.atomic_sub(counter, value, signedness="signed")
+    pto.atomic_min(counter, value, signedness="signed")
+    pto.atomic_max(counter, value, signedness="signed")
+    pto.atomic_and(counter, value, signedness="unsigned")
+    pto.atomic_or(counter, value, signedness="unsigned")
+    pto.atomic_xor(counter, value, signedness="unsigned")
+    pto.atomic_cas(counter, old, value, signedness="signed")
     pto.stg(old, counter, idx, l1cache="uncache", l2cache="wtsred")
 
 

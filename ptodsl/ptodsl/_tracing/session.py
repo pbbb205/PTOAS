@@ -252,6 +252,27 @@ class TraceSession:
                 self._simt_helper_symbol_counters[base_symbol] = index
                 return symbol
 
+    def resolve_simt_peer_symbol(self, subkernel) -> str:
+        """Return the unique materialized helper symbol for a ``@pto.simt`` peer."""
+        symbol_name = subkernel.spec.symbol_name
+        matches = [
+            helper_fn
+            for key, helper_fn in self._simt_helper_specializations.items()
+            if key.symbol_name == symbol_name
+        ]
+        if not matches:
+            raise RuntimeError(
+                f"pto.import_reserved_buffer(..., peer_func={symbol_name}) cannot resolve "
+                "the @pto.simt helper symbol before the helper is called or launched"
+            )
+        if len(matches) > 1:
+            raise RuntimeError(
+                f"pto.import_reserved_buffer(..., peer_func={symbol_name}) is ambiguous "
+                "because the @pto.simt helper has multiple specializations; pass the "
+                "materialized peer function symbol explicitly"
+            )
+        return _symbol_name(matches[0])
+
     def lookup_helper(self, symbol_name: str):
         """Return a previously declared helper function, or ``None``."""
         return self._helpers.get(symbol_name)

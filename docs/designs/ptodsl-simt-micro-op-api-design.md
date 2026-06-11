@@ -273,12 +273,14 @@ Runtime SSA values must be passed positionally so they become helper function
 arguments. This avoids capturing values from the enclosing entry function into
 the generated SIMT helper body.
 
-Because generated SIMT helper symbols are internal specialization names, other
-APIs that require stable `func.func` symbols must not reference authored
-`@pto.simt` helper names. In particular, `pto.import_reserved_buffer(peer_func=...)`
-must refer to a real peer `func.func` containing the matching
-`pto.reserve_buffer`, not to an authored SIMT helper whose generated symbol may
-be specialized.
+Because generated SIMT helper symbols are internal specialization names, APIs
+that require stable `func.func` symbols must resolve authored `@pto.simt`
+helpers to a materialized helper symbol before emitting IR. In particular,
+`pto.import_reserved_buffer(peer_func=simt_helper)` resolves to the generated
+helper symbol when the helper has exactly one materialized specialization. If
+the helper has not been called/launched yet, or if multiple specializations
+exist, PTO-DSL raises a frontend error and requires the caller to pass an
+explicit peer function symbol.
 
 ### 5.6 `@pto.simt` Decorator Attributes
 
@@ -401,8 +403,8 @@ Frontend files touched by the implemented surface:
   - documented the SIMT API surface.
 - `ptodsl/tests/support/docs_fragment_fixtures.py`
   - declares stable peer functions for docs snippets that use
-    `pto.import_reserved_buffer(peer_func=...)`, instead of relying on
-    generated SIMT helper symbols.
+    `pto.import_reserved_buffer(peer_func=...)` where the snippet needs a
+    fixed peer symbol independent of SIMT helper specialization.
 - `ptodsl/tests/test_jit_compile.py`
   - compile smoke tests for launch/query wrappers, full SIMT micro-op surface,
     invalid frontend argument combinations, and SIMT helper specialization.
