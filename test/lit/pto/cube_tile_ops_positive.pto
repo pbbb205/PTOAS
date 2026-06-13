@@ -1,0 +1,150 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// Cube tile ops lowering — positive cases.
+// Covers TLOAD.MAT (ND2NZ/DN2NZ), TSTORE.ACC (NZ2ND/NZ2DN/NZ2NZ), and TSTORE_FP.
+// Each func checks only the key lowering intrinsic to avoid trivial per-dtype duplication.
+// Dtype variation is exercised in ST (tilelang_st), not here.
+
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --enable-tile-op-expand %s -o - | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
+
+  // TLOAD.MAT ND2NZ f16 — GM row-major → MAT NZ
+  func.func @tload_mat_nd2nz_f16(%src: !pto.ptr<f16>) attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+   %c0 = arith.constant 0 : index
+   %c1 = arith.constant 1 : index
+   %c16 = arith.constant 16 : index
+   %c32 = arith.constant 32 : index
+   %tv = pto.make_tensor_view %src, shape = [%c16, %c32], strides = [%c32, %c1] : !pto.tensor_view<?x?xf16>
+   %sv = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c16, %c32] : !pto.tensor_view<?x?xf16> -> !pto.partition_tensor_view<16x32xf16>
+   %dst_tile = pto.alloc_tile : !pto.tile_buf<mat, 16x32xf16, blayout=col_major, slayout=row_major>
+   pto.tload ins(%sv : !pto.partition_tensor_view<16x32xf16>)
+             outs(%dst_tile : !pto.tile_buf<mat, 16x32xf16, blayout=col_major, slayout=row_major>)
+   pto.barrier #pto.pipe<PIPE_ALL>
+   return
+  }
+
+  // TLOAD.MAT DN2NZ bf16 — GM col-major → MAT NZ
+  func.func @tload_mat_dn2nz_bf16(%src: !pto.ptr<bf16>) attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+   %c0 = arith.constant 0 : index
+   %c1 = arith.constant 1 : index
+   %c16 = arith.constant 16 : index
+   %c32 = arith.constant 32 : index
+   %tv = pto.make_tensor_view %src, shape = [%c32, %c16], strides = [%c16, %c1] : !pto.tensor_view<?x?xbf16>
+   %sv = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c32, %c16] : !pto.tensor_view<?x?xbf16> -> !pto.partition_tensor_view<32x16xbf16>
+   %dst_tile = pto.alloc_tile : !pto.tile_buf<mat, 16x32xbf16, blayout=col_major, slayout=row_major>
+   pto.tload ins(%sv : !pto.partition_tensor_view<32x16xbf16>)
+             outs(%dst_tile : !pto.tile_buf<mat, 16x32xbf16, blayout=col_major, slayout=row_major>)
+   pto.barrier #pto.pipe<PIPE_ALL>
+   return
+  }
+
+  // TSTORE.ACC NZ2ND f16 — ACC f32 → GM f16 (row-major, dtype conversion)
+  func.func @tstore_acc_nz2nd_f16(%dst: !pto.ptr<f16>) attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+   %c0 = arith.constant 0 : index
+   %c1 = arith.constant 1 : index
+   %c16 = arith.constant 16 : index
+   %c32 = arith.constant 32 : index
+   %src_tile = pto.alloc_tile : !pto.tile_buf<acc, 16x32xf32, blayout=col_major, slayout=row_major>
+   %tv = pto.make_tensor_view %dst, shape = [%c16, %c32], strides = [%c32, %c1] : !pto.tensor_view<?x?xf16>
+   %sv = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c16, %c32] : !pto.tensor_view<?x?xf16> -> !pto.partition_tensor_view<16x32xf16>
+   pto.tstore ins(%src_tile : !pto.tile_buf<acc, 16x32xf32, blayout=col_major, slayout=row_major>)
+              outs(%sv : !pto.partition_tensor_view<16x32xf16>)
+   pto.barrier #pto.pipe<PIPE_ALL>
+   return
+  }
+
+  // TSTORE.ACC NZ2DN bf16 — ACC f32 → GM bf16 (col-major DN format)
+  func.func @tstore_acc_nz2dn_bf16(%dst: !pto.ptr<bf16>) attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+   %c0 = arith.constant 0 : index
+   %c1 = arith.constant 1 : index
+   %c16 = arith.constant 16 : index
+   %c32 = arith.constant 32 : index
+   %src_tile = pto.alloc_tile : !pto.tile_buf<acc, 16x32xf32, blayout=col_major, slayout=row_major>
+   %tv = pto.make_tensor_view %dst, shape = [%c32, %c16], strides = [%c16, %c1] : !pto.tensor_view<?x?xbf16>
+   %sv = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c32, %c16] : !pto.tensor_view<?x?xbf16> -> !pto.partition_tensor_view<32x16xbf16>
+   pto.tstore ins(%src_tile : !pto.tile_buf<acc, 16x32xf32, blayout=col_major, slayout=row_major>)
+              outs(%sv : !pto.partition_tensor_view<32x16xbf16>)
+   pto.barrier #pto.pipe<PIPE_ALL>
+   return
+  }
+
+  // TSTORE.ACC NZ2NZ i32 — ACC i32 → GM i32 (fractal NZ format)
+  func.func @tstore_acc_nz2nz_i32(%dst: !pto.ptr<i32>) attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+   %c0 = arith.constant 0 : index
+   %c1 = arith.constant 1 : index
+   %c16 = arith.constant 16 : index
+   %c32 = arith.constant 32 : index
+   %src_tile = pto.alloc_tile : !pto.tile_buf<acc, 16x32xi32, blayout=col_major, slayout=row_major>
+   %tv = pto.make_tensor_view %dst, shape = [%c16, %c32], strides = [%c32, %c1] : !pto.tensor_view<?x?xi32>
+   %sv = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c16, %c32] : !pto.tensor_view<?x?xi32> -> !pto.partition_tensor_view<16x32xi32>
+   pto.tstore ins(%src_tile : !pto.tile_buf<acc, 16x32xi32, blayout=col_major, slayout=row_major>)
+              outs(%sv : !pto.partition_tensor_view<16x32xi32>)
+   pto.barrier #pto.pipe<PIPE_ALL>
+   return
+  }
+
+  // TSTORE_FP f16 scaling — ACC f32 + scaling f16 → GM f16
+  func.func @tstore_fp_f16(%dst_gm: !pto.ptr<f16>) attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+   %c0 = arith.constant 0 : index
+   %c1 = arith.constant 1 : index
+   %c32 = arith.constant 32 : index
+   %acc_tile = pto.alloc_tile : !pto.tile_buf<acc, 16x32xf32, blayout=col_major, slayout=row_major>
+   %fp_tile = pto.alloc_tile : !pto.tile_buf<scaling, 1x32xf16>
+   %tv = pto.make_tensor_view %dst_gm, shape = [%c1, %c32], strides = [%c32, %c1] : !pto.tensor_view<?x?xf16>
+   %sv = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c1, %c32] : !pto.tensor_view<?x?xf16> -> !pto.partition_tensor_view<1x32xf16>
+   pto.tstore_fp ins(%acc_tile, %fp_tile : !pto.tile_buf<acc, 16x32xf32, blayout=col_major, slayout=row_major>, !pto.tile_buf<scaling, 1x32xf16>)
+                 outs(%sv : !pto.partition_tensor_view<1x32xf16>)
+   pto.barrier #pto.pipe<PIPE_ALL>
+   return
+  }
+
+  // E2E: TLOAD.MAT ND2NZ + TSTORE.ACC NZ2ND (f16 pipeline)
+  func.func @e2e_tload_mat_tstore_acc(%src_gm: !pto.ptr<f16>, %dst_gm: !pto.ptr<f32>) attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+   %c0 = arith.constant 0 : index
+   %c1 = arith.constant 1 : index
+   %c16 = arith.constant 16 : index
+   %c32 = arith.constant 32 : index
+   %tv_src = pto.make_tensor_view %src_gm, shape = [%c16, %c32], strides = [%c32, %c1] : !pto.tensor_view<?x?xf16>
+   %sv_src = pto.partition_view %tv_src, offsets = [%c0, %c0], sizes = [%c16, %c32] : !pto.tensor_view<?x?xf16> -> !pto.partition_tensor_view<16x32xf16>
+   %mat_tile = pto.alloc_tile : !pto.tile_buf<mat, 16x32xf16, blayout=col_major, slayout=row_major>
+   pto.tload ins(%sv_src : !pto.partition_tensor_view<16x32xf16>)
+             outs(%mat_tile : !pto.tile_buf<mat, 16x32xf16, blayout=col_major, slayout=row_major>)
+   %acc_tile = pto.alloc_tile : !pto.tile_buf<acc, 16x32xf32, blayout=col_major, slayout=row_major>
+   %tv_dst = pto.make_tensor_view %dst_gm, shape = [%c16, %c32], strides = [%c32, %c1] : !pto.tensor_view<?x?xf32>
+   %sv_dst = pto.partition_view %tv_dst, offsets = [%c0, %c0], sizes = [%c16, %c32] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<16x32xf32>
+   pto.tstore ins(%acc_tile : !pto.tile_buf<acc, 16x32xf32, blayout=col_major, slayout=row_major>)
+              outs(%sv_dst : !pto.partition_tensor_view<16x32xf32>)
+   pto.barrier #pto.pipe<PIPE_ALL>
+   return
+  }
+
+}
+
+// CHECK-LABEL: func.func @tload_mat_nd2nz_f16
+// CHECK: pto.copy_gm_to_cbuf_multi_nd2nz
+
+// CHECK-LABEL: func.func @tload_mat_dn2nz_bf16
+// CHECK: pto.copy_gm_to_cbuf_multi_dn2nz
+
+// CHECK-LABEL: func.func @tstore_acc_nz2nd_f16
+// CHECK: pto.copy_matrix_cc_to_gm
+
+// CHECK-LABEL: func.func @tstore_acc_nz2dn_bf16
+// CHECK: pto.copy_matrix_cc_to_gm
+
+// CHECK-LABEL: func.func @tstore_acc_nz2nz_i32
+// CHECK: pto.copy_matrix_cc_to_gm
+
+// CHECK-LABEL: func.func @tstore_fp_f16
+// CHECK: pto.copy_matrix_cc_to_gm
+
+// CHECK-LABEL: func.func @e2e_tload_mat_tstore_acc
+// CHECK: pto.copy_gm_to_cbuf_multi_nd2nz
+// CHECK: pto.copy_matrix_cc_to_gm

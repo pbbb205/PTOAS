@@ -4686,6 +4686,8 @@ class _SemanticAnalyzer:
     ) -> None:
         mode_value = self._require_string_expr(mode, f"{context} mode")
         if mode_value in {"f32_f16", "f32_bf16"}:
+            # f32_f16 / f32_bf16 only accept scalar payload per hardware spec.
+            # Vector/scaling payload is NOT supported for these modes.
             self._require_fixpipe_scalar_payload(payload, f"{context} payload")
         elif mode_value.endswith(scalar_required_suffix):
             self._require_fixpipe_scalar_payload(payload, f"{context} payload")

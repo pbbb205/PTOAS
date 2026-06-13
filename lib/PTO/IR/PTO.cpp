@@ -11334,6 +11334,27 @@ mlir::LogicalResult mlir::pto::TStoreFPOp::verify() {
            fp.getDefiningOp<pto::BindTileOp>();
   };
 
+  // Always verify the src dtype constraint regardless of whether the
+  // operands have been decoded to memref.  The hardware FIXPIPE write-back
+  // path only accepts f32 or i32 accumulator element types — f16/bf16/i8
+  // etc. are invalid on all architectures and must be caught even after
+  // type lowering.
+  auto verifySrcDtypeAlways = [&]() -> LogicalResult {
+    Type srcTy = getSrc().getType();
+    auto srcElemTy = getElemTy(srcTy);
+    if (!srcElemTy)
+      return success(); // cannot check if element type is unavailable
+    auto srcIntTy = dyn_cast<IntegerType>(srcElemTy);
+    if (!(srcElemTy.isF32() ||
+          (srcIntTy && srcIntTy.getWidth() == 32)))
+      return emitOpError()
+             << "expects src to have element type f32, i32";
+    return success();
+  };
+
+  if (failed(verifySrcDtypeAlways()))
+    return failure();
+
   auto verifyDstType = [&]() -> LogicalResult {
     Type dstTy = getDst().getType();
     if (!isa<MemRefType, pto::PartitionTensorViewType>(dstTy))
@@ -11400,6 +11421,14 @@ mlir::LogicalResult mlir::pto::TStoreFPOp::verify() {
     auto srcSpace = getPTOMemorySpaceEnum(srcTy);
     if (!srcSpace || *srcSpace != pto::AddressSpace::ACC)
       return emitOpError() << "expects src to be in the acc address space";
+    // The hardware FIXPIPE write-back path only accepts f32 or i32
+    // accumulator element types.  f16 / bf16 / i8 etc. are invalid.
+    auto srcElemTy = getElemTy(srcTy);
+    auto srcIntTy = dyn_cast<IntegerType>(srcElemTy);
+    if (!(srcElemTy.isF32() ||
+          (srcIntTy && srcIntTy.getWidth() == 32)))
+      return emitOpError()
+             << "expects src to have element type f32, i32";
     return mlir::success();
   };
   if (shouldBypassDecoded())

@@ -6433,6 +6433,7 @@ def TSqrtOp: PTO_TOp<"tsqrt", [
 
 def TStoreFPOp: PTO_TOp<"tstore_fp", [
   PTO_DpsInitOpInterface,
+  OpPipeInterface,
 ]> {
   let summary = "TSTORE_FP: Store an accumulator tile into global memory using a scaling (fp) tile for vector quantization parameters.";
 
@@ -6452,6 +6453,9 @@ def TStoreFPOp: PTO_TOp<"tstore_fp", [
     attr-dict
   }];
   let extraClassDeclaration = [{
+    // TStoreFPOp always transfers ACC data to GM through the FIXPIPE
+    // write-back path (same pipe used by other ACC-store variants).
+    ::mlir::pto::PIPE getPipe() { return ::mlir::pto::PIPE::PIPE_FIX; }
     ::mlir::MutableOperandRange getDpsInitsMutable() { return getDstMutable(); }
   }];
 }

@@ -1,0 +1,29 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// TSTORE invalid memory space — MAT src is not valid for A5 (only VEC/ACC allowed)
+
+// RUN: not ptoas --pto-arch=a5 %s 2>&1 | FileCheck %s
+
+module attributes {pto.target_arch = "a5"} {
+ func.func @tstore_invalid_memspace(%src: !pto.ptr<f32>, %dst: !pto.ptr<f32>) attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %c16 = arith.constant 16 : index
+  %c32 = arith.constant 32 : index
+  %tv = pto.make_tensor_view %dst, shape = [%c16, %c32], strides = [%c32, %c1] : !pto.tensor_view<?x?xf32>
+  %sv = pto.partition_view %tv, offsets = [%c0, %c0], sizes = [%c16, %c32] : !pto.tensor_view<?x?xf32> -> !pto.partition_tensor_view<16x32xf32>
+  %src_tile = pto.alloc_tile : !pto.tile_buf<mat, 16x32xf32, blayout=col_major, slayout=row_major>
+  pto.tstore ins(%src_tile : !pto.tile_buf<mat, 16x32xf32, blayout=col_major, slayout=row_major>)
+             outs(%sv : !pto.partition_tensor_view<16x32xf32>)
+  pto.barrier #pto.pipe<PIPE_ALL>
+  return
+ }
+}
+
+// CHECK: expects A5 tstore src to use loc=vec or loc=acc

@@ -6,7 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""`pto.tstore` 的 TileLang DSL 模板"""
+"""TileLang DSL template for `pto.tstore`"""
 
 import tilelang_dsl as pto
 
@@ -167,8 +167,9 @@ def template_tstore_dn(src: pto.Tile, dst: pto.PartitionTensorView):
     gm_stride = s4 * elem_bytes
     ub_stride = ub_rows * elem_bytes
 
-    # UB 源 tile 是列高 `ub_rows` 的紧凑 col-major 布局，
-    # 与 `TStoreVecDN` 一样由 `g4` / `g2` / `g1` 递推出三级 stride。
+    # The UB source tile has a compact col-major layout with column height
+    # `ub_rows`. Like `TStoreVecDN`, three levels of stride are derived from
+    # `g4` / `g2` / `g1`.
     src_stride2 = ub_rows * g4
     src_stride1 = g2 * src_stride2
     src_stride0 = g1 * src_stride1
@@ -224,20 +225,22 @@ def template_tstore_nz(src: pto.Tile, dst: pto.PartitionTensorView):
     valid_rows, valid_cols = src.valid_shape
     ub_rows, ub_cols = src.shape
 
-    # 对应 C++ `C0_SIZE_BYTE`。NZ 每个 burst 始终写一个完整 C0 block。
+    # Corresponds to C++ `C0_SIZE_BYTE`. Each NZ burst always writes one
+    # complete C0 block.
     c0_size_bytes = 32
     n_burst = g1
     len_burst = valid_rows * c0_size_bytes
     gm_stride = s1 * elem_bytes
     ub_stride = ub_rows * c0_size_bytes
 
-    # 每个 g0 block 在 UB 中由 `g1` 个 NZ block 串接组成。
+    # Each g0 block in UB is composed of `g1` NZ blocks concatenated together.
     tile_stride = g1 * ub_rows * g4
 
     ub_ptr = src.as_ptr()
     gm_ptr = dst.as_ptr()
 
-    # NZ path 本身不使用 loop1/loop2，主动切回 normal mode 避免继承旧状态。
+    # NZ path itself does not use loop1/loop2; explicitly reset to normal mode
+    # to avoid inheriting stale state.
     pto.set_loop_size_ubtoout(loop1=1, loop2=1)
     for i in range(0, g0, 1):
         src_i = pto.addptr(ub_ptr, i * tile_stride)
@@ -248,6 +251,379 @@ def template_tstore_nz(src: pto.Tile, dst: pto.PartitionTensorView):
             n_burst=n_burst,
             len_burst=len_burst,
             gm_stride=gm_stride,
-            ub_stride=ub_stride,            
+            ub_stride=ub_stride,
         )
+    return
+
+
+# ============================================================================
+# Cube Templates: TSTORE.ACC (ACC → GM)
+# ============================================================================
+
+def _constraint_tstore_acc_base(src, dst) -> bool:
+    """TSTORE.ACC base constraint check"""
+    # src must be MemorySpace.ACC
+    src_space = src.memory_space
+    if src_space is None:
+        return False
+    src_space_value = src_space.value if hasattr(src_space, "value") else src_space
+    if src_space_value not in {"acc", "ACC"}:
+        return False
+    # dst must be GM (via PartitionTensorView)
+    dst_space = dst.memory_space
+    if dst_space is None:
+        dst_space_value = "gm"  # PartitionTensorView defaults to GM
+    else:
+        dst_space_value = dst_space.value if hasattr(dst_space, "value") else dst_space
+    if dst_space_value not in {"gm", "GM"}:
+        return False
+    # ACC dtype must be f32 or i32
+    src_dtype = src.dtype
+    if src_dtype is None:
+        return False
+    dtype_name = src_dtype.name if hasattr(src_dtype, "name") else str(src_dtype)
+    if dtype_name not in {"f32", "i32"}:
+        return False
+    # dst dtype can be f32, f16, bf16, i32
+    dst_dtype = dst.dtype
+    if dst_dtype is None:
+        return True  # allow dst dtype to be unspecified
+    dst_dtype_name = dst_dtype.name if hasattr(dst_dtype, "name") else str(dst_dtype)
+    supported_dst_dtypes = {"f32", "f16", "bf16", "i32"}
+    if dst_dtype_name not in supported_dst_dtypes:
+        return False
+    return True
+
+
+def _extract_b_layout_value(config) -> str | None:
+    """Extract the effective b_layout string from a config object.
+
+    Handles both TileConfig (with b_layout/s_layout attributes) and
+    ViewConfig (with a single layout attribute like 'nd' or 'dn').
+    Returns a canonical layout string: 'row_major' or 'col_major', or None.
+    """
+    if config is None:
+        return None
+    # TileConfig has explicit b_layout attribute
+    if hasattr(config, "b_layout") and config.b_layout is not None:
+        bl = config.b_layout
+        return bl.value if hasattr(bl, "value") else bl
+    # ViewConfig uses a single 'layout' attribute:
+    #   'nd' -> row_major (ND/row-major format)
+    #   'dn' -> col_major (DN/col-major format)
+    #   'nz' -> col_major (NZ/fractal format, same block layout as col_major)
+    if hasattr(config, "layout") and config.layout is not None:
+        layout = config.layout
+        layout_str = layout.value if hasattr(layout, "value") else str(layout)
+        normalized = layout_str.strip().lower().replace("-", "_")
+        if normalized in {"nd", "row_major"}:
+            return "row_major"
+        if normalized in {"dn", "col_major"}:
+            return "col_major"
+        if normalized in {"nz"}:
+            return "col_major"  # NZ fractal uses col-major block layout
+    return None
+
+
+def _extract_s_layout_value(config) -> str | None:
+    """Extract the effective s_layout string from a config object.
+
+    For TileConfig this is the s_layout attribute.
+    For ViewConfig there is no slayout distinction; returns None.
+    """
+    if config is None:
+        return None
+    if hasattr(config, "s_layout") and config.s_layout is not None:
+        sl = config.s_layout
+        return sl.value if hasattr(sl, "value") else sl
+    return None
+
+
+def _constraint_tstore_acc_nz2nd(src, dst) -> bool:
+    """TSTORE.ACC NZ2ND constraint"""
+    if not _constraint_tstore_acc_base(src, dst):
+        return False
+    # dst must be row-major layout (ND format)
+    b_layout_value = _extract_b_layout_value(dst.config)
+    if b_layout_value is None:
+        return True  # default is row-major
+    # ROW_MAJOR corresponds to ND format
+    if b_layout_value not in {"row_major", "ROW_MAJOR"}:
+        return False
+    return True
+
+
+def _constraint_tstore_acc_nz2dn(src, dst) -> bool:
+    """TSTORE.ACC NZ2DN constraint"""
+    if not _constraint_tstore_acc_base(src, dst):
+        return False
+    b_layout_value = _extract_b_layout_value(dst.config)
+    if b_layout_value is None:
+        return False
+    if b_layout_value not in {"col_major", "COL_MAJOR"}:
+        return False
+    return True
+
+
+def _constraint_tstore_acc_nz2nz(src, dst) -> bool:
+    """TSTORE.ACC NZ2NZ constraint"""
+    if not _constraint_tstore_acc_base(src, dst):
+        return False
+    # dst must be NZ layout (fractal): b_layout=col_major + s_layout=row_major
+    b_layout_value = _extract_b_layout_value(dst.config)
+    s_layout_value = _extract_s_layout_value(dst.config)
+    if b_layout_value is None:
+        return False
+    if s_layout_value is None:
+        return False
+    if b_layout_value not in {"col_major", "COL_MAJOR"}:
+        return False
+    if s_layout_value not in {"row_major", "ROW_MAJOR"}:
+        return False
+    return True
+
+
+@pto.ckernel(
+    target="a5",
+    op="pto.tstore",
+    priority=1,
+    dtypes=[
+        (pto.f32, pto.f32),
+        (pto.f32, pto.f16),
+        (pto.f32, pto.bf16),
+        (pto.i32, pto.i32),
+    ],
+    constraints=[_constraint_tstore_acc_nz2nd],
+    name="tstore_acc_to_gm_nz2nd",
+)
+def template_tstore_acc_to_gm_nz2nd(src: pto.Tile, dst: pto.PartitionTensorView):
+    """ACC -> GM (NZ2ND mode)
+
+    Write NZ-format data from L0C Accumulator Buffer back to GM in
+    Row-Major (ND) format.
+
+    Args:
+        src: Tile with ACC memory_space, shape=(M, N), dtype=f32/i32
+        dst: PartitionTensorView with GM memory_space, row-major (ND) format
+
+    Uses:
+        pto.mte_l0c_gm with layout="nz2nd"
+    """
+    m, n = src.valid_shape
+
+    acc_ptr = src.as_ptr()
+    gm_ptr = dst.as_ptr()
+
+    # src_stride: ACC buffer stride (N under NZ format)
+    # dst_stride: GM stride (N under ND format)
+    src_stride = n
+    dst_stride = n
+
+    pto.mte_l0c_gm(
+        acc_ptr, gm_ptr,
+        m, n, src_stride, dst_stride,
+        0, 0,
+        layout="nz2nd"
+    )
+    return
+
+
+@pto.ckernel(
+    target="a5",
+    op="pto.tstore",
+    priority=1,
+    dtypes=[
+        (pto.f32, pto.f32),
+        (pto.f32, pto.f16),
+        (pto.f32, pto.bf16),
+        (pto.i32, pto.i32),
+    ],
+    constraints=[_constraint_tstore_acc_nz2dn],
+    name="tstore_acc_to_gm_nz2dn",
+)
+def template_tstore_acc_to_gm_nz2dn(src: pto.Tile, dst: pto.PartitionTensorView):
+    """ACC -> GM (NZ2DN mode)
+
+    Write NZ-format data from L0C Accumulator Buffer back to GM in
+    Col-Major (DN) format.
+
+    Args:
+        src: Tile with ACC memory_space, shape=(M, N)
+        dst: PartitionTensorView with GM memory_space, col-major (DN) format
+
+    Uses:
+        pto.mte_l0c_gm with layout="nz2dn"
+    """
+    m, n = src.valid_shape
+
+    acc_ptr = src.as_ptr()
+    gm_ptr = dst.as_ptr()
+
+    # NZ2DN requires an additional loop0_src_stride parameter
+    src_stride = n
+    dst_stride = m  # Under DN format, stride is M
+    loop0_src_stride = 1  # loop0_src_stride for NZ2DN
+
+    pto.mte_l0c_gm(
+        acc_ptr, gm_ptr,
+        m, n, src_stride, dst_stride,
+        0, 0,
+        layout=("nz2dn", loop0_src_stride)
+    )
+    return
+
+
+@pto.ckernel(
+    target="a5",
+    op="pto.tstore",
+    dtypes=[
+        (pto.f32, pto.f32),
+        (pto.f32, pto.f16),
+        (pto.f32, pto.bf16),
+        (pto.i32, pto.i32),
+    ],
+    constraints=[_constraint_tstore_acc_nz2nz],
+    name="tstore_acc_to_gm_nz2nz",
+)
+def template_tstore_acc_to_gm_nz2nz(src: pto.Tile, dst: pto.PartitionTensorView):
+    """ACC -> GM (NZ2NZ mode)
+
+    Write NZ-format data from L0C Accumulator Buffer back to GM in NZ
+    format (no layout conversion).
+
+    Args:
+        src: Tile with ACC memory_space, shape=(M, N)
+        dst: PartitionTensorView with GM memory_space, NZ (fractal) format
+
+    Uses:
+        pto.mte_l0c_gm with layout="nz2nz"
+    """
+    m, n = src.valid_shape
+
+    acc_ptr = src.as_ptr()
+    gm_ptr = dst.as_ptr()
+
+    src_stride = n
+    dst_stride = n
+    split = 1  # NZ2NZ requires a split parameter
+
+    pto.mte_l0c_gm(
+        acc_ptr, gm_ptr,
+        m, n, src_stride, dst_stride,
+        0, 0,
+        layout=("nz2nz", split)
+    )
+    return
+
+
+# ============================================================================
+# Cube Templates: TSTORE.MAT (MAT → GM) — NOT YET IMPLEMENTED
+# ============================================================================
+# NOTE: There is no direct MAT → GM DMA path (mte_l1_gm does not exist).
+# The correct implementation requires a two-step intermediate path:
+#   1. Copy from MAT to UB via mte_l1_ub (allocating a temporary UB tile)
+#   2. Copy from UB to GM via copy_ubuf_to_gm
+#
+# However, UB buffer allocation is not yet supported in ckernel mode.
+# This template is intentionally NOT registered until a proper
+# MAT → UB → GM implementation can be provided.
+# Adding it with dtypes=[] would crash the module import (_freeze_dtypes
+# requires at least one signature tuple), so we omit it entirely.
+
+
+# ============================================================================
+# Cube Templates: TSTORE_FP (ACC + FP → GM)
+# ============================================================================
+
+def _constraint_tstore_fp(src, fp, dst) -> bool:
+    """TSTORE_FP constraint check"""
+    # src must be MemorySpace.ACC
+    src_space = src.memory_space
+    if src_space is None:
+        return False
+    src_space_value = src_space.value if hasattr(src_space, "value") else src_space
+    if src_space_value not in {"acc", "ACC"}:
+        return False
+    # fp must be SCALING memory space or specific buffer
+    fp_space = fp.memory_space
+    if fp_space is None:
+        return False
+    fp_space_value = fp_space.value if hasattr(fp_space, "value") else fp_space
+    if fp_space_value not in {"scaling", "SCALING", "ub", "UB"}:
+        return False
+    # dst must be GM
+    dst_space = dst.memory_space
+    if dst_space is None:
+        dst_space_value = "gm"
+    else:
+        dst_space_value = dst_space.value if hasattr(dst_space, "value") else dst_space
+    if dst_space_value not in {"gm", "GM"}:
+        return False
+    # src dtype must be f32
+    src_dtype = src.dtype
+    if src_dtype is None:
+        return False
+    dtype_name = src_dtype.name if hasattr(src_dtype, "name") else str(src_dtype)
+    if dtype_name != "f32":
+        return False
+    return True
+
+
+@pto.ckernel(
+    target="a5",
+    op="pto.tstore_fp",
+    dtypes=[
+        (pto.f32, pto.f16, pto.f16),
+        (pto.f32, pto.bf16, pto.bf16),
+    ],
+    constraints=[_constraint_tstore_fp],
+    name="tstore_fp_acc_to_gm",
+)
+def template_tstore_fp_acc_to_gm(src: pto.Tile, fp: pto.Tile, dst: pto.PartitionTensorView):
+    """ACC + FP -> GM with floating-point conversion (TSTORE_FP)
+
+    Write f32 data from L0C Accumulator Buffer, combined with FP (scaling)
+    parameters, back to GM in f16/bf16 format.
+
+    Args:
+        src: Tile with ACC memory_space, dtype=f32
+        fp: Tile with SCALING/UB memory_space, dtype=f16/bf16
+        dst: PartitionTensorView with GM memory_space, dtype=f16/bf16
+
+    Note:
+        Uses qf322f16_pre_vec / qf322bf16_pre_vec mode for pre_quant, which
+        supports vector (per-channel) scaling rows per the hardware spec.
+        The f32_f16/f32_bf16 modes only accept scalar payload and cannot be
+        used for per-channel quantization via a scaling buffer.
+    """
+    m, n = src.valid_shape
+
+    acc_ptr = src.as_ptr()
+    fp_ptr = fp.as_ptr()
+    gm_ptr = dst.as_ptr()
+
+    # Determine pre_quant mode based on fp (scaling) buffer dtype:
+    # Use qf322*_pre_vec modes which support vector scale rows (scaling buffer).
+    # f32_f16/f32_bf16 modes only accept scalar payload and cannot be used here.
+    # Note: dst.dtype is not supported by the TileLang DSL v1 frontend for
+    # PartitionTensorView, so we use fp.element_type instead.
+    fp_dtype = fp.element_type
+
+    if pto.constexpr(fp_dtype == pto.bf16):
+        quant_mode = "qf322bf16_pre_vec"
+    else:
+        quant_mode = "qf322f16_pre_vec"
+
+    # TODO: Replace with tstore_fp DSL surface once available.
+    # Currently using mte_l0c_gm + pre_quant as a temporary workaround.
+    src_stride = n
+    dst_stride = n
+
+    pto.mte_l0c_gm(
+        acc_ptr, gm_ptr,
+        m, n, src_stride, dst_stride,
+        0, 0,
+        layout="nz2nd",
+        pre_quant=(fp_ptr, quant_mode)
+    )
     return
