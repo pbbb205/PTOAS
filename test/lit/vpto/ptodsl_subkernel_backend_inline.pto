@@ -7,7 +7,8 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 
 // Guards shared backend-helper inlining for PTODSL subkernel helpers on the
-// normal VPTO path.
+// normal VPTO path. This pass runs before VPTO tile-op expansion, so the tile
+// op itself should remain as pto.tadd here.
 // RUN: ptoas --pto-arch=a5 --pto-backend=vpto --emit-vpto --mlir-print-ir-after=pto-inline-backend-helpers %s -o /dev/null 2>&1 | FileCheck %s
 
 module attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
@@ -45,7 +46,7 @@ module attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
 }
 
 // CHECK-LABEL: func.func @kernel
-// CHECK: pto.vadd
+// CHECK: pto.tadd
 // CHECK: arith.constant 1 : i32
 // CHECK: arith.addi %arg0, %{{[^,]+}} : i32
 // CHECK-NOT: func.call @ptodsl_simd_helper

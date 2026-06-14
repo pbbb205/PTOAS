@@ -25,14 +25,16 @@
 // CHECK-NEXT: TFREE<TPipe<4, Direction::DIR_C2V, 16384, 8, 2, false>,
 // CHECK-NEXT: wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID[[OUTER_CARRY]]);
 // CHECK-NEXT: wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID[[OUTER_TAIL]]);
-// CHECK-NEXT: for (size_t
-// CHECK: };
+// CHECK-NEXT: wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID[[OUTER_CARRY]]);
+// CHECK-NEXT: TPOP<TPipe<2, Direction::DIR_C2V, 32768, 8, 2, false>,
+// CHECK: wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID[[INNER_TAIL:[0-9]+]]);
+// CHECK-NEXT: TPOP<TPipe<4, Direction::DIR_C2V, 16384, 8, 2, false>,
+// CHECK: set_flag(PIPE_V, PIPE_MTE2, EVENT_ID[[INNER_TAIL]]);
+// CHECK-NEXT: TFREE<TPipe<4, Direction::DIR_C2V, 16384, 8, 2, false>,
 // CHECK-NEXT: set_flag(PIPE_MTE3, PIPE_V, EVENT_ID[[TAIL_HEAD:[0-9]+]]);
 // CHECK-NEXT: set_flag(PIPE_V, PIPE_MTE2, EVENT_ID[[POST_LOOP:[0-9]+]]);
 // CHECK-NEXT: wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID[[POST_LOOP]]);
 // CHECK-NEXT: TPOP<TPipe<4, Direction::DIR_C2V, 16384, 8, 2, false>,
-// CHECK-NEXT: set_flag(PIPE_MTE2, PIPE_V, EVENT_ID[[POST_POP:[0-9]+]]);
-// CHECK-NEXT: wait_flag(PIPE_MTE2, PIPE_V, EVENT_ID[[POST_POP]]);
 // CHECK: wait_flag(PIPE_MTE3, PIPE_V, EVENT_ID[[TAIL_HEAD]]);
 // CHECK-NEXT: wait_flag(PIPE_V, PIPE_MTE2, EVENT_ID[[OUTER_CARRY]]);
 

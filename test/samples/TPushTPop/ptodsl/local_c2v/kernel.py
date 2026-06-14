@@ -42,20 +42,6 @@ _SLOT_SIZE = _ROWS * _COLS * 4
 _FIFO_SIZE = _SLOT_SIZE * 8
 
 
-@pto.cube
-def _cube_send_tile(c2v, src_tile):
-    c2v.init_cube()
-    c2v.push(src_tile, split=0)
-
-
-@pto.simd
-def _vector_recv_tile(c2v, dst_type, dst_part):
-    c2v.init_simd()
-    fifo_tile = c2v.pop(result_type=dst_type, split=0)
-    pto.tile.store(fifo_tile, dst_part)
-    c2v.free(split=0)
-
-
 @pto.jit(name="ptodsl_tpush_tpop_local_c2v_cube", target="a5", kernel_kind="cube")
 def ptodsl_tpush_tpop_local_c2v_cube(
     A_ptr: pto.ptr(pto.f32, "gm"),
@@ -83,7 +69,9 @@ def ptodsl_tpush_tpop_local_c2v_cube(
     )
     src_tile = pto.alloc_tile(shape=[_ROWS, _COLS], dtype=pto.f32)
     pto.tile.load(a_part, src_tile)
-    _cube_send_tile(c2v, src_tile)
+    with pto.cube():
+        c2v.init_cube()
+        c2v.push(src_tile, split=0)
 
 
 @pto.jit(name="ptodsl_tpush_tpop_local_c2v_vector", target="a5", kernel_kind="vector")
@@ -105,7 +93,11 @@ def ptodsl_tpush_tpop_local_c2v_vector(
         id=0,
     )
     dst_type = pto.alloc_tile(shape=[_ROWS, _COLS], dtype=pto.f32)
-    _vector_recv_tile(c2v, dst_type, o_part)
+    with pto.simd():
+        c2v.init_simd()
+        fifo_tile = c2v.pop(result_type=dst_type, split=0)
+        pto.tile.store(fifo_tile, o_part)
+        c2v.free(split=0)
 
 
 def emit_mlir() -> str:

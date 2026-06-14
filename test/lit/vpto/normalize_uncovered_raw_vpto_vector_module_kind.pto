@@ -25,7 +25,7 @@ module attributes {pto.target_arch = "a5"} {
   }
 }
 
-// CHECK: module attributes {pto.target_arch = "a5"} {
+// CHECK: module attributes {pto.backend = "vpto", pto.target_arch = "a5"} {
 // CHECK: module attributes {pto.backend = "vpto", pto.kernel_kind = #pto.kernel_kind<vector>, pto.target_arch = "a5"} {
 // CHECK-LABEL: func.func public @raw_vec_kernel
 // CHECK: pto.vlds

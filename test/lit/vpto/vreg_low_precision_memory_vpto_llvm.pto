@@ -74,10 +74,10 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 // CHECK-LABEL: llvm.func @lowp_vlds_vsts_mix_aiv
 // CHECK: llvm.call @llvm.hivm.vldsx1.v256f8e4m3
 // CHECK: llvm.call @llvm.hivm.vldsx1.v256f8e5m2
-// CHECK: llvm.call @llvm.hivm.vldsx1.v256hif8
+// CHECK: llvm.call @llvm.hivm.vldsx1.v256s8
 // CHECK: llvm.call @llvm.hivm.vstsx1.v256f8e4m3
 // CHECK: llvm.call @llvm.hivm.vstsx1.v256f8e5m2
-// CHECK: llvm.call @llvm.hivm.vstsx1.v256hif8
+// CHECK: llvm.call @llvm.hivm.vstsx1.v256s8
 
 // CHECK-LABEL: llvm.func @lowp_x2_and_block_mix_aiv
 // CHECK: llvm.call @llvm.hivm.vldsx2.v256f4e1m2x2
@@ -87,7 +87,7 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<ve
 // CHECK: llvm.call @llvm.hivm.vsstb
 
 // CHECK-LABEL: llvm.func @lowp_unaligned_state_mix_aiv
-// CHECK: llvm.call @llvm.hivm.vldus.v256hif8
+// CHECK: llvm.call @llvm.hivm.vldus.v256s8
 // CHECK: llvm.call @llvm.hivm.vstus
 // CHECK: llvm.call @llvm.hivm.vstur
 // CHECK: llvm.call @llvm.hivm.vstar

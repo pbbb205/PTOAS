@@ -8,7 +8,8 @@
 
 // RUN: env PTOAS_DEBUG_CHILD_UNIT=1 ptoas --pto-arch=a5 %s -o %t.o 2>&1 | FileCheck %s
 // Guards child-unit rewriting: user-authored symbols containing "__ptodsl_"
-// must not be rewritten into logical-name wrappers.
+// must not be rewritten into logical-name wrappers. Anchor both debug child
+// units explicitly so bulk stderr noise cannot satisfy the checks out of order.
 
 module attributes {pto.target_arch = "a5"} {
   module attributes {pto.backend = "emitc"} {
@@ -31,9 +32,16 @@ module attributes {pto.target_arch = "a5"} {
   }
 }
 
+// CHECK-LABEL: // ----- child compile unit ----- //
+// CHECK: func.func private @helper__ptodsl_user()
+// CHECK: func.func @entry() attributes {pto.entry} {
+// CHECK: call @helper__ptodsl_user() : () -> ()
+// CHECK: return
+
+// CHECK-LABEL: // ----- child compile unit ----- //
 // CHECK: func.func public @helper() {
-// CHECK-NEXT: {{.*}}return
-// CHECK-NEXT: {{.*}}}
-// CHECK: func.func public @helper__ptodsl_user() {
-// CHECK-NEXT: {{.*}}return
-// CHECK-NEXT: {{.*}}}
+// CHECK-NEXT: return
+// CHECK-NEXT: }
+// CHECK-NEXT: func.func public @helper__ptodsl_user() {
+// CHECK-NEXT: return
+// CHECK-NEXT: }

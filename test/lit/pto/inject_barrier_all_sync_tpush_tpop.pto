@@ -2,7 +2,7 @@
 // RUN: ptoas --pto-arch=a3 --enable-inject-barrier-all-sync %s 2>&1 | FileCheck %s --check-prefix=CPP
 
 module {
-  func.func @regular_pipe_memory_ops(%src: memref<16x16xf32, #pto.address_space<gm>>) {
+  func.func @regular_pipe_memory_ops(%src: memref<16x16xf32, #pto.address_space<gm>>) attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
     // CHECK-LABEL: func.func @regular_pipe_memory_ops
     %mat = pto.alloc_tile : !pto.tile_buf<loc=mat, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
     %left = pto.alloc_tile : !pto.tile_buf<loc=left, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=row_major, slayout=row_major, fractal=512, pad=0>
@@ -19,7 +19,7 @@ module {
     return
   }
 
-  func.func @manual_pipe_all_barrier_not_duplicated(%src: memref<16x16xf32, #pto.address_space<gm>>) {
+  func.func @manual_pipe_all_barrier_not_duplicated(%src: memref<16x16xf32, #pto.address_space<gm>>) attributes {pto.kernel_kind = #pto.kernel_kind<cube>} {
     // CHECK-LABEL: func.func @manual_pipe_all_barrier_not_duplicated
     // CHECK: pto.barrier <PIPE_ALL>
     // CHECK-NEXT: pto.tload
