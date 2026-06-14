@@ -30,7 +30,7 @@ for case in CASES:
     elif name.startswith("mat2right"):
         id_mat = np.eye(case["shape_id"][0], case["shape_id"][1], dtype=case["dtype_id"])
         src = np.random.uniform(-1.0, 1.0, size=case["shape_src"]).astype(case["dtype_src"])
-        golden = np.matmul(id_mat.astype(np.float32), src.astype(np.float32)).astype(np.float32)
+        golden = src.astype(np.float32).T.copy()
         save_case_data(name, {"input1": id_mat, "input2": src, "golden": golden})
 
     print(f"[INFO] gen_data: {name} done")
