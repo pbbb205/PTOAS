@@ -1090,7 +1090,7 @@ consumer-side local FIFO buffer and do not take `consumer_buf` or
 |-----------|------|-------------|
 | `consumer_buf` | varies | Required for local tile-entry pipes. Consumer-owned FIFO buffer. The consumer side reserves it with `pto.reserve_buffer`; the producer side imports it with `pto.import_reserved_buffer`. Omit for global-entry pipes. |
 | `id` | `int` | Required. Stable pipe identifier shared by the producer and consumer sides. |
-| `slot_size` | `int` | Required for local tile-entry pipes. Optional for global-entry pipes; defaults to the byte size of one slot of `gm_slot_tensor`. |
+| `slot_size` | `int` | Required for local tile-entry pipes. For global-entry pipes, omit it only when `nosplit=True` and `gm_slot_tensor` already describes one full slot; otherwise pass the full-slot byte size explicitly. |
 | `gm_slot_buffer` | `PtrType` | Optional GM FIFO storage pointer for A2/A3 local tile-entry L2G2L lowering. Do not use with `gm_slot_tensor`. |
 | `gm_slot_tensor` | `TensorView` | Optional. When provided, the pipe uses GlobalTensor-like entries and `alloc/pop` infer the entry descriptor type. |
 | `local_slot_num` | `int` | Optional. Local FIFO slot count override for local tile-entry pipes. |
@@ -1191,6 +1191,7 @@ Declaration (shared between Cube and Vector sides):
 c2v = pto.pipe.c2v(
     gm_slot_tensor=gm_slots,
     id=0,
+    nosplit=True,
 )
 ```
 
@@ -1234,6 +1235,7 @@ Declaration:
 v2c = pto.pipe.v2c(
     gm_slot_tensor=gm_slots,
     id=0,
+    nosplit=True,
 )
 ```
 
@@ -1348,6 +1350,7 @@ def cube_producer(
     c2v = pto.pipe.c2v(
         gm_slot_tensor=gm_view,
         id=0,
+        nosplit=True,
     )
 
     a_part = pto.partition_view(
@@ -1377,6 +1380,7 @@ def vector_consumer(
     c2v = pto.pipe.c2v(
         gm_slot_tensor=gm_view,
         id=0,
+        nosplit=True,
     )
 
     b_tile = pto.alloc_tile(shape=[16, 16], dtype=pto.f32)

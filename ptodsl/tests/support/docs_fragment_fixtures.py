@@ -1892,6 +1892,7 @@ FRAGMENT_FIXTURES = {
             c2v = pto.pipe.c2v(
                 gm_slot_tensor=gm_view,
                 id=0,
+                nosplit=True,
             )
 
             a_part = pto.partition_view(
@@ -1913,6 +1914,7 @@ FRAGMENT_FIXTURES = {
             c2v = pto.pipe.c2v(
                 gm_slot_tensor=gm_view,
                 id=0,
+                nosplit=True,
             )
 
             b_tile = pto.alloc_tile(shape=[16, 16], dtype=pto.f32)
@@ -1944,6 +1946,7 @@ FRAGMENT_FIXTURES = {
             v2c = pto.pipe.v2c(
                 gm_slot_tensor=gm_view,
                 id=0,
+                nosplit=True,
             )
 
             src_tile = pto.alloc_tile(shape=[16, 16], dtype=pto.f32)
@@ -1962,6 +1965,7 @@ FRAGMENT_FIXTURES = {
             v2c = pto.pipe.v2c(
                 gm_slot_tensor=gm_view,
                 id=0,
+                nosplit=True,
             )
 
             dst_tile = pto.alloc_tile(shape=[16, 16], dtype=pto.f32)
