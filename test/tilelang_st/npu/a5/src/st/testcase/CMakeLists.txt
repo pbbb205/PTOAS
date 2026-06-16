@@ -193,7 +193,10 @@ set(ALL_TESTCASES
     trems
     tfmods
     tcmps
+    tgemv
     tmatmul
+    tmatmul_acc
+    tmatmul_bias
     textract
     textract_fp
     textract_v2v

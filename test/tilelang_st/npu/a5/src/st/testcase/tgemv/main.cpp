@@ -17,42 +17,29 @@
 using namespace PtoTestCommon;
 
 // ---- launch wrappers (defined in launch.cpp) ----
-void LaunchTMATMUL_f16_40x50x60(void *a, void *b, void *c, void *stream);
-void LaunchTMATMUL_i8_6x7x8(void *a, void *b, void *c, void *stream);
-void LaunchTMATMUL_f16_127x128x61(void *a, void *b, void *c, void *stream);
-void LaunchTMATMUL_f32_120x110x50(void *a, void *b, void *c, void *stream);
-void LaunchTMATMUL_bf16_144x80x48(void *a, void *b, void *c, void *stream);
-// void LaunchTMATMUL_f8e4m3_32x64x96(void *a, void *b, void *c, void *stream);
-// void LaunchTMATMUL_f8e4m3_f8e5m2_128x96x64(void *a, void *b, void *c, void *stream);
-// void LaunchTMATMUL_f8e5m2_f8e4m3_145x115x85(void *a, void *b, void *c, void *stream);
-// void LaunchTMATMUL_f8e5m2_120x90x160(void *a, void *b, void *c, void *stream);
-// void LaunchTMATMUL_hif8_30x90x60(void *a, void *b, void *c, void *stream);
-void LaunchTMATMUL_f32_16x32x64(void *a, void *b, void *c, void *stream);
-void LaunchTMATMUL_f32_128x96x64(void *a, void *b, void *c, void *stream);
+void LaunchTGEMV_f16_1x300x60(void *a, void *b, void *c, void *stream);
+void LaunchTGEMV_BIAS_f16_1x512x85(void *a, void *b, void *bias, void *c, void *stream);
 
-using LaunchFn = void (*)(void *, void *, void *, void *);
+using LaunchFn3 = void (*)(void *, void *, void *, void *);
+using LaunchFn4 = void (*)(void *, void *, void *, void *, void *);
 
 struct TestCase {
     const char *name;
-    LaunchFn    launch;
+    bool        hasBias;
+    LaunchFn3   launch3;
+    LaunchFn4   launch4;
     size_t      M;
     size_t      K;
     size_t      N;
     size_t      aElemSize;
     size_t      bElemSize;
+    size_t      biasElemSize;
     size_t      cElemSize;
 };
 
 static const TestCase kCases[] = {
-    // M/K/N values match gen_data padding: K_use is K rounded up to block size.
-    {"f16_40x50x60",                    LaunchTMATMUL_f16_40x50x60,                    48,  64,  64,  2, 2, 4},
-    {"i8_6x7x8",                        LaunchTMATMUL_i8_6x7x8,                        16,  32,  32,  1, 1, 4},
-    {"f16_127x128x61",                  LaunchTMATMUL_f16_127x128x61,                 128, 128,  64,  2, 2, 4},
-    {"f32_120x110x50",                  LaunchTMATMUL_f32_120x110x50,                 128, 112,  64,  4, 4, 4},
-    {"bf16_144x80x48",                  LaunchTMATMUL_bf16_144x80x48,                 144,  80,  48,  2, 2, 4},
-    // ...
-    {"f32_16x32x64",                    LaunchTMATMUL_f32_16x32x64,                   16,  32,  64,  4, 4, 4},
-    {"f32_128x96x64",                   LaunchTMATMUL_f32_128x96x64,                 128,  96,  64,  4, 4, 4},
+    {"gemv_f16_1x300x60",       false, LaunchTGEMV_f16_1x300x60,       nullptr,   1, 320,  64, 2, 2, 0, 4},
+    {"gemv_bias_f16_1x512x85",  true,  nullptr,                       LaunchTGEMV_BIAS_f16_1x512x85,   1, 512,  96, 2, 2, 4, 4},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
@@ -61,6 +48,7 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     int rc = 0;
     size_t aBytes = tc.M * tc.K * tc.aElemSize;
     size_t bBytes = tc.K * tc.N * tc.bElemSize;
+    size_t biasBytes = tc.hasBias ? tc.N * tc.biasElemSize : 0;
     const size_t cBytes = tc.M * tc.N * tc.cElemSize;
 
     std::printf(
@@ -70,16 +58,18 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
 
     std::string caseDir = std::string("./") + tc.name;
 
-    void *aHost = nullptr, *bHost = nullptr, *cHost = nullptr;
-    void *aDevice = nullptr, *bDevice = nullptr, *cDevice = nullptr;
+    void *aHost = nullptr, *bHost = nullptr, *biasHost = nullptr, *cHost = nullptr;
+    void *aDevice = nullptr, *bDevice = nullptr, *biasDevice = nullptr, *cDevice = nullptr;
 
     aclrtMallocHost(&aHost, aBytes);
     aclrtMallocHost(&bHost, bBytes);
     aclrtMallocHost(&cHost, cBytes);
+    if (tc.hasBias) aclrtMallocHost(&biasHost, biasBytes);
 
     aclrtMalloc(&aDevice, aBytes, ACL_MEM_MALLOC_HUGE_FIRST);
     aclrtMalloc(&bDevice, bBytes, ACL_MEM_MALLOC_HUGE_FIRST);
     aclrtMalloc(&cDevice, cBytes, ACL_MEM_MALLOC_HUGE_FIRST);
+    if (tc.hasBias) aclrtMalloc(&biasDevice, biasBytes, ACL_MEM_MALLOC_HUGE_FIRST);
 
     if (!ReadFile((caseDir + "/input1.bin").c_str(), aBytes, aHost, aBytes)) {
         std::fprintf(stderr, "[ERROR] failed to read %s/input1.bin\n", caseDir.c_str());
@@ -89,12 +79,21 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
         std::fprintf(stderr, "[ERROR] failed to read %s/input2.bin\n", caseDir.c_str());
         rc = 1;
     }
+    if (rc == 0 && tc.hasBias && !ReadFile((caseDir + "/input3.bin").c_str(), biasBytes, biasHost, biasBytes)) {
+        std::fprintf(stderr, "[ERROR] failed to read %s/input3.bin\n", caseDir.c_str());
+        rc = 1;
+    }
 
     if (rc == 0) {
         aclrtMemcpy(aDevice, aBytes, aHost, aBytes, ACL_MEMCPY_HOST_TO_DEVICE);
         aclrtMemcpy(bDevice, bBytes, bHost, bBytes, ACL_MEMCPY_HOST_TO_DEVICE);
+        if (tc.hasBias) aclrtMemcpy(biasDevice, biasBytes, biasHost, biasBytes, ACL_MEMCPY_HOST_TO_DEVICE);
 
-        tc.launch(aDevice, bDevice, cDevice, stream);
+        if (tc.hasBias) {
+            tc.launch4(aDevice, bDevice, biasDevice, cDevice, stream);
+        } else {
+            tc.launch3(aDevice, bDevice, cDevice, stream);
+        }
 
         aclrtSynchronizeStream(stream);
         aclrtMemcpy(cHost, cBytes, cDevice, cBytes, ACL_MEMCPY_DEVICE_TO_HOST);
@@ -107,9 +106,11 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
 
     if (aDevice != nullptr) aclrtFree(aDevice);
     if (bDevice != nullptr) aclrtFree(bDevice);
+    if (biasDevice != nullptr) aclrtFree(biasDevice);
     if (cDevice != nullptr) aclrtFree(cDevice);
     if (aHost != nullptr) aclrtFreeHost(aHost);
     if (bHost != nullptr) aclrtFreeHost(bHost);
+    if (biasHost != nullptr) aclrtFreeHost(biasHost);
     if (cHost != nullptr) aclrtFreeHost(cHost);
 
     if (rc == 0)

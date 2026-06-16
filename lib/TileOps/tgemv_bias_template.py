@@ -6,28 +6,23 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""TileLang DSL template for pto.tmatmul."""
+"""TileLang DSL template for pto.tgemv.bias."""
 
 import tilelang_dsl as pto
 
 
 @pto.ckernel(
     target="a5",
-    op="pto.tmatmul",
+    op="pto.tgemv.bias",
     dtypes=[
-        (pto.f16, pto.f16, pto.f32),
-        (pto.bf16, pto.bf16, pto.f32),
-        (pto.f32, pto.f32, pto.f32),
-        (pto.i8, pto.i8, pto.i32),
-        (pto.ScalarType("f8E4M3FN"), pto.ScalarType("f8E4M3FN"), pto.f32),
-        (pto.ScalarType("f8E4M3FN"), pto.ScalarType("f8E5M2"), pto.f32),
-        (pto.ScalarType("f8E5M2"), pto.ScalarType("f8E4M3FN"), pto.f32),
-        (pto.ScalarType("f8E5M2"), pto.ScalarType("f8E5M2"), pto.f32),
-        (pto.ScalarType("hif8"), pto.ScalarType("hif8"), pto.f32),
+        (pto.f16, pto.f16, pto.f32, pto.f32),
+        (pto.bf16, pto.bf16, pto.f32, pto.f32),
+        (pto.f32, pto.f32, pto.f32, pto.f32),
+        (pto.i8, pto.i8, pto.i32, pto.i32),
     ],
 )
-def template_tmatmul(lhs: pto.Tile, rhs: pto.Tile, acc: pto.Tile):
-    m, k = lhs.valid_shape
+def template_tgemv_bias(lhs: pto.Tile, rhs: pto.Tile, bias: pto.Tile, dst: pto.Tile):
+    _, k = lhs.valid_shape
     _, n = rhs.valid_shape
-    pto.mad(lhs.as_ptr(), rhs.as_ptr(), acc.as_ptr(), m, n, k, disable_gemv=True)
+    pto.mad_bias(lhs.as_ptr(), rhs.as_ptr(), dst.as_ptr(), bias.as_ptr(), 1, n, k)
     return None
