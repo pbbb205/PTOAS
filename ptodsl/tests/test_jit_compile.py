@@ -1206,6 +1206,7 @@ def carry_static_pyint_init_probe():
         col_loop.update(remained=remained_after_pack)
 
 
+@pto.jit(target="a5")
 def fixed_integer_index_coercion_probe():
     count = pto.const(4)
     mask, remained = pto.make_mask(pto.f32, count)

@@ -65,6 +65,7 @@ def float_bitwise_probe():
     _ = value & 1
 
 
+@pto.jit(target="a5")
 def float_literal_index_store_probe(ptr: pto.ptr(pto.index, "gm")):
     scalar.store(1.5, ptr)
 
