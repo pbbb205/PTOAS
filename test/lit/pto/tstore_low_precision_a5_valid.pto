@@ -24,8 +24,8 @@ module {
   }
 }
 
-// CHECK: func.func @tstore_low_precision_a5_valid(%arg0: memref<1x1x1x16x16xf8E4M3FN>, %arg1: memref<1x1x1x16x16x!pto.hif8>, %arg2: i64)
+// CHECK: func.func @tstore_low_precision_a5_valid(%arg0: memref<16x16xf8E4M3FN>, %arg1: memref<16x16x!pto.hif8>, %arg2: i64)
 // CHECK: pto.tstore ins(
-// CHECK: outs(%arg0 : memref<1x1x1x16x16xf8E4M3FN>)
+// CHECK: outs(%arg0 : memref<16x16xf8E4M3FN>)
 // CHECK: pto.tstore ins(
-// CHECK: outs(%arg1 : memref<1x1x1x16x16x!pto.hif8>)
+// CHECK: outs(%arg1 : memref<16x16x!pto.hif8>)

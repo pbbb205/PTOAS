@@ -1,4 +1,4 @@
-// RUN: ptoas --pto-arch=a5 --emit-pto-ir --mlir-print-ir-after=pto-canonicalize-ir %s -o /dev/null 2>&1 | FileCheck %s
+// RUN: ptoas --pto-arch=a5 --pto-backend=vpto --mlir-print-ir-after=pto-canonicalize-ir %s -o /dev/null 2>&1 | FileCheck %s
 
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
   func.func @canonicalize_rank2_views(%src: !pto.ptr<bf16, gm>, %dst: !pto.ptr<bf16, gm>) attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
