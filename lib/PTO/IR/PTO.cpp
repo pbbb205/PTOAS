@@ -261,11 +261,6 @@ func::FuncOp mlir::pto::lookupPeerFuncAcrossContainer(Operation *op,
   if (!op || !peerAttr)
     return {};
 
-  if (auto nearest =
-          SymbolTable::lookupNearestSymbolFrom<func::FuncOp>(op, peerAttr)) {
-    return nearest;
-  }
-
   auto currentFunc = op->getParentOfType<func::FuncOp>();
   if (!currentFunc)
     return {};
@@ -305,16 +300,6 @@ func::FuncOp mlir::pto::lookupPeerFuncAcrossContainer(Operation *op,
 
   if (fallbackMatches.size() == 1)
     return fallbackMatches.front();
-  if (fallbackMatches.empty()) {
-    for (Operation &childOp : outerModule.getBodyRegion().front().getOperations()) {
-      auto childModule = dyn_cast<ModuleOp>(childOp);
-      if (!childModule || childModule == currentChildModule)
-        continue;
-      if (auto found = dyn_cast_or_null<func::FuncOp>(
-              SymbolTable::lookupSymbolIn(childModule, target)))
-        return found;
-    }
-  }
   return {};
 }
 
