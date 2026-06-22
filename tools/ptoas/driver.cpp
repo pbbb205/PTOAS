@@ -273,8 +273,11 @@ parseDriverBackendAttr(Operation *op,
 }
 
 static bool isBackendPartitionedContainer(ModuleOp module) {
-  return llvm::all_of(module.getOps<ModuleOp>(),
-                      [](ModuleOp) { return true; });
+  Block *body = module.getBody();
+  if (!body)
+    return false;
+  return llvm::all_of(body->getOperations(),
+                      [](Operation &op) { return isa<ModuleOp>(op); });
 }
 
 static SmallVector<StringRef> collectImportedPeerNames(ModuleOp module) {
@@ -1005,9 +1008,16 @@ static LogicalResult resolveSingleBackend(
   bool debugIROutputRequested =
       mlir::pto::emitMlirIR || mlir::pto::emitVPTO || mlir::pto::ptoPrintSeamIR ||
       !mlir::pto::ptoSeamIRFile.empty();
-  if (!debugIROutputRequested && children.size() > 1 &&
-      isBackendPartitionedContainer(module))
+  if (!debugIROutputRequested && children.size() > 1) {
+    if (!isBackendPartitionedContainer(module)) {
+      llvm::errs() << "Error: mixed pto.backend fatobj mode expects either a "
+                      "single module or an outer module containing only child "
+                      "modules; found non-module top-level ops alongside child "
+                      "modules.\n";
+      return failure();
+    }
     return success();
+  }
 
   std::optional<mlir::pto::PTOBackend> firstChildBackend;
   for (ModuleOp child : children) {
