@@ -9211,20 +9211,19 @@ mlir::LogicalResult mlir::pto::TQuantMxOp::verify() {
       if (!dstElem.isInteger(8))
         return emitOpError("expects MXFP8 dst element type to be i8/ui8");
     } else {
-      if (!isPTOFloat4PackedType(dstElem))
+      if (!isa<pto::F4E2M1x2Type>(dstElem))
         return emitOpError("expects MXFP4_E2M1 dst element type to be !pto.f4E2M1x2");
       if (!(srcElem.isF16() || srcElem.isBF16()))
         return emitOpError("expects MXFP4_E2M1 src element type to be f16/bf16");
-      if (!isa<pto::F4E2M1x2Type>(dstElem))
-        return emitOpError("expects MXFP4_E2M1 dst element type to be !pto.f4E2M1x2");
     }
 
     auto srcValid = getValidShapeVec(srcTy);
+    auto dstValid = getValidShapeVec(dstTy);
     auto expValid = getValidShapeVec(expTy);
     auto maxValid = getValidShapeVec(maxTy);
     auto scalingValid = getValidShapeVec(scalingTy);
-    if (srcValid.size() != 2 || expValid.size() != 2 || maxValid.size() != 2 ||
-        scalingValid.size() != 2)
+    if (srcValid.size() != 2 || dstValid.size() != 2 || expValid.size() != 2 ||
+        maxValid.size() != 2 || scalingValid.size() != 2)
       return emitOpError("expects rank-2 valid_shape for src/dst/exp/max/scaling");
     // scaling is a per-group tile (like exp/max), NOT per-element: the ISA
     // flattens it to 1D and writes one reciprocal scale per 32-element group.
@@ -9232,6 +9231,12 @@ mlir::LogicalResult mlir::pto::TQuantMxOp::verify() {
     // is checked below alongside exp/max.
     if (failed(verifyTileBufSameElemType(*this, srcTy, maxTy, "src", "max")) ||
         failed(verifyTileBufSameElemType(*this, srcTy, scalingTy, "src", "scaling")))
+      return failure();
+    // dst must carry the same logical element count as src. For MXFP8 this is a
+    // plain valid_shape match; for MXFP4_E2M1 the packed dst (f4E2M1x2, 2 elems
+    // per byte) is handled by verifyTileBufSameLogicalExtent.
+    if (failed(verifyTileBufSameLogicalExtent(*this, srcTy, dstTy, "src", "dst",
+                                              /*compareValidShape=*/true)))
       return failure();
 
     int64_t srcRows = srcValid[0];

@@ -9669,42 +9669,38 @@ struct PTOQuantMxToEmitC : public OpConversionPattern<pto::TQuantMxOp> {
     Value max = peelUnrealized(adaptor.getMax());
     Value scaling = peelUnrealized(adaptor.getScaling());
 
-    auto makePtr = [&](Value v) -> Value {
-      auto ot = mlir::dyn_cast<emitc::OpaqueType>(v.getType());
-      if (!ot)
-        return {};
+    auto dstOT = mlir::dyn_cast<emitc::OpaqueType>(dst.getType());
+    auto srcOT = mlir::dyn_cast<emitc::OpaqueType>(src.getType());
+    auto expOT = mlir::dyn_cast<emitc::OpaqueType>(exp.getType());
+    auto maxOT = mlir::dyn_cast<emitc::OpaqueType>(max.getType());
+    auto scalingOT = mlir::dyn_cast<emitc::OpaqueType>(scaling.getType());
+    if (!dstOT || !srcOT || !expOT || !maxOT || !scalingOT)
+      return rewriter.notifyMatchFailure(
+          op, "expected all operands to be emitc::OpaqueType");
+
+    auto makePtr = [&](Value v, emitc::OpaqueType ot) -> Value {
       return rewriter.create<emitc::ApplyOp>(
                          loc, emitc::PointerType::get(ot), "&", v)
           .getResult();
     };
 
-    Value expPtr = makePtr(exp);
-    Value maxPtr = makePtr(max);
-    Value scalingPtr = makePtr(scaling);
+    Value expPtr = makePtr(exp, expOT);
+    Value maxPtr = makePtr(max, maxOT);
+    Value scalingPtr = makePtr(scaling, scalingOT);
 
     std::string quantTypeStr =
         op.getQuantType() == pto::QuantType::MXFP8
             ? "pto::QuantType::MXFP8"
             : "pto::QuantType::MXFP4_E2M1";
 
-    ArrayAttr templateArgs;
-    auto dstOT = mlir::dyn_cast<emitc::OpaqueType>(dst.getType());
-    auto srcOT = mlir::dyn_cast<emitc::OpaqueType>(src.getType());
-    auto expOT = mlir::dyn_cast<emitc::OpaqueType>(exp.getType());
-    auto maxOT = mlir::dyn_cast<emitc::OpaqueType>(max.getType());
-    auto scalingOT = mlir::dyn_cast<emitc::OpaqueType>(scaling.getType());
-    if (dstOT && srcOT && expOT && maxOT && scalingOT) {
-      templateArgs = rewriter.getArrayAttr({
-          emitc::OpaqueAttr::get(ctx, quantTypeStr),
-          emitc::OpaqueAttr::get(ctx, dstOT.getValue().str()),
-          emitc::OpaqueAttr::get(ctx, srcOT.getValue().str()),
-          emitc::OpaqueAttr::get(ctx, expOT.getValue().str()),
-          emitc::OpaqueAttr::get(ctx, maxOT.getValue().str()),
-          emitc::OpaqueAttr::get(ctx, scalingOT.getValue().str()),
-      });
-    } else {
-      templateArgs = ArrayAttr{};
-    }
+    ArrayAttr templateArgs = rewriter.getArrayAttr({
+        emitc::OpaqueAttr::get(ctx, quantTypeStr),
+        emitc::OpaqueAttr::get(ctx, dstOT.getValue().str()),
+        emitc::OpaqueAttr::get(ctx, srcOT.getValue().str()),
+        emitc::OpaqueAttr::get(ctx, expOT.getValue().str()),
+        emitc::OpaqueAttr::get(ctx, maxOT.getValue().str()),
+        emitc::OpaqueAttr::get(ctx, scalingOT.getValue().str()),
+    });
 
     SmallVector<Value> operands{dst, src, expPtr, maxPtr, scalingPtr};
     rewriter.create<emitc::CallOpaqueOp>(
