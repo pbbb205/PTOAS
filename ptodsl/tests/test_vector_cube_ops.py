@@ -21,13 +21,72 @@ import ptodsl._pipe_namespace as _pipe_namespace
 from ptodsl._bootstrap import make_context
 from ptodsl import pto
 from mlir.ir import F32Type
-
-
 def _identity(value):
     return value
 
 
 class VectorCubeSurfaceTest(unittest.TestCase):
+    def test_row_reduction_auto_tmp_prefers_surface_metadata(self):
+        src = SimpleNamespace(
+            type="ignored_type",
+            surface_metadata={
+                "shape": (8, 64),
+                "dtype": "f32_type",
+                "memory_space": "vec",
+                "valid_shape": ("rows", "cols"),
+            },
+        )
+        auto_tmp = object()
+        dst = object()
+        sentinel = object()
+
+        with patch.object(_ops, "parse_tile_type_metadata") as parse_tile_type_metadata, \
+             patch.object(_ops, "alloc_tile", return_value=auto_tmp) as alloc_tile, \
+             patch.object(_ops, "trowmax", return_value=sentinel) as trowmax:
+            result = pto.tile.rowmax(src, dst=dst, tmp=None)
+
+        self.assertIs(result, sentinel)
+        parse_tile_type_metadata.assert_not_called()
+        alloc_tile.assert_called_once_with(
+            shape=[8, 64],
+            dtype="f32_type",
+            memory_space="vec",
+            valid_shape=["rows", "cols"],
+            blayout="RowMajor",
+            slayout="NoneBox",
+        )
+        trowmax.assert_called_once_with(src, auto_tmp, dst)
+
+    def test_row_reduction_auto_tmp_uses_row_major_layout(self):
+        src = SimpleNamespace(type="!pto.tile_buf<vec, 8x64xf32, valid=8x64, blayout=col_major>")
+        auto_tmp = object()
+        dst = object()
+        sentinel = object()
+        element_type = object()
+        metadata = {
+            "shape_dims": (8, 64),
+            "element_type": element_type,
+            "memory_space": "vec",
+            "valid_dims": (8, 64),
+        }
+
+        with patch.object(_ops, "unwrap_surface_value", return_value=src), \
+             patch.object(_ops, "parse_tile_type_metadata", return_value=metadata), \
+             patch.object(_ops, "alloc_tile", return_value=auto_tmp) as alloc_tile, \
+             patch.object(_ops, "trowmax", return_value=sentinel) as trowmax:
+            result = pto.tile.rowmax(src, dst=dst, tmp=None)
+
+        self.assertIs(result, sentinel)
+        alloc_tile.assert_called_once_with(
+            shape=[8, 64],
+            dtype=element_type,
+            memory_space="vec",
+            valid_shape=[8, 64],
+            blayout="RowMajor",
+            slayout="NoneBox",
+        )
+        trowmax.assert_called_once_with(src, auto_tmp, dst)
+
     def test_public_namespace_exports_new_vector_and_cube_apis(self):
         names = [
             "vsub", "vmin", "vand", "vor", "vxor", "vshl", "vshr",

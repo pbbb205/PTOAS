@@ -1,0 +1,84 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 %s -o - 2>&1 | FileCheck %s
+
+// A5 TXOR/TXORS/TSEL/TSELS keep tmp in the DPS ABI but the current
+// implementation does not consume it. Local-memory planning must not count tmp
+// as an extra scratch write on A5, otherwise these shapes trigger false vec
+// overflow diagnostics.
+// CHECK-NOT: vec overflow
+// CHECK-LABEL: AICORE void TXOR_TMP_OVERFLOW()
+// CHECK-LABEL: AICORE void TXORS_TMP_OVERFLOW()
+// CHECK-LABEL: AICORE void TSEL_TMP_OVERFLOW()
+// CHECK-LABEL: AICORE void TSELS_TMP_OVERFLOW()
+// CHECK-LABEL: AICORE void TROWMAX_TMP_OVERFLOW()
+// CHECK-LABEL: AICORE void TROWEXPANDMAX_TMP_OVERFLOW()
+
+module {
+  func.func @TXOR_TMP_OVERFLOW() {
+    %src0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i16, rows=82, cols=512, v_row=82, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i16, rows=82, cols=512, v_row=82, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %tmp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i16, rows=82, cols=512, v_row=82, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i16, rows=82, cols=512, v_row=82, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.txor ins(%src0, %src1, %tmp : !pto.tile_buf<loc=vec, dtype=i16, rows=82, cols=512, v_row=82, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i16, rows=82, cols=512, v_row=82, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i16, rows=82, cols=512, v_row=82, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+             outs(%dst : !pto.tile_buf<loc=vec, dtype=i16, rows=82, cols=512, v_row=82, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  func.func @TXORS_TMP_OVERFLOW() {
+    %scalar = arith.constant 255 : i32
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=62, cols=512, v_row=62, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %tmp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=62, cols=512, v_row=62, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=62, cols=512, v_row=62, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.txors ins(%src, %scalar, %tmp : !pto.tile_buf<loc=vec, dtype=i32, rows=62, cols=512, v_row=62, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>, i32, !pto.tile_buf<loc=vec, dtype=i32, rows=62, cols=512, v_row=62, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+              outs(%dst : !pto.tile_buf<loc=vec, dtype=i32, rows=62, cols=512, v_row=62, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  func.func @TSEL_TMP_OVERFLOW() {
+    %mask = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i8, rows=76, cols=128, v_row=76, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i8, rows=76, cols=1024, v_row=76, v_col=1024, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i8, rows=76, cols=1024, v_row=76, v_col=1024, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %tmp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i8, rows=76, cols=1024, v_row=76, v_col=1024, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i8, rows=76, cols=1024, v_row=76, v_col=1024, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tsel ins(%mask, %src0, %src1, %tmp : !pto.tile_buf<loc=vec, dtype=i8, rows=76, cols=128, v_row=76, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i8, rows=76, cols=1024, v_row=76, v_col=1024, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i8, rows=76, cols=1024, v_row=76, v_col=1024, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i8, rows=76, cols=1024, v_row=76, v_col=1024, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+             outs(%dst : !pto.tile_buf<loc=vec, dtype=i8, rows=76, cols=1024, v_row=76, v_col=1024, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  func.func @TSELS_TMP_OVERFLOW() {
+    %scalar = arith.constant 7 : i8
+    %mask = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i8, rows=102, cols=128, v_row=102, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i8, rows=102, cols=1024, v_row=102, v_col=1024, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %tmp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i8, rows=102, cols=1024, v_row=102, v_col=1024, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i8, rows=102, cols=1024, v_row=102, v_col=1024, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.tsels ins(%mask, %src, %tmp, %scalar : !pto.tile_buf<loc=vec, dtype=i8, rows=102, cols=128, v_row=102, v_col=128, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i8, rows=102, cols=1024, v_row=102, v_col=1024, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i8, rows=102, cols=1024, v_row=102, v_col=1024, blayout=row_major, slayout=none_box, fractal=512, pad=0>, i8)
+              outs(%dst : !pto.tile_buf<loc=vec, dtype=i8, rows=102, cols=1024, v_row=102, v_col=1024, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  func.func @TROWMAX_TMP_OVERFLOW() {
+    %src = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=64, cols=512, v_row=62, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %tmp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=64, cols=512, v_row=62, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=64, cols=1, v_row=62, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>
+    pto.trowmax ins(%src, %tmp : !pto.tile_buf<loc=vec, dtype=i32, rows=64, cols=512, v_row=62, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i32, rows=64, cols=512, v_row=62, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+               outs(%dst : !pto.tile_buf<loc=vec, dtype=i32, rows=64, cols=1, v_row=62, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+
+  func.func @TROWEXPANDMAX_TMP_OVERFLOW() {
+    %src0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=64, cols=512, v_row=62, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %src1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=64, cols=1, v_row=62, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>
+    %tmp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=64, cols=512, v_row=62, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    %dst = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=i32, rows=64, cols=512, v_row=62, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>
+    pto.trowexpandmax ins(%src0, %src1, %tmp : !pto.tile_buf<loc=vec, dtype=i32, rows=64, cols=512, v_row=62, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i32, rows=64, cols=1, v_row=62, v_col=1, blayout=col_major, slayout=none_box, fractal=512, pad=0>, !pto.tile_buf<loc=vec, dtype=i32, rows=64, cols=512, v_row=62, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+                     outs(%dst : !pto.tile_buf<loc=vec, dtype=i32, rows=64, cols=512, v_row=62, v_col=512, blayout=row_major, slayout=none_box, fractal=512, pad=0>)
+    return
+  }
+}

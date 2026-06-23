@@ -9,10 +9,47 @@
 from . import _ops
 
 
+def _row_reduction_tmp_metadata(src):
+    surface_metadata = getattr(src, "surface_metadata", None)
+    if surface_metadata is not None:
+        shape = surface_metadata.get("shape")
+        dtype = surface_metadata.get("dtype")
+        memory_space = surface_metadata.get("memory_space")
+        if shape is not None and dtype is not None and memory_space is not None:
+            return {
+                "shape": shape,
+                "dtype": dtype,
+                "memory_space": memory_space,
+                "valid_shape": surface_metadata.get("valid_shape"),
+            }
+
+    parsed = _ops.parse_tile_type_metadata(_ops.unwrap_surface_value(src).type)
+    if parsed is None:
+        return None
+    return {
+        "shape": parsed["shape_dims"],
+        "dtype": parsed["element_type"],
+        "memory_space": parsed["memory_space"],
+        "valid_shape": parsed["valid_dims"],
+    }
+
+
 def _resolve_row_reduction_tmp(src, tmp):
     if tmp is not None:
         return tmp
-    return _ops.alloc_tile(tile_type=_ops.unwrap_surface_value(src).type)
+    metadata = _row_reduction_tmp_metadata(src)
+    if metadata is None:
+        return _ops.alloc_tile(tile_type=_ops.unwrap_surface_value(src).type)
+    alloc_kwargs = {
+        "shape": list(metadata["shape"]),
+        "dtype": metadata["dtype"],
+        "memory_space": metadata["memory_space"],
+        "blayout": "RowMajor",
+        "slayout": "NoneBox",
+    }
+    if metadata["valid_shape"] is not None:
+        alloc_kwargs["valid_shape"] = list(metadata["valid_shape"])
+    return _ops.alloc_tile(**alloc_kwargs)
 
 
 class _TileNamespace:

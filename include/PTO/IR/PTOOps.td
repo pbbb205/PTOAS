@@ -819,7 +819,10 @@ def TTransOp : PTO_TOp<"ttrans", [
   let summary = "PTO matrix trans operation (destination-style, DPS).";
   let description = [{
     DPS form:
-      tile buf:  pto.ttrans ins(%src %tmp) outs(%dst)
+      tile buf:  pto.ttrans ins(%src, %tmp) outs(%dst)
+
+    The current PTO IR form always carries a tmp operand, but PTO IR does not
+    require tmp to match the shape or valid shape of src/dst.
   }];
   let arguments = (ins
     PTODpsType:$src,
@@ -4842,7 +4845,7 @@ def TMrgSortOp: PTO_TOp<"tmrgsort", [
   OpPipeInterface,
   DeclareOpInterfaceMethods<MemoryEffectsOpInterface>
 ]> {
-  let summary = "TMRGSORT: Merge sort (format1: ins(src,blockLen) out(dst); format2: ins(2 to 4 srcs), outs(dst,tmp,executed)).";
+  let summary = "TMRGSORT: Merge sort (format1: ins(src, blockLen) outs(dst); format2: ins(2 to 4 srcs, tmp) outs(dst, executed)).";
 
   let arguments = (ins
     Variadic<PTODpsType>:$srcs,
@@ -5592,7 +5595,7 @@ def TRowExpandDivOp: PTO_TOp<"trowexpanddiv", [
 ]> {
   let summary = "TROWEXPANDDIV: Row-wise broadcast divide: divide each row of src0 by a per-row scalar vector src1.";
   let description = [{
-    pto-isa has overloads with/without tmp; optional tmp for scratch.
+    pto-isa has overloads with/without tmp; on A5 the tmp operand is accepted as a placeholder and does not add extra shape constraints.
   }];
 
   let arguments = (ins
@@ -5625,7 +5628,7 @@ def TRowExpandMulOp: PTO_TOp<"trowexpandmul", [
 ]> {
   let summary = "TROWEXPANDMUL: Row-wise broadcast multiply with per-row scalar vector.";
   let description = [{
-    pto-isa has overloads with/without tmp; optional tmp for scratch.
+    pto-isa has overloads with/without tmp; on A5 the tmp operand is accepted as a placeholder and does not add extra shape constraints.
   }];
 
   let arguments = (ins
@@ -5657,7 +5660,7 @@ def TRowExpandSubOp: PTO_TOp<"trowexpandsub", [
 ]> {
   let summary = "TROWEXPANDSUB: Row-wise broadcast subtract: subtract a per-row scalar vector src1 from each row of src0.";
   let description = [{
-    pto-isa has overloads with/without tmp; optional tmp for scratch.
+    pto-isa has overloads with/without tmp; on A5 the tmp operand is accepted as a placeholder and does not add extra shape constraints.
   }];
 
   let arguments = (ins
@@ -5686,7 +5689,7 @@ def TRowExpandAddOp: PTO_TOp<"trowexpandadd", [
 ]> {
   let summary = "TROWEXPANDADD: Row-wise broadcast add: add a per-row scalar vector src1 to each row of src0.";
   let description = [{
-    pto-isa has overloads with/without tmp; optional tmp for scratch.
+    pto-isa has overloads with/without tmp; on A5 the tmp operand is accepted as a placeholder and does not add extra shape constraints.
   }];
 
   let arguments = (ins
@@ -5714,7 +5717,7 @@ def TRowExpandExpdifOp: PTO_TOp<"trowexpandexpdif", [
 ]> {
   let summary = "TROWEXPANDEXPDIF: Row-wise broadcast expdif with per-row scalar vector.";
   let description = [{
-    pto-isa has overloads with/without tmp on A2/A3; A5 supports the 3-operand form only.
+    pto-isa has overloads with/without tmp; on A5 the tmp operand is accepted as a placeholder and does not add extra shape constraints.
   }];
 
   let arguments = (ins
@@ -5743,7 +5746,7 @@ def TRowExpandMaxOp: PTO_TOp<"trowexpandmax", [
 ]> {
   let summary = "TROWEXPANDMAX: Row-wise broadcast max with per-row scalar vector.";
   let description = [{
-    pto-isa has overloads with/without tmp on A2/A3; A5 supports the 3-operand form only.
+    pto-isa has overloads with/without tmp; on A5 the tmp operand is accepted as a placeholder and does not add extra shape constraints.
   }];
 
   let arguments = (ins
@@ -5772,7 +5775,7 @@ def TRowExpandMinOp: PTO_TOp<"trowexpandmin", [
 ]> {
   let summary = "TROWEXPANDMIN: Row-wise broadcast min with per-row scalar vector.";
   let description = [{
-    pto-isa has overloads with/without tmp on A2/A3; A5 supports the 3-operand form only.
+    pto-isa has overloads with/without tmp; on A5 the tmp operand is accepted as a placeholder and does not add extra shape constraints.
   }];
 
   let arguments = (ins

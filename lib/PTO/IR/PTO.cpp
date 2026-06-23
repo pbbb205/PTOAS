@@ -1900,9 +1900,9 @@ static bool isSupportedRowReductionElemType(Type elem) {
          elem.isF32();
 }
 
-static LogicalResult verifyTRowReductionNoTmpCommon(Operation *op, Type srcTy,
-                                                    Type dstTy,
-                                                    StringRef elemTypeError) {
+[[maybe_unused]] static LogicalResult
+verifyTRowReductionNoTmpCommon(Operation *op, Type srcTy, Type dstTy,
+                               StringRef elemTypeError) {
   if (failed(verifyRowReductionSrcLayout(op, srcTy, "src")) ||
       failed(verifyRowReductionDstLayout(op, dstTy, "dst")))
     return failure();
@@ -1920,11 +1920,8 @@ static LogicalResult verifyTRowReductionWithTmpCommon(Operation *op, Type srcTy,
                                                       Type tmpTy, Type dstTy,
                                                       StringRef elemTypeError) {
   if (failed(verifyRowReductionSrcLayout(op, srcTy, "src")) ||
-      failed(verifyVecTileCommon(op, tmpTy, "tmp")) ||
+      failed(verifyVecTileStorage(op, tmpTy, "tmp")) ||
       failed(verifyRowReductionDstLayout(op, dstTy, "dst")))
-    return failure();
-  if (failed(verifyTileBufSameElemType(op, srcTy, tmpTy, "src", "tmp")) ||
-      failed(verifyTileBufSameValidShape(op, srcTy, tmpTy, "src", "tmp")))
     return failure();
   if (getElemTy(srcTy) != getElemTy(dstTy))
     return op->emitOpError("expects src and dst to have the same element type");
@@ -2040,6 +2037,28 @@ static LogicalResult verifyTColArgReductionOpA5(Operation *op, Type srcTy,
   auto dstInt = dyn_cast<IntegerType>(getElemTy(dstTy));
   if (!dstInt || dstInt.getWidth() != 32)
     return op->emitOpError("expects dst element type to be i32 or ui32");
+  return success();
+}
+
+static LogicalResult verifyTColSumTmpStride(Operation *op, Type srcTy,
+                                            Type tmpTy, bool isBinary) {
+  if (!isBinary)
+    return success();
+
+  auto srcValid = getValidShapeVec(srcTy);
+  auto tmpShape = getShapeVec(tmpTy);
+  if (srcValid.size() != 2 || tmpShape.size() != 2)
+    return op->emitOpError("expects src and tmp to be rank-2 tiles");
+
+  int64_t srcValidCols = srcValid[1];
+  int64_t tmpStride = tmpShape[1];
+  if (srcValidCols != ShapedType::kDynamic && tmpStride != ShapedType::kDynamic &&
+      tmpStride < srcValidCols) {
+    return op->emitOpError()
+           << "expects tmp shape[1] to be at least src valid_shape[1] when "
+              "isBinary is true; got "
+           << tmpStride << " vs " << srcValidCols;
+  }
   return success();
 }
 
@@ -5778,6 +5797,8 @@ LogicalResult pto::TColSumOp::verify() {
         return failure();
       if (getElemTy(srcTy) != getElemTy(dstTy) || getElemTy(srcTy) != getElemTy(tmpTy))
         return emitOpError("expects src/tmp/dst element types to match");
+      if (failed(verifyTColSumTmpStride(*this, srcTy, tmpTy, getIsBinary())))
+        return failure();
     }
     if (getElemTy(srcTy) != getElemTy(dstTy))
       return emitOpError("expects src/dst element types to match");
@@ -5808,6 +5829,8 @@ LogicalResult pto::TColSumOp::verify() {
         return failure();
       if (getElemTy(srcTy) != getElemTy(dstTy) || getElemTy(srcTy) != getElemTy(tmpTy))
         return emitOpError("expects src/tmp/dst element types to match");
+      if (failed(verifyTColSumTmpStride(*this, srcTy, tmpTy, getIsBinary())))
+        return failure();
     }
     if (getElemTy(srcTy) != getElemTy(dstTy))
       return emitOpError("expects src/dst element types to match");
@@ -10211,13 +10234,6 @@ static LogicalResult verifyTRowExpandReduceLikeOp(Operation *op, Type src0Ty,
   if (src0Valid.size() != 2 || src1Valid.size() != 2 || dstValid.size() != 2)
     return op->emitOpError("expects src0, src1, and dst to have rank-2 valid_shape");
 
-  // Operand-form invariant, enforced regardless of the valid region: A5 has no
-  // tmp form for these ops. Must run before the empty-marker early-accept below,
-  // otherwise a 0x0 dst would let an A5 tmp form slip through and lower to the
-  // A2/A3 4-operand TROWEXPAND* call.
-  if (hasTmp && targetArch == PTOArch::A5)
-    return op->emitOpError("expects A5 form to omit tmp");
-
   // Fully-empty dst valid region (0x0): dual-AIV no-op replay marker. Element
   // type/layout were already checked above; the op writes no elements, so accept
   // and skip the non-empty broadcast/width constraints. One-sided empties still
@@ -10374,9 +10390,9 @@ mlir::LogicalResult mlir::pto::TRowExpandMinOp::verify() {
 
 mlir::LogicalResult mlir::pto::TRowMaxOp::verify() {
   auto verifyByArch = [&]() -> LogicalResult {
-    return verifyTRowReductionNoTmpCommon(*this, getSrc().getType(),
-                                          getDst().getType(),
-                                          "expects element type to be i16/i32/f16/f32");
+    return verifyTRowReductionWithTmpCommon(
+        *this, getSrc().getType(), getTmp().getType(), getDst().getType(),
+        "expects element type to be i16/i32/f16/f32");
   };
   return dispatchVerifierByArch(getOperation(), verifyByArch, verifyByArch);
 }
@@ -10420,9 +10436,9 @@ mlir::LogicalResult mlir::pto::TRowArgMinOp::verify() {
 
 mlir::LogicalResult mlir::pto::TRowSumOp::verify() {
   auto verifyByArch = [&]() -> LogicalResult {
-    return verifyTRowReductionNoTmpCommon(*this, getSrc().getType(),
-                                          getDst().getType(),
-                                          "expects element type to be i16/i32/f16/f32");
+    return verifyTRowReductionWithTmpCommon(
+        *this, getSrc().getType(), getTmp().getType(), getDst().getType(),
+        "expects element type to be i16/i32/f16/f32");
   };
   return dispatchVerifierByArch(getOperation(), verifyByArch, verifyByArch);
 }
@@ -11082,7 +11098,15 @@ mlir::LogicalResult mlir::pto::TXorSOp::verify() {
     FailureOr<Type> elemOr = verifyCommon();
     if (failed(elemOr))
       return failure();
-    auto it = mlir::dyn_cast<IntegerType>(*elemOr);
+    Type tmpTy = getTmp().getType();
+    if (failed(verifyTileBufCommon(*this, tmpTy, "tmp")))
+      return failure();
+    Type elem = *elemOr;
+    if (getElemTy(tmpTy) != elem)
+      return emitOpError("expects tmp to have the same element type as src and dst");
+    if (!isRowMajorTileBuf(tmpTy))
+      return emitOpError("expects tmp to use row-major layout");
+    auto it = mlir::dyn_cast<IntegerType>(elem);
     if (!it || (it.getWidth() != 8 && it.getWidth() != 16))
       return emitOpError(
           "expects A2/A3 txors src and dst element type to be i8/i16");
@@ -12714,7 +12738,7 @@ void TRowExpandDivOp::getEffects(
   PTO_ADD_READ(getSrc0Mutable());
   PTO_ADD_READ(getSrc1Mutable());
   auto tmp = getTmpMutable();
-  if (!tmp.empty())
+  if (!tmp.empty() && getTargetArch(getOperation()) != PTOArch::A5)
     PTO_ADD_WRITE(tmp[0]);
   PTO_ADD_WRITE(getDstMutable());
 }
@@ -12724,7 +12748,7 @@ void TRowExpandMulOp::getEffects(
   PTO_ADD_READ(getSrc0Mutable());
   PTO_ADD_READ(getSrc1Mutable());
   auto tmp = getTmpMutable();
-  if (!tmp.empty())
+  if (!tmp.empty() && getTargetArch(getOperation()) != PTOArch::A5)
     PTO_ADD_WRITE(tmp[0]);
   PTO_ADD_WRITE(getDstMutable());
 }
@@ -12734,19 +12758,27 @@ void TRowExpandSubOp::getEffects(
   PTO_ADD_READ(getSrc0Mutable());
   PTO_ADD_READ(getSrc1Mutable());
   auto tmp = getTmpMutable();
-  if (!tmp.empty())
+  if (!tmp.empty() && getTargetArch(getOperation()) != PTOArch::A5)
     PTO_ADD_WRITE(tmp[0]);
   PTO_ADD_WRITE(getDstMutable());
 }
 
-PTO_DEFINE_BINARY_EFFECTS(TRowExpandAddOp, getSrc0Mutable(), getSrc1Mutable(), getDstMutable())
+void TRowExpandAddOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
+  PTO_ADD_READ(getSrc0Mutable());
+  PTO_ADD_READ(getSrc1Mutable());
+  auto tmp = getTmpMutable();
+  if (!tmp.empty() && getTargetArch(getOperation()) != PTOArch::A5)
+    PTO_ADD_WRITE(tmp[0]);
+  PTO_ADD_WRITE(getDstMutable());
+}
 
 void TRowExpandExpdifOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   PTO_ADD_READ(getSrc0Mutable());
   PTO_ADD_READ(getSrc1Mutable());
   auto tmp = getTmpMutable();
-  if (!tmp.empty())
+  if (!tmp.empty() && getTargetArch(getOperation()) != PTOArch::A5)
     PTO_ADD_WRITE(tmp[0]);
   PTO_ADD_WRITE(getDstMutable());
 }
@@ -12756,7 +12788,7 @@ void TRowExpandMaxOp::getEffects(
   PTO_ADD_READ(getSrc0Mutable());
   PTO_ADD_READ(getSrc1Mutable());
   auto tmp = getTmpMutable();
-  if (!tmp.empty())
+  if (!tmp.empty() && getTargetArch(getOperation()) != PTOArch::A5)
     PTO_ADD_WRITE(tmp[0]);
   PTO_ADD_WRITE(getDstMutable());
 }
@@ -12766,7 +12798,7 @@ void TRowExpandMinOp::getEffects(
   PTO_ADD_READ(getSrc0Mutable());
   PTO_ADD_READ(getSrc1Mutable());
   auto tmp = getTmpMutable();
-  if (!tmp.empty())
+  if (!tmp.empty() && getTargetArch(getOperation()) != PTOArch::A5)
     PTO_ADD_WRITE(tmp[0]);
   PTO_ADD_WRITE(getDstMutable());
 }
@@ -12775,7 +12807,8 @@ void TRowExpandMinOp::getEffects(
 void TRowMaxOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   PTO_ADD_READ(getSrcMutable());
-  PTO_ADD_WRITE(getTmpMutable());
+  if (getTargetArch(getOperation()) != PTOArch::A5)
+    PTO_ADD_WRITE(getTmpMutable());
   PTO_ADD_WRITE(getDstMutable());
 }
 
@@ -12793,7 +12826,8 @@ void TRowArgMaxOp::getEffects(
 void TRowMinOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   PTO_ADD_READ(getSrcMutable());
-  PTO_ADD_WRITE(getTmpMutable());
+  if (getTargetArch(getOperation()) != PTOArch::A5)
+    PTO_ADD_WRITE(getTmpMutable());
   PTO_ADD_WRITE(getDstMutable());
 }
 
@@ -12811,14 +12845,16 @@ void TRowArgMinOp::getEffects(
 void TRowSumOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   PTO_ADD_READ(getSrcMutable());
-  PTO_ADD_WRITE(getTmpMutable());
+  if (getTargetArch(getOperation()) != PTOArch::A5)
+    PTO_ADD_WRITE(getTmpMutable());
   PTO_ADD_WRITE(getDstMutable());
 }
 
 void TRowProdOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   PTO_ADD_READ(getSrcMutable());
-  PTO_ADD_WRITE(getTmpMutable());
+  if (getTargetArch(getOperation()) != PTOArch::A5)
+    PTO_ADD_WRITE(getTmpMutable());
   PTO_ADD_WRITE(getDstMutable());
 }
 void TRsqrtOp::getEffects(
@@ -12841,22 +12877,30 @@ void TScatterOp::getEffects(
   PTO_ADD_WRITE(getDstMutable());
 }
 
-// Select: Read(mask, src0, src1) -> Write(tmp, dst)
+// Select: Read(mask, src0, src1) -> Write(tmp on A2/A3, dst)
 void TSelOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   PTO_ADD_READ(getMaskMutable());
   PTO_ADD_READ(getSrc0Mutable());
   PTO_ADD_READ(getSrc1Mutable());
-  PTO_ADD_WRITE(getTmpMutable());
+  // A5 lowering does not consume tmp for TSEL; modeling tmp as a scratch
+  // write inflates local-memory planning and can trigger false vec-overflow
+  // diagnostics.
+  if (getTargetArch(getOperation()) != PTOArch::A5)
+    PTO_ADD_WRITE(getTmpMutable());
   PTO_ADD_WRITE(getDstMutable());
 }
 
-// TSELS: Read(src0, src1) -> Write(tmp, dst)
+// TSELS: Read(mask, src) -> Write(tmp on A2/A3, dst)
 void TSelSOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   PTO_ADD_READ(getMaskMutable());
   PTO_ADD_READ(getSrcMutable());
-  PTO_ADD_WRITE(getTmpMutable());
+  // A5 lowering does not consume tmp for TSELS; modeling tmp as a scratch
+  // write inflates local-memory planning and can trigger false vec-overflow
+  // diagnostics.
+  if (getTargetArch(getOperation()) != PTOArch::A5)
+    PTO_ADD_WRITE(getTmpMutable());
   PTO_ADD_WRITE(getDstMutable());
 }
 
@@ -12882,20 +12926,28 @@ PTO_DEFINE_TERNARY_EFFECTS(TSubCOp, getSrc0Mutable(), getSrc1Mutable(), getSrc2M
 PTO_DEFINE_UNARY_EFFECTS(TSubSOp, getSrcMutable(), getDstMutable())
 PTO_DEFINE_BINARY_EFFECTS(TSubSCOp, getSrc0Mutable(), getSrc1Mutable(), getDstMutable())
 
-// TXORS: Read(src) -> Write(tmp, dst)
+// TXORS: Read(src) -> Write(tmp on A2/A3, dst)
 void TXorSOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   PTO_ADD_READ(getSrcMutable());
-  PTO_ADD_WRITE(getTmpMutable());
+  // A5 lowering does not consume tmp for TXORS; modeling tmp as a scratch
+  // write inflates local-memory planning and can trigger false vec-overflow
+  // diagnostics.
+  if (getTargetArch(getOperation()) != PTOArch::A5)
+    PTO_ADD_WRITE(getTmpMutable());
   PTO_ADD_WRITE(getDstMutable());
 }
 
-// TXOR: Read(src0, src1) -> Write(tmp?, dst)
+// TXOR: Read(src0, src1) -> Write(tmp on A2/A3, dst)
 void TXorOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>> &effects) {
   PTO_ADD_READ(getSrc0Mutable());
   PTO_ADD_READ(getSrc1Mutable());
-  PTO_ADD_WRITE(getTmpMutable());
+  // A5 lowering does not consume tmp for TXOR; modeling tmp as a scratch
+  // write inflates local-memory planning and can trigger false vec-overflow
+  // diagnostics.
+  if (getTargetArch(getOperation()) != PTOArch::A5)
+    PTO_ADD_WRITE(getTmpMutable());
   PTO_ADD_WRITE(getDstMutable());
 }
 

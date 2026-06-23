@@ -58,8 +58,8 @@ def build():
             ptv5d  = pto.PartitionTensorViewType.get([_dyn] * 5, f32)  # !pto.partition_tensor_view<?x?x?x?x?xf32>
 
             # Tile-buffer config attributes
-            _col_cfg = pto.TileBufConfigAttr.get(
-                pto.BLayoutAttr.get(pto.BLayout.ColMajor),
+            _reduce_cfg = pto.TileBufConfigAttr.get(
+                pto.BLayoutAttr.get(pto.BLayout.RowMajor),
                 pto.SLayoutAttr.get(pto.SLayout.NoneBox),
                 512, pto.PadValueAttr.get(pto.PadValue.Null),
             )
@@ -68,8 +68,8 @@ def build():
                 pto.SLayoutAttr.get(pto.SLayout.NoneBox),
                 512, pto.PadValueAttr.get(pto.PadValue.Null),
             )
-            # !pto.tile_buf<vec, 8x1xf32, valid=?x1, blayout=col_major>
-            tile_col  = pto.TileBufType.get([8, 1],   f32, _ub, [-1,  1], _col_cfg)
+            # !pto.tile_buf<vec, 8x1xf32, valid=?x1, blayout=row_major>
+            tile_col  = pto.TileBufType.get([8, 1],   f32, _ub, [-1,  1], _reduce_cfg)
             # !pto.tile_buf<vec, 8x128xf32, valid=?x?>
             tile_wide = pto.TileBufType.get([8, 128], f32, _ub, [-1, -1], _row_cfg)
 

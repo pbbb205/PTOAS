@@ -39,6 +39,7 @@ pto.<op> ins(%src, %tmp : !pto.tile_buf<...>, !pto.tile_buf<...>)
 
 - `dst.v_row` should match `src.v_row`.
 - `dst.v_col` should be `1`.
+- For `pto.trowsum`, `pto.trowprod`, `pto.trowmax`, and `pto.trowmin`, PTO IR keeps `%tmp` for ABI/workspace plumbing but does not impose extra `%tmp` element-type, shape, or layout constraints beyond requiring a `loc=vec` tile.
 - `pto.trowargmax` and `pto.trowargmin` require an integer destination element type for the row-local index result.
 - Numeric widening / narrowing inside the reduction is target-defined by the selected template (e.g. `trowsum` may widen `i16` accumulation internally before storing to `dst`).
 

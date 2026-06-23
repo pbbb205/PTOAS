@@ -12,6 +12,8 @@
 
 txors: bitwise XOR with scalar, dst = src ^ scalar.
 Integer only: i32, i16.
+Each case also records `tmp_shape`, because A5 keeps tmp in the ABI but only
+needs a small placeholder tile.
 """
 
 import numpy as np
@@ -22,6 +24,7 @@ CASES = [
         "dtype": np.int32,
         "shape": (32, 64),
         "valid_shape": (32, 64),
+        "tmp_shape": (1, 8),
         "eps": 0,
     },
     {
@@ -29,6 +32,7 @@ CASES = [
         "dtype": np.int16,
         "shape": (63, 64),
         "valid_shape": (63, 64),
+        "tmp_shape": (1, 16),
         "eps": 0,
     },
     {
@@ -36,6 +40,7 @@ CASES = [
         "dtype": np.int32,
         "shape": (31, 128),
         "valid_shape": (31, 128),
+        "tmp_shape": (1, 8),
         "eps": 0,
     },
     {
@@ -43,6 +48,7 @@ CASES = [
         "dtype": np.int16,
         "shape": (15, 192),
         "valid_shape": (15, 192),
+        "tmp_shape": (1, 16),
         "eps": 0,
     },
 ]

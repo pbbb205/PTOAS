@@ -6,17 +6,14 @@
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
 
-// RUN: not ptoas --pto-arch=a5 --emit-pto-ir %s 2>&1 | FileCheck %s
+// RUN: ptoas --pto-arch=a5 --emit-pto-ir %s 2>&1 | FileCheck %s
 
-// The empty-region (0x0) marker accept in verifyTRowExpandReduceLikeOp must not
-// short-circuit the arch/operand-form invariants. A5 has no tmp form for these
-// ops, so an A5 trowexpandmax with a tmp operand must still be rejected even
-// when dst valid_shape is 0x0 -- otherwise it would lower to the A2/A3-only
-// 4-operand TROWEXPANDMAX call. The invariant is enforced before the marker
-// accept, so this fails as it should.
+// A5 keeps the tmp-taking ABI form for TROWEXPANDMAX. Even with the 0x0
+// no-op marker, PTO IR should accept a placeholder tmp instead of rejecting
+// the form as A2/A3-only.
 
 module attributes {"pto.device-spec" = "Ascend910B3"} {
-  func.func @issue708_reject_a5_tmp_zero_valid_trowexpandmax() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @issue708_accept_a5_tmp_zero_valid_trowexpandmax() attributes {pto.kernel_kind = #pto.kernel_kind<vector>} {
     %src0 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>
     %src1 = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=1, v_row=0, v_col=0, blayout=col_major, slayout=none_box, fractal=512, pad=0>
     %tmp = pto.alloc_tile : !pto.tile_buf<loc=vec, dtype=f32, rows=16, cols=16, v_row=0, v_col=0, blayout=row_major, slayout=none_box, fractal=512, pad=0>
@@ -27,4 +24,5 @@ module attributes {"pto.device-spec" = "Ascend910B3"} {
   }
 }
 
-// CHECK: error: 'pto.trowexpandmax' op expects A5 form to omit tmp
+// CHECK-LABEL: func.func @issue708_accept_a5_tmp_zero_valid_trowexpandmax
+// CHECK: pto.trowexpandmax
