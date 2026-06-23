@@ -1339,6 +1339,10 @@ PY
       cpp="${out_subdir}/${base}.cpp"
       if [[ "$A" == "Qwen3DecodeA3" || "$A" == "Qwen3DecodeA5" || "$A" == "DeepseekV4DecodeA3" || "$A" == "DeepseekV4DecodeA5" ]]; then
         cpp="${out_subdir}/${base}-pto.cpp"
+      elif [[ "$base" == "tquant_mx" ]]; then
+        # Board validation currently discovers generated sample kernels via
+        # the historical `*-pto.cpp` naming convention.
+        cpp="${out_subdir}/${base}-pto.cpp"
       fi
       local sample_use_ptobc_roundtrip="$use_ptobc_roundtrip"
 
