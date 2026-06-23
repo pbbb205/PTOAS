@@ -19,6 +19,7 @@ Provides:
 
 import os
 import sys
+import zlib
 import numpy as np
 
 
@@ -74,10 +75,10 @@ def validate_cases(cases):
 def setup_case_rng(case):
     """Set a per-case deterministic random seed.
 
-    Using hash(name) ensures that adding/reordering cases does not change
-    the random data of existing cases.
+    Use a stable checksum instead of Python's process-randomized hash() so
+    repeated runs generate identical data across subprocesses.
     """
-    np.random.seed(hash(case["name"]) & 0xFFFFFFFF)
+    np.random.seed(zlib.crc32(case["name"].encode("utf-8")) & 0xFFFFFFFF)
 
 
 def save_case_data(case_name, data_dict):

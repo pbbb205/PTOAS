@@ -49,10 +49,10 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
       : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64, i64, i64
     pto.mte_l1_l0b %l1_b_data, %l0b, %c64_i64, %c16_i64, %c0_i64, %c0_i64 {transpose = true}
       : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0b>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c16_i64, %c64_i64
-      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64
-    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c64_i64, %c16_i64
-      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0b>, i64, i64
+    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c16_i64, %c64_i64, %c0_i64, %c0_i64
+      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64, i64, i64
+    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c64_i64, %c16_i64, %c0_i64, %c0_i64
+      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0b>, i64, i64, i64, i64
     pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
     pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
     pto.mad_mx %l0a, %l0b, %l0c, %c16_i64, %c16_i64, %c64_i64 unit_flag(check_only) disable_gemv sat

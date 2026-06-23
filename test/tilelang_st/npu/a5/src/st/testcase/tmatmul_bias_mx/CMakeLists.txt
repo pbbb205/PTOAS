@@ -6,4 +6,4 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-pto_tilelang_cube_st(tgemv_mx PTO_LEVEL level3)
+pto_tilelang_cube_st(tmatmul_bias_mx PTO_LEVEL level3)

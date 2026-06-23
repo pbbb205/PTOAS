@@ -1,14 +1,4 @@
-// Copyright (c) 2026 Huawei Technologies Co., Ltd.
-// Licensed under the CANN Open Software License Agreement Version 2.0.
-
-// VPTO-style MX matmul kernels using castptr + mad_mx / mad_mx_bias.
-// Each kernel computes: C[M,N] = A[M,K] * scale_A x B[K,N] * scale_B
-// with optional bias: C[M,N] += bias[N]
-// Data loaded from GM to L1, then L1 to L0A/L0B + L0A_MX/L0B_MX for scales,
-// then mad_mx compute, then L0C to GM storeback.
-
 module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cube>} {
-
   // =========================================================================
   // fp8_e5m2_128x64x64  (M=128, K=64, N=64)
   // =========================================================================
@@ -20,34 +10,45 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
       %c_gm: !pto.ptr<f32, gm>) attributes {pto.aicore} {
     %c0_i64  = arith.constant 0    : i64
     %c1_i64  = arith.constant 1    : i64
-    %c16_i64 = arith.constant 16   : i64
     %c64_i64 = arith.constant 64   : i64
     %c128_i64 = arith.constant 128 : i64
-    %c1024_i64 = arith.constant 1024 : i64
+    %c256_i64 = arith.constant 256 : i64
+    %c4096_i64 = arith.constant 4096 : i64
     %c8192_i64 = arith.constant 8192 : i64
     %c8448_i64 = arith.constant 8448 : i64
     %c12544_i64 = arith.constant 12544 : i64
-    %c8_i64 = arith.constant 8 : i64
-    %c4_i64 = arith.constant 4 : i64
-    %c2_i64 = arith.constant 2 : i64
-    %false = arith.constant false
 
     %l1_a_data  = pto.castptr %c0_i64    : i64 -> !pto.ptr<f8E5M2, l1>
     %l1_a_scale = pto.castptr %c8192_i64  : i64 -> !pto.ptr<f8E5M2, l1>
     %l1_b_data  = pto.castptr %c8448_i64  : i64 -> !pto.ptr<f8E5M2, l1>
     %l1_b_scale = pto.castptr %c12544_i64 : i64 -> !pto.ptr<f8E5M2, l1>
-    %l0a = pto.castptr %c0_i64 : i64 -> !pto.ptr<f8E5M2, l0a>
-    %l0b = pto.castptr %c0_i64 : i64 -> !pto.ptr<f8E5M2, l0b>
-    %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, l0c>
+    %lhs_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=left, dtype=f8E5M2, rows=128, cols=64, v_row=128, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %a_scale_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=scaling, dtype=f16, rows=128, cols=2, v_row=128, v_col=2, blayout=row_major, slayout=row_major, fractal=32, pad=0>
+    %rhs_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=right, dtype=f8E5M2, rows=64, cols=64, v_row=64, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %b_scale_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=scaling, dtype=f16, rows=2, cols=64, v_row=2, v_col=64, blayout=col_major, slayout=col_major, fractal=32, pad=0>
+    %dst_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=acc, dtype=f32, rows=128, cols=64, v_row=128, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %l0a = pto.tile_buf_addr %lhs_tile
+      : !pto.tile_buf<loc=left, dtype=f8E5M2, rows=128, cols=64, v_row=128, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+     -> !pto.ptr<f8E5M2, l0a>
+    %l0b = pto.tile_buf_addr %rhs_tile
+      : !pto.tile_buf<loc=right, dtype=f8E5M2, rows=64, cols=64, v_row=64, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+     -> !pto.ptr<f8E5M2, l0b>
+    %l0c = pto.tile_buf_addr %dst_tile
+      : !pto.tile_buf<loc=acc, dtype=f32, rows=128, cols=64, v_row=128, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+     -> !pto.ptr<f32, l0c>
 
-    // Use mte_gm_l1 for both A and B matrices (same as FP4)
-    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c8_i64, %c0_i64, %c0_i64)
+    pto.mte_gm_l1 %a_gm, %l1_a_data, %c8192_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
       : !pto.ptr<f8E5M2, gm>, !pto.ptr<f8E5M2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
+    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c256_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
       : !pto.ptr<f8E5M2, gm>, !pto.ptr<f8E5M2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
+    pto.mte_gm_l1 %b_gm, %l1_b_data, %c4096_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
       : !pto.ptr<f8E5M2, gm>, !pto.ptr<f8E5M2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c2_i64, %c0_i64, %c0_i64)
+    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c128_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
       : !pto.ptr<f8E5M2, gm>, !pto.ptr<f8E5M2, l1>, i64, i64, i64, i64
 
     pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
@@ -57,16 +58,20 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
       : !pto.ptr<f8E5M2, l1>, !pto.ptr<f8E5M2, l0a>, i64, i64, i64, i64
     pto.mte_l1_l0b %l1_b_data, %l0b, %c64_i64, %c64_i64, %c0_i64, %c0_i64 {transpose = true}
       : !pto.ptr<f8E5M2, l1>, !pto.ptr<f8E5M2, l0b>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c128_i64, %c64_i64
-      : !pto.ptr<f8E5M2, l1>, !pto.ptr<f8E5M2, l0a>, i64, i64
-    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c64_i64, %c64_i64
-      : !pto.ptr<f8E5M2, l1>, !pto.ptr<f8E5M2, l0b>, i64, i64
+    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c128_i64, %c64_i64, %c0_i64, %c0_i64
+      : !pto.ptr<f8E5M2, l1>, !pto.ptr<f8E5M2, l0a>, i64, i64, i64, i64
+    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c64_i64, %c64_i64, %c0_i64, %c0_i64
+      : !pto.ptr<f8E5M2, l1>, !pto.ptr<f8E5M2, l0b>, i64, i64, i64, i64
 
     pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
     pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
 
-    pto.mad_mx %l0a, %l0b, %l0c, %c128_i64, %c64_i64, %c64_i64 unit_flag(check_only) disable_gemv sat
-      : !pto.ptr<f8E5M2, l0a>, !pto.ptr<f8E5M2, l0b>, !pto.ptr<f32, l0c>, i64, i64, i64
+    pto.tmatmul.mx ins(%lhs_tile, %a_scale_tile, %rhs_tile, %b_scale_tile :
+                       !pto.tile_buf<loc=left, dtype=f8E5M2, rows=128, cols=64, v_row=128, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>,
+                       !pto.tile_buf<loc=scaling, dtype=f16, rows=128, cols=2, v_row=128, v_col=2, blayout=row_major, slayout=row_major, fractal=32, pad=0>,
+                       !pto.tile_buf<loc=right, dtype=f8E5M2, rows=64, cols=64, v_row=64, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>,
+                       !pto.tile_buf<loc=scaling, dtype=f16, rows=2, cols=64, v_row=2, v_col=64, blayout=col_major, slayout=col_major, fractal=32, pad=0>)
+                   outs(%dst_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=128, cols=64, v_row=128, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
 
     pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
     pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
@@ -77,7 +82,6 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
     pto.barrier #pto.pipe<PIPE_ALL>
     return
   }
-
   // =========================================================================
   // fp8_e4m3_127x72x64  (M=127, K=72->128, N=64)
   // =========================================================================
@@ -105,19 +109,35 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
     %l1_a_scale = pto.castptr %c16384_i64  : i64 -> !pto.ptr<f8E4M3FN, l1>
     %l1_b_data  = pto.castptr %c16896_i64  : i64 -> !pto.ptr<f8E4M3FN, l1>
     %l1_b_scale = pto.castptr %c25088_i64  : i64 -> !pto.ptr<f8E4M3FN, l1>
-    %l0a = pto.castptr %c0_i64 : i64 -> !pto.ptr<f8E4M3FN, l0a>
-    %l0b = pto.castptr %c0_i64 : i64 -> !pto.ptr<f8E4M3FN, l0b>
-    %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, l0c>
+    %lhs_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=128, cols=128, v_row=127, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %a_scale_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=scaling, dtype=f16, rows=128, cols=4, v_row=127, v_col=4, blayout=row_major, slayout=row_major, fractal=32, pad=0>
+    %rhs_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=right, dtype=f8E4M3FN, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %b_scale_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=scaling, dtype=f16, rows=4, cols=64, v_row=4, v_col=64, blayout=col_major, slayout=col_major, fractal=32, pad=0>
+    %dst_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=acc, dtype=f32, rows=128, cols=64, v_row=127, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %l0a = pto.tile_buf_addr %lhs_tile
+      : !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=128, cols=128, v_row=127, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+     -> !pto.ptr<f8E4M3FN, l0a>
+    %l0b = pto.tile_buf_addr %rhs_tile
+      : !pto.tile_buf<loc=right, dtype=f8E4M3FN, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+     -> !pto.ptr<f8E4M3FN, l0b>
+    %l0c = pto.tile_buf_addr %dst_tile
+      : !pto.tile_buf<loc=acc, dtype=f32, rows=128, cols=64, v_row=127, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+     -> !pto.ptr<f32, l0c>
 
     // Use mte_gm_l1 for both A and B (same as FP4)
-    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c16_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c8_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c8_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
+    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c16_i64, %c1024_i64, %c1024_i64)
+      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64, loop i64, i64, i64
+    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c8_i64, %c64_i64, %c64_i64)
+      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64, loop i64, i64, i64
+    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c8_i64, %c1024_i64, %c1024_i64)
+      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64, loop i64, i64, i64
+    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c4_i64, %c64_i64, %c64_i64)
+      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64, loop i64, i64, i64
 
     pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
     pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
@@ -126,27 +146,30 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
       : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64, i64, i64
     pto.mte_l1_l0b %l1_b_data, %l0b, %c128_i64, %c64_i64, %c0_i64, %c0_i64 {transpose = true}
       : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0b>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c127_i64, %c128_i64
-      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64
-    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c128_i64, %c64_i64
-      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0b>, i64, i64
+    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c127_i64, %c128_i64, %c0_i64, %c0_i64
+      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64, i64, i64
+    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c128_i64, %c64_i64, %c0_i64, %c0_i64
+      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0b>, i64, i64, i64, i64
 
     pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
     pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
 
-    pto.mad_mx %l0a, %l0b, %l0c, %c127_i64, %c64_i64, %c128_i64 unit_flag(check_only) disable_gemv sat
-      : !pto.ptr<f8E4M3FN, l0a>, !pto.ptr<f8E4M3FN, l0b>, !pto.ptr<f32, l0c>, i64, i64, i64
+    pto.tmatmul.mx ins(%lhs_tile, %a_scale_tile, %rhs_tile, %b_scale_tile :
+                       !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=128, cols=128, v_row=127, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>,
+                       !pto.tile_buf<loc=scaling, dtype=f16, rows=128, cols=4, v_row=127, v_col=4, blayout=row_major, slayout=row_major, fractal=32, pad=0>,
+                       !pto.tile_buf<loc=right, dtype=f8E4M3FN, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>,
+                       !pto.tile_buf<loc=scaling, dtype=f16, rows=4, cols=64, v_row=4, v_col=64, blayout=col_major, slayout=col_major, fractal=32, pad=0>)
+                   outs(%dst_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=128, cols=64, v_row=127, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
 
     pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
     pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
 
-    pto.mte_l0c_gm %l0c, %c_gm, %c127_i64, %c64_i64, %c127_i64, %c64_i64, %c0_i64, %c0_i64, nz2nd
+    pto.mte_l0c_gm %l0c, %c_gm, %c128_i64, %c64_i64, %c128_i64, %c64_i64, %c0_i64, %c0_i64, nz2nd
       : !pto.ptr<f32, l0c>, !pto.ptr<f32, gm>, i64, i64, i64, i64, i64, i64
 
     pto.barrier #pto.pipe<PIPE_ALL>
     return
   }
-
   // =========================================================================
   // fp8_e4m3_e5m2_128x110x63  (M=128, K=110->128, N=63)
   // =========================================================================
@@ -173,18 +196,34 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
     %l1_a_scale = pto.castptr %c16384_i64  : i64 -> !pto.ptr<f8E4M3FN, l1>
     %l1_b_data  = pto.castptr %c16896_i64  : i64 -> !pto.ptr<f8E5M2, l1>
     %l1_b_scale = pto.castptr %c25088_i64  : i64 -> !pto.ptr<f8E5M2, l1>
-    %l0a = pto.castptr %c0_i64 : i64 -> !pto.ptr<f8E4M3FN, l0a>
-    %l0b = pto.castptr %c0_i64 : i64 -> !pto.ptr<f8E5M2, l0b>
-    %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, l0c>
+    %lhs_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %a_scale_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=scaling, dtype=f16, rows=128, cols=4, v_row=128, v_col=4, blayout=row_major, slayout=row_major, fractal=32, pad=0>
+    %rhs_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=right, dtype=f8E5M2, rows=128, cols=64, v_row=128, v_col=63, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %b_scale_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=scaling, dtype=f16, rows=4, cols=64, v_row=4, v_col=63, blayout=col_major, slayout=col_major, fractal=32, pad=0>
+    %dst_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=acc, dtype=f32, rows=128, cols=64, v_row=128, v_col=63, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %l0a = pto.tile_buf_addr %lhs_tile
+      : !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+     -> !pto.ptr<f8E4M3FN, l0a>
+    %l0b = pto.tile_buf_addr %rhs_tile
+      : !pto.tile_buf<loc=right, dtype=f8E5M2, rows=128, cols=64, v_row=128, v_col=63, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+     -> !pto.ptr<f8E5M2, l0b>
+    %l0c = pto.tile_buf_addr %dst_tile
+      : !pto.tile_buf<loc=acc, dtype=f32, rows=128, cols=64, v_row=128, v_col=63, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+     -> !pto.ptr<f32, l0c>
 
-    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c16_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c8_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c8_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E5M2, gm>, !pto.ptr<f8E5M2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E5M2, gm>, !pto.ptr<f8E5M2, l1>, i64, i64, i64, i64
+    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c16_i64, %c1024_i64, %c1024_i64)
+      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64, loop i64, i64, i64
+    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c8_i64, %c64_i64, %c64_i64)
+      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64, loop i64, i64, i64
+    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c8_i64, %c1024_i64, %c1024_i64)
+      : !pto.ptr<f8E5M2, gm>, !pto.ptr<f8E5M2, l1>, i64, i64, i64, i64, loop i64, i64, i64
+    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c4_i64, %c64_i64, %c64_i64)
+      : !pto.ptr<f8E5M2, gm>, !pto.ptr<f8E5M2, l1>, i64, i64, i64, i64, loop i64, i64, i64
 
     pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
     pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
@@ -193,27 +232,30 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
       : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64, i64, i64
     pto.mte_l1_l0b %l1_b_data, %l0b, %c128_i64, %c63_i64, %c0_i64, %c0_i64 {transpose = true}
       : !pto.ptr<f8E5M2, l1>, !pto.ptr<f8E5M2, l0b>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c128_i64, %c128_i64
-      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64
-    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c128_i64, %c63_i64
-      : !pto.ptr<f8E5M2, l1>, !pto.ptr<f8E5M2, l0b>, i64, i64
+    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c128_i64, %c128_i64, %c0_i64, %c0_i64
+      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64, i64, i64
+    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c128_i64, %c63_i64, %c0_i64, %c0_i64
+      : !pto.ptr<f8E5M2, l1>, !pto.ptr<f8E5M2, l0b>, i64, i64, i64, i64
 
     pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
     pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
 
-    pto.mad_mx %l0a, %l0b, %l0c, %c128_i64, %c63_i64, %c128_i64 unit_flag(check_only) disable_gemv sat
-      : !pto.ptr<f8E4M3FN, l0a>, !pto.ptr<f8E5M2, l0b>, !pto.ptr<f32, l0c>, i64, i64, i64
+    pto.tmatmul.mx ins(%lhs_tile, %a_scale_tile, %rhs_tile, %b_scale_tile :
+                       !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>,
+                       !pto.tile_buf<loc=scaling, dtype=f16, rows=128, cols=4, v_row=128, v_col=4, blayout=row_major, slayout=row_major, fractal=32, pad=0>,
+                       !pto.tile_buf<loc=right, dtype=f8E5M2, rows=128, cols=64, v_row=128, v_col=63, blayout=row_major, slayout=col_major, fractal=512, pad=0>,
+                       !pto.tile_buf<loc=scaling, dtype=f16, rows=4, cols=64, v_row=4, v_col=63, blayout=col_major, slayout=col_major, fractal=32, pad=0>)
+                   outs(%dst_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=128, cols=64, v_row=128, v_col=63, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
 
     pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
     pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
 
-    pto.mte_l0c_gm %l0c, %c_gm, %c128_i64, %c63_i64, %c128_i64, %c63_i64, %c0_i64, %c0_i64, nz2nd
+    pto.mte_l0c_gm %l0c, %c_gm, %c128_i64, %c64_i64, %c128_i64, %c64_i64, %c0_i64, %c0_i64, nz2nd
       : !pto.ptr<f32, l0c>, !pto.ptr<f32, gm>, i64, i64, i64, i64, i64, i64
 
     pto.barrier #pto.pipe<PIPE_ALL>
     return
   }
-
   // =========================================================================
   // fp4_e2m1_128x64x64  (M=128, K=64, N=64, is_fp4)
   // =========================================================================
@@ -238,18 +280,34 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
     %l1_a_scale = pto.castptr %c4096_i64  : i64 -> !pto.ptr<!pto.f4E2M1x2, l1>
     %l1_b_data  = pto.castptr %c4352_i64  : i64 -> !pto.ptr<!pto.f4E2M1x2, l1>
     %l1_b_scale = pto.castptr %c6400_i64  : i64 -> !pto.ptr<!pto.f4E2M1x2, l1>
-    %l0a = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E2M1x2, l0a>
-    %l0b = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E2M1x2, l0b>
-    %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, l0c>
+    %lhs_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=left, dtype=!pto.f4E2M1x2, rows=128, cols=64, v_row=128, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %a_scale_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=scaling, dtype=f16, rows=128, cols=2, v_row=128, v_col=2, blayout=row_major, slayout=row_major, fractal=32, pad=0>
+    %rhs_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=right, dtype=!pto.f4E2M1x2, rows=64, cols=64, v_row=64, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %b_scale_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=scaling, dtype=f16, rows=2, cols=64, v_row=2, v_col=64, blayout=col_major, slayout=col_major, fractal=32, pad=0>
+    %dst_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=acc, dtype=f32, rows=128, cols=64, v_row=128, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %l0a = pto.tile_buf_addr %lhs_tile
+      : !pto.tile_buf<loc=left, dtype=!pto.f4E2M1x2, rows=128, cols=64, v_row=128, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+     -> !pto.ptr<!pto.f4E2M1x2, l0a>
+    %l0b = pto.tile_buf_addr %rhs_tile
+      : !pto.tile_buf<loc=right, dtype=!pto.f4E2M1x2, rows=64, cols=64, v_row=64, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+     -> !pto.ptr<!pto.f4E2M1x2, l0b>
+    %l0c = pto.tile_buf_addr %dst_tile
+      : !pto.tile_buf<loc=acc, dtype=f32, rows=128, cols=64, v_row=128, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+     -> !pto.ptr<f32, l0c>
 
-    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c2_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c2_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64
+    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c4_i64, %c1024_i64, %c1024_i64)
+      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64, loop i64, i64, i64
+    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c4_i64, %c64_i64, %c64_i64)
+      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64, loop i64, i64, i64
+    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c2_i64, %c1024_i64, %c1024_i64)
+      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64, loop i64, i64, i64
+    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c2_i64, %c64_i64, %c64_i64)
+      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64, loop i64, i64, i64
 
     pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
     pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
@@ -258,16 +316,20 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
       : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0a>, i64, i64, i64, i64
     pto.mte_l1_l0b %l1_b_data, %l0b, %c64_i64, %c64_i64, %c0_i64, %c0_i64 {transpose = true}
       : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0b>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c128_i64, %c64_i64
-      : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0a>, i64, i64
-    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c64_i64, %c64_i64
-      : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0b>, i64, i64
+    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c128_i64, %c64_i64, %c0_i64, %c0_i64
+      : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0a>, i64, i64, i64, i64
+    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c64_i64, %c64_i64, %c0_i64, %c0_i64
+      : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0b>, i64, i64, i64, i64
 
     pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
     pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
 
-    pto.mad_mx %l0a, %l0b, %l0c, %c128_i64, %c64_i64, %c64_i64 unit_flag(check_only) disable_gemv sat
-      : !pto.ptr<!pto.f4E2M1x2, l0a>, !pto.ptr<!pto.f4E2M1x2, l0b>, !pto.ptr<f32, l0c>, i64, i64, i64
+    pto.tmatmul.mx ins(%lhs_tile, %a_scale_tile, %rhs_tile, %b_scale_tile :
+                       !pto.tile_buf<loc=left, dtype=!pto.f4E2M1x2, rows=128, cols=64, v_row=128, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>,
+                       !pto.tile_buf<loc=scaling, dtype=f16, rows=128, cols=2, v_row=128, v_col=2, blayout=row_major, slayout=row_major, fractal=32, pad=0>,
+                       !pto.tile_buf<loc=right, dtype=!pto.f4E2M1x2, rows=64, cols=64, v_row=64, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>,
+                       !pto.tile_buf<loc=scaling, dtype=f16, rows=2, cols=64, v_row=2, v_col=64, blayout=col_major, slayout=col_major, fractal=32, pad=0>)
+                   outs(%dst_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=128, cols=64, v_row=128, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
 
     pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
     pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
@@ -278,7 +340,6 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
     pto.barrier #pto.pipe<PIPE_ALL>
     return
   }
-
   // =========================================================================
   // fp4_e1m2_e2m1_117x64x60  (M=117, K=64, N=60, is_fp4)
   // =========================================================================
@@ -305,18 +366,34 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
     %l1_a_scale = pto.castptr %c4096_i64  : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
     %l1_b_data  = pto.castptr %c4352_i64  : i64 -> !pto.ptr<!pto.f4E2M1x2, l1>
     %l1_b_scale = pto.castptr %c6400_i64  : i64 -> !pto.ptr<!pto.f4E2M1x2, l1>
-    %l0a = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E1M2x2, l0a>
-    %l0b = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E2M1x2, l0b>
-    %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, l0c>
+    %lhs_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=left, dtype=!pto.f4E1M2x2, rows=128, cols=64, v_row=117, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %a_scale_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=scaling, dtype=f16, rows=128, cols=2, v_row=117, v_col=2, blayout=row_major, slayout=row_major, fractal=32, pad=0>
+    %rhs_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=right, dtype=!pto.f4E2M1x2, rows=64, cols=64, v_row=64, v_col=60, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %b_scale_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=scaling, dtype=f16, rows=2, cols=64, v_row=2, v_col=60, blayout=col_major, slayout=col_major, fractal=32, pad=0>
+    %dst_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=acc, dtype=f32, rows=128, cols=64, v_row=117, v_col=60, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %l0a = pto.tile_buf_addr %lhs_tile
+      : !pto.tile_buf<loc=left, dtype=!pto.f4E1M2x2, rows=128, cols=64, v_row=117, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+     -> !pto.ptr<!pto.f4E1M2x2, l0a>
+    %l0b = pto.tile_buf_addr %rhs_tile
+      : !pto.tile_buf<loc=right, dtype=!pto.f4E2M1x2, rows=64, cols=64, v_row=64, v_col=60, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+     -> !pto.ptr<!pto.f4E2M1x2, l0b>
+    %l0c = pto.tile_buf_addr %dst_tile
+      : !pto.tile_buf<loc=acc, dtype=f32, rows=128, cols=64, v_row=117, v_col=60, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+     -> !pto.ptr<f32, l0c>
 
-    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c2_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c2_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64
+    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c4_i64, %c1024_i64, %c1024_i64)
+      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64, loop i64, i64, i64
+    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c4_i64, %c64_i64, %c64_i64)
+      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64, loop i64, i64, i64
+    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c2_i64, %c1024_i64, %c1024_i64)
+      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64, loop i64, i64, i64
+    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c2_i64, %c64_i64, %c64_i64)
+      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64, loop i64, i64, i64
 
     pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
     pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
@@ -325,27 +402,30 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
       : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0a>, i64, i64, i64, i64
     pto.mte_l1_l0b %l1_b_data, %l0b, %c64_i64, %c60_i64, %c0_i64, %c0_i64 {transpose = true}
       : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0b>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c117_i64, %c64_i64
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0a>, i64, i64
-    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c64_i64, %c60_i64
-      : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0b>, i64, i64
+    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c117_i64, %c64_i64, %c0_i64, %c0_i64
+      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0a>, i64, i64, i64, i64
+    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c64_i64, %c60_i64, %c0_i64, %c0_i64
+      : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0b>, i64, i64, i64, i64
 
     pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
     pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
 
-    pto.mad_mx %l0a, %l0b, %l0c, %c117_i64, %c60_i64, %c64_i64 unit_flag(check_only) disable_gemv sat
-      : !pto.ptr<!pto.f4E1M2x2, l0a>, !pto.ptr<!pto.f4E2M1x2, l0b>, !pto.ptr<f32, l0c>, i64, i64, i64
+    pto.tmatmul.mx ins(%lhs_tile, %a_scale_tile, %rhs_tile, %b_scale_tile :
+                       !pto.tile_buf<loc=left, dtype=!pto.f4E1M2x2, rows=128, cols=64, v_row=117, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>,
+                       !pto.tile_buf<loc=scaling, dtype=f16, rows=128, cols=2, v_row=117, v_col=2, blayout=row_major, slayout=row_major, fractal=32, pad=0>,
+                       !pto.tile_buf<loc=right, dtype=!pto.f4E2M1x2, rows=64, cols=64, v_row=64, v_col=60, blayout=row_major, slayout=col_major, fractal=512, pad=0>,
+                       !pto.tile_buf<loc=scaling, dtype=f16, rows=2, cols=64, v_row=2, v_col=60, blayout=col_major, slayout=col_major, fractal=32, pad=0>)
+                   outs(%dst_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=128, cols=64, v_row=117, v_col=60, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
 
     pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
     pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
 
-    pto.mte_l0c_gm %l0c, %c_gm, %c117_i64, %c60_i64, %c117_i64, %c60_i64, %c0_i64, %c0_i64, nz2nd
+    pto.mte_l0c_gm %l0c, %c_gm, %c128_i64, %c64_i64, %c128_i64, %c64_i64, %c0_i64, %c0_i64, nz2nd
       : !pto.ptr<f32, l0c>, !pto.ptr<f32, gm>, i64, i64, i64, i64, i64, i64
 
     pto.barrier #pto.pipe<PIPE_ALL>
     return
   }
-
   // =========================================================================
   // fp4_e2m1_e1m2_128x118x64  (M=128, K=118->128, N=64, is_fp4)
   // =========================================================================
@@ -357,32 +437,58 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
       %c_gm: !pto.ptr<f32, gm>) attributes {pto.aicore} {
     %c0_i64  = arith.constant 0    : i64
     %c1_i64  = arith.constant 1    : i64
+    %c32_i64 = arith.constant 32   : i64
     %c64_i64 = arith.constant 64   : i64
     %c128_i64 = arith.constant 128 : i64
-    %c1024_i64 = arith.constant 1024 : i64
     %c8192_i64 = arith.constant 8192 : i64
-    %c8448_i64 = arith.constant 8448 : i64
-    %c12544_i64 = arith.constant 12544 : i64
+    %c8704_i64 = arith.constant 8704 : i64
+    %c12800_i64 = arith.constant 12800 : i64
     %c8_i64 = arith.constant 8 : i64
     %c4_i64 = arith.constant 4 : i64
-    %c2_i64 = arith.constant 2 : i64
+    %false = arith.constant false
 
     %l1_a_data  = pto.castptr %c0_i64    : i64 -> !pto.ptr<!pto.f4E2M1x2, l1>
     %l1_a_scale = pto.castptr %c8192_i64  : i64 -> !pto.ptr<!pto.f4E2M1x2, l1>
-    %l1_b_data  = pto.castptr %c8448_i64  : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l1_b_scale = pto.castptr %c12544_i64 : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l0a = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E2M1x2, l0a>
-    %l0b = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E1M2x2, l0b>
-    %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, l0c>
+    %l1_b_data  = pto.castptr %c8704_i64  : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
+    %l1_b_scale = pto.castptr %c12800_i64 : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
+    %lhs_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=left, dtype=!pto.f4E2M1x2, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %a_scale_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=scaling, dtype=f16, rows=128, cols=4, v_row=128, v_col=4, blayout=row_major, slayout=row_major, fractal=32, pad=0>
+    %rhs_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=right, dtype=!pto.f4E1M2x2, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %b_scale_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=scaling, dtype=f16, rows=4, cols=64, v_row=4, v_col=64, blayout=col_major, slayout=col_major, fractal=32, pad=0>
+    %dst_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=acc, dtype=f32, rows=128, cols=64, v_row=128, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %l0a = pto.tile_buf_addr %lhs_tile
+      : !pto.tile_buf<loc=left, dtype=!pto.f4E2M1x2, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+     -> !pto.ptr<!pto.f4E2M1x2, l0a>
+    %l0b = pto.tile_buf_addr %rhs_tile
+      : !pto.tile_buf<loc=right, dtype=!pto.f4E1M2x2, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+     -> !pto.ptr<!pto.f4E1M2x2, l0b>
+    %l0c = pto.tile_buf_addr %dst_tile
+      : !pto.tile_buf<loc=acc, dtype=f32, rows=128, cols=64, v_row=128, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+     -> !pto.ptr<f32, l0c>
 
-    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c8_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c2_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
+    pto.mte_gm_l1_frac %a_gm, %l1_a_data, nd2nz,
+      shape(%c128_i64, %c64_i64), src_layout(%c64_i64),
+      dst_group(%c1_i64, %c1_i64, %c128_i64, %c0_i64),
+      ctrl(%c0_i64, %false)
+      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, nd2nz,
+        shape i64, i64, src_layout(i64),
+        dst_group i64, i64, i64, i64, ctrl i64, i1
+    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c8_i64, %c64_i64, %c64_i64)
+      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64, loop i64, i64, i64
+    pto.mte_gm_l1_frac %b_gm, %l1_b_data, nd2nz,
+      shape(%c128_i64, %c32_i64), src_layout(%c32_i64),
+      dst_group(%c1_i64, %c1_i64, %c128_i64, %c0_i64),
+      ctrl(%c0_i64, %false)
+      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, nd2nz,
+        shape i64, i64, src_layout(i64),
+        dst_group i64, i64, i64, i64, ctrl i64, i1
+    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c4_i64, %c64_i64, %c64_i64)
+      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64, loop i64, i64, i64
 
     pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
     pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
@@ -391,16 +497,20 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
       : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0a>, i64, i64, i64, i64
     pto.mte_l1_l0b %l1_b_data, %l0b, %c128_i64, %c64_i64, %c0_i64, %c0_i64 {transpose = true}
       : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0b>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c128_i64, %c128_i64
-      : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0a>, i64, i64
-    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c128_i64, %c64_i64
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0b>, i64, i64
+    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c128_i64, %c128_i64, %c0_i64, %c0_i64
+      : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0a>, i64, i64, i64, i64
+    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c128_i64, %c64_i64, %c0_i64, %c0_i64
+      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0b>, i64, i64, i64, i64
 
     pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
     pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
 
-    pto.mad_mx %l0a, %l0b, %l0c, %c128_i64, %c64_i64, %c128_i64 unit_flag(check_only) disable_gemv sat
-      : !pto.ptr<!pto.f4E2M1x2, l0a>, !pto.ptr<!pto.f4E1M2x2, l0b>, !pto.ptr<f32, l0c>, i64, i64, i64
+    pto.tmatmul.mx ins(%lhs_tile, %a_scale_tile, %rhs_tile, %b_scale_tile :
+                       !pto.tile_buf<loc=left, dtype=!pto.f4E2M1x2, rows=128, cols=128, v_row=128, v_col=128, blayout=col_major, slayout=row_major, fractal=512, pad=0>,
+                       !pto.tile_buf<loc=scaling, dtype=f16, rows=128, cols=4, v_row=128, v_col=4, blayout=row_major, slayout=row_major, fractal=32, pad=0>,
+                       !pto.tile_buf<loc=right, dtype=!pto.f4E1M2x2, rows=128, cols=64, v_row=128, v_col=64, blayout=row_major, slayout=col_major, fractal=512, pad=0>,
+                       !pto.tile_buf<loc=scaling, dtype=f16, rows=4, cols=64, v_row=4, v_col=64, blayout=col_major, slayout=col_major, fractal=32, pad=0>)
+                   outs(%dst_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=128, cols=64, v_row=128, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
 
     pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
     pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
@@ -411,7 +521,6 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
     pto.barrier #pto.pipe<PIPE_ALL>
     return
   }
-
   // =========================================================================
   // fp4_e2m1_e1m2_115x64x30  (M=115, K=64, N=30, is_fp4)
   // =========================================================================
@@ -430,26 +539,42 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
     %c1024_i64 = arith.constant 1024 : i64
     %c4096_i64 = arith.constant 4096 : i64
     %c4352_i64 = arith.constant 4352 : i64
-    %c5376_i64 = arith.constant 5376 : i64
+    %c6400_i64 = arith.constant 6400 : i64
     %c4_i64 = arith.constant 4 : i64
     %c2_i64 = arith.constant 2 : i64
 
     %l1_a_data  = pto.castptr %c0_i64    : i64 -> !pto.ptr<!pto.f4E2M1x2, l1>
     %l1_a_scale = pto.castptr %c4096_i64  : i64 -> !pto.ptr<!pto.f4E2M1x2, l1>
     %l1_b_data  = pto.castptr %c4352_i64  : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l1_b_scale = pto.castptr %c5376_i64  : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l0a = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E2M1x2, l0a>
-    %l0b = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E1M2x2, l0b>
-    %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, l0c>
+    %l1_b_scale = pto.castptr %c6400_i64  : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
+    %lhs_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=left, dtype=!pto.f4E2M1x2, rows=128, cols=64, v_row=115, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %a_scale_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=scaling, dtype=f16, rows=128, cols=2, v_row=115, v_col=2, blayout=row_major, slayout=row_major, fractal=32, pad=0>
+    %rhs_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=right, dtype=!pto.f4E1M2x2, rows=64, cols=64, v_row=64, v_col=30, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %b_scale_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=scaling, dtype=f16, rows=2, cols=64, v_row=2, v_col=30, blayout=col_major, slayout=col_major, fractal=32, pad=0>
+    %dst_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=acc, dtype=f32, rows=128, cols=64, v_row=115, v_col=30, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %l0a = pto.tile_buf_addr %lhs_tile
+      : !pto.tile_buf<loc=left, dtype=!pto.f4E2M1x2, rows=128, cols=64, v_row=115, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+     -> !pto.ptr<!pto.f4E2M1x2, l0a>
+    %l0b = pto.tile_buf_addr %rhs_tile
+      : !pto.tile_buf<loc=right, dtype=!pto.f4E1M2x2, rows=64, cols=64, v_row=64, v_col=30, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+     -> !pto.ptr<!pto.f4E1M2x2, l0b>
+    %l0c = pto.tile_buf_addr %dst_tile
+      : !pto.tile_buf<loc=acc, dtype=f32, rows=128, cols=64, v_row=115, v_col=30, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+     -> !pto.ptr<f32, l0c>
 
-    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c2_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
+    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c4_i64, %c1024_i64, %c1024_i64)
+      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64, loop i64, i64, i64
+    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c4_i64, %c64_i64, %c64_i64)
+      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64, loop i64, i64, i64
+    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c2_i64, %c1024_i64, %c1024_i64)
+      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64, loop i64, i64, i64
+    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c2_i64, %c64_i64, %c64_i64)
+      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64, loop i64, i64, i64
 
     pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
     pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
@@ -458,27 +583,30 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
       : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0a>, i64, i64, i64, i64
     pto.mte_l1_l0b %l1_b_data, %l0b, %c64_i64, %c30_i64, %c0_i64, %c0_i64 {transpose = true}
       : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0b>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c115_i64, %c64_i64
-      : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0a>, i64, i64
-    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c64_i64, %c30_i64
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0b>, i64, i64
+    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c115_i64, %c64_i64, %c0_i64, %c0_i64
+      : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0a>, i64, i64, i64, i64
+    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c64_i64, %c30_i64, %c0_i64, %c0_i64
+      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0b>, i64, i64, i64, i64
 
     pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
     pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
 
-    pto.mad_mx %l0a, %l0b, %l0c, %c115_i64, %c30_i64, %c64_i64 unit_flag(check_only) disable_gemv sat
-      : !pto.ptr<!pto.f4E2M1x2, l0a>, !pto.ptr<!pto.f4E1M2x2, l0b>, !pto.ptr<f32, l0c>, i64, i64, i64
+    pto.tmatmul.mx ins(%lhs_tile, %a_scale_tile, %rhs_tile, %b_scale_tile :
+                       !pto.tile_buf<loc=left, dtype=!pto.f4E2M1x2, rows=128, cols=64, v_row=115, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>,
+                       !pto.tile_buf<loc=scaling, dtype=f16, rows=128, cols=2, v_row=115, v_col=2, blayout=row_major, slayout=row_major, fractal=32, pad=0>,
+                       !pto.tile_buf<loc=right, dtype=!pto.f4E1M2x2, rows=64, cols=64, v_row=64, v_col=30, blayout=row_major, slayout=col_major, fractal=512, pad=0>,
+                       !pto.tile_buf<loc=scaling, dtype=f16, rows=2, cols=64, v_row=2, v_col=30, blayout=col_major, slayout=col_major, fractal=32, pad=0>)
+                   outs(%dst_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=128, cols=64, v_row=115, v_col=30, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
 
     pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
     pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
 
-    pto.mte_l0c_gm %l0c, %c_gm, %c115_i64, %c30_i64, %c115_i64, %c30_i64, %c0_i64, %c0_i64, nz2nd
+    pto.mte_l0c_gm %l0c, %c_gm, %c128_i64, %c64_i64, %c128_i64, %c64_i64, %c0_i64, %c0_i64, nz2nd
       : !pto.ptr<f32, l0c>, !pto.ptr<f32, gm>, i64, i64, i64, i64, i64, i64
 
     pto.barrier #pto.pipe<PIPE_ALL>
     return
   }
-
   // =========================================================================
   // fp8_e4m3_16x32x16  (M=16, K=32->64, N=16)
   // =========================================================================
@@ -491,26 +619,56 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
     %c0_i64  = arith.constant 0    : i64
     %c1_i64  = arith.constant 1    : i64
     %c16_i64 = arith.constant 16   : i64
+    %c32_i64 = arith.constant 32   : i64
     %c64_i64 = arith.constant 64   : i64
     %c1024_i64 = arith.constant 1024 : i64
     %c1088_i64 = arith.constant 1088 : i64
     %c2112_i64 = arith.constant 2112 : i64
+    %false = arith.constant false
 
     %l1_a_data  = pto.castptr %c0_i64    : i64 -> !pto.ptr<f8E4M3FN, l1>
     %l1_a_scale = pto.castptr %c1024_i64  : i64 -> !pto.ptr<f8E4M3FN, l1>
     %l1_b_data  = pto.castptr %c1088_i64  : i64 -> !pto.ptr<f8E4M3FN, l1>
     %l1_b_scale = pto.castptr %c2112_i64  : i64 -> !pto.ptr<f8E4M3FN, l1>
-    %l0a = pto.castptr %c0_i64 : i64 -> !pto.ptr<f8E4M3FN, l0a>
-    %l0b = pto.castptr %c0_i64 : i64 -> !pto.ptr<f8E4M3FN, l0b>
-    %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, l0c>
 
-    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
+    %lhs_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=16, cols=64, v_row=16, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %a_scale_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=scaling, dtype=f16, rows=16, cols=2, v_row=16, v_col=2, blayout=row_major, slayout=row_major, fractal=32, pad=0>
+    %rhs_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=right, dtype=f8E4M3FN, rows=64, cols=16, v_row=64, v_col=16, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %b_scale_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=scaling, dtype=f16, rows=2, cols=16, v_row=2, v_col=16, blayout=col_major, slayout=col_major, fractal=32, pad=0>
+    %dst_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+
+    %l0a = pto.tile_buf_addr %lhs_tile
+      : !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=16, cols=64, v_row=16, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+     -> !pto.ptr<f8E4M3FN, l0a>
+    %l0b = pto.tile_buf_addr %rhs_tile
+      : !pto.tile_buf<loc=right, dtype=f8E4M3FN, rows=64, cols=16, v_row=64, v_col=16, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+     -> !pto.ptr<f8E4M3FN, l0b>
+    %l0c = pto.tile_buf_addr %dst_tile
+      : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+     -> !pto.ptr<f32, l0c>
+
+    pto.mte_gm_l1_frac %a_gm, %l1_a_data, nd2nz,
+      shape(%c16_i64, %c64_i64), src_layout(%c64_i64),
+      dst_group(%c1_i64, %c1_i64, %c16_i64, %c0_i64),
+      ctrl(%c0_i64, %false)
+      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, nd2nz,
+        shape i64, i64, src_layout(i64),
+        dst_group i64, i64, i64, i64, ctrl i64, i1
+    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c32_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
       : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
+    pto.mte_gm_l1_frac %b_gm, %l1_b_data, nd2nz,
+      shape(%c64_i64, %c16_i64), src_layout(%c16_i64),
+      dst_group(%c1_i64, %c1_i64, %c64_i64, %c0_i64),
+      ctrl(%c0_i64, %false)
+      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, nd2nz,
+        shape i64, i64, src_layout(i64),
+        dst_group i64, i64, i64, i64, ctrl i64, i1
+    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c32_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
       : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
 
     pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
@@ -520,16 +678,20 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
       : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64, i64, i64
     pto.mte_l1_l0b %l1_b_data, %l0b, %c64_i64, %c16_i64, %c0_i64, %c0_i64 {transpose = true}
       : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0b>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c16_i64, %c64_i64
-      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64
-    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c64_i64, %c16_i64
-      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0b>, i64, i64
+    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c16_i64, %c64_i64, %c0_i64, %c0_i64
+      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64, i64, i64
+    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c64_i64, %c16_i64, %c0_i64, %c0_i64
+      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0b>, i64, i64, i64, i64
 
     pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
     pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
 
-    pto.mad_mx %l0a, %l0b, %l0c, %c16_i64, %c16_i64, %c64_i64 unit_flag(check_only) disable_gemv sat
-      : !pto.ptr<f8E4M3FN, l0a>, !pto.ptr<f8E4M3FN, l0b>, !pto.ptr<f32, l0c>, i64, i64, i64
+    pto.tmatmul.mx ins(%lhs_tile, %a_scale_tile, %rhs_tile, %b_scale_tile :
+                       !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=16, cols=64, v_row=16, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>,
+                       !pto.tile_buf<loc=scaling, dtype=f16, rows=16, cols=2, v_row=16, v_col=2, blayout=row_major, slayout=row_major, fractal=32, pad=0>,
+                       !pto.tile_buf<loc=right, dtype=f8E4M3FN, rows=64, cols=16, v_row=64, v_col=16, blayout=row_major, slayout=col_major, fractal=512, pad=0>,
+                       !pto.tile_buf<loc=scaling, dtype=f16, rows=2, cols=16, v_row=2, v_col=16, blayout=col_major, slayout=col_major, fractal=32, pad=0>)
+                   outs(%dst_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=16, v_row=16, v_col=16, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
 
     pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
     pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
@@ -540,7 +702,6 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
     pto.barrier #pto.pipe<PIPE_ALL>
     return
   }
-
   // =========================================================================
   // fp8_e4m3_e5m2_10x50x54  (M=10, K=50->64, N=54)
   // =========================================================================
@@ -553,6 +714,8 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
     %c0_i64  = arith.constant 0    : i64
     %c1_i64  = arith.constant 1    : i64
     %c10_i64 = arith.constant 10   : i64
+    %c16_i64 = arith.constant 16   : i64
+    %c32_i64 = arith.constant 32   : i64
     %c54_i64 = arith.constant 54   : i64
     %c64_i64 = arith.constant 64   : i64
     %c1024_i64 = arith.constant 1024 : i64
@@ -565,18 +728,34 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
     %l1_a_scale = pto.castptr %c1024_i64  : i64 -> !pto.ptr<f8E4M3FN, l1>
     %l1_b_data  = pto.castptr %c1088_i64  : i64 -> !pto.ptr<f8E5M2, l1>
     %l1_b_scale = pto.castptr %c5184_i64  : i64 -> !pto.ptr<f8E5M2, l1>
-    %l0a = pto.castptr %c0_i64 : i64 -> !pto.ptr<f8E4M3FN, l0a>
-    %l0b = pto.castptr %c0_i64 : i64 -> !pto.ptr<f8E5M2, l0b>
-    %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, l0c>
+    %lhs_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=16, cols=64, v_row=10, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %a_scale_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=scaling, dtype=f16, rows=16, cols=2, v_row=10, v_col=2, blayout=row_major, slayout=row_major, fractal=32, pad=0>
+    %rhs_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=right, dtype=f8E5M2, rows=64, cols=64, v_row=64, v_col=54, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %b_scale_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=scaling, dtype=f16, rows=2, cols=64, v_row=2, v_col=54, blayout=col_major, slayout=col_major, fractal=32, pad=0>
+    %dst_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=64, v_row=10, v_col=54, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %l0a = pto.tile_buf_addr %lhs_tile
+      : !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=16, cols=64, v_row=10, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+     -> !pto.ptr<f8E4M3FN, l0a>
+    %l0b = pto.tile_buf_addr %rhs_tile
+      : !pto.tile_buf<loc=right, dtype=f8E5M2, rows=64, cols=64, v_row=64, v_col=54, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+     -> !pto.ptr<f8E5M2, l0b>
+    %l0c = pto.tile_buf_addr %dst_tile
+      : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=64, v_row=10, v_col=54, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+     -> !pto.ptr<f32, l0c>
 
     pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
       : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
+    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c32_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
       : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E5M2, gm>, !pto.ptr<f8E5M2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c2_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E5M2, gm>, !pto.ptr<f8E5M2, l1>, i64, i64, i64, i64
+    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c4_i64, %c1024_i64, %c1024_i64)
+      : !pto.ptr<f8E5M2, gm>, !pto.ptr<f8E5M2, l1>, i64, i64, i64, i64, loop i64, i64, i64
+    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c2_i64, %c64_i64, %c64_i64)
+      : !pto.ptr<f8E5M2, gm>, !pto.ptr<f8E5M2, l1>, i64, i64, i64, i64, loop i64, i64, i64
 
     pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
     pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
@@ -585,27 +764,30 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
       : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64, i64, i64
     pto.mte_l1_l0b %l1_b_data, %l0b, %c64_i64, %c54_i64, %c0_i64, %c0_i64 {transpose = true}
       : !pto.ptr<f8E5M2, l1>, !pto.ptr<f8E5M2, l0b>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c10_i64, %c64_i64
-      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64
-    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c64_i64, %c54_i64
-      : !pto.ptr<f8E5M2, l1>, !pto.ptr<f8E5M2, l0b>, i64, i64
+    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c10_i64, %c64_i64, %c0_i64, %c0_i64
+      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64, i64, i64
+    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c64_i64, %c54_i64, %c0_i64, %c0_i64
+      : !pto.ptr<f8E5M2, l1>, !pto.ptr<f8E5M2, l0b>, i64, i64, i64, i64
 
     pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
     pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
 
-    pto.mad_mx %l0a, %l0b, %l0c, %c10_i64, %c54_i64, %c64_i64 unit_flag(check_only) disable_gemv sat
-      : !pto.ptr<f8E4M3FN, l0a>, !pto.ptr<f8E5M2, l0b>, !pto.ptr<f32, l0c>, i64, i64, i64
+    pto.tmatmul.mx ins(%lhs_tile, %a_scale_tile, %rhs_tile, %b_scale_tile :
+                       !pto.tile_buf<loc=left, dtype=f8E4M3FN, rows=16, cols=64, v_row=10, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>,
+                       !pto.tile_buf<loc=scaling, dtype=f16, rows=16, cols=2, v_row=10, v_col=2, blayout=row_major, slayout=row_major, fractal=32, pad=0>,
+                       !pto.tile_buf<loc=right, dtype=f8E5M2, rows=64, cols=64, v_row=64, v_col=54, blayout=row_major, slayout=col_major, fractal=512, pad=0>,
+                       !pto.tile_buf<loc=scaling, dtype=f16, rows=2, cols=64, v_row=2, v_col=54, blayout=col_major, slayout=col_major, fractal=32, pad=0>)
+                   outs(%dst_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=64, v_row=10, v_col=54, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
 
     pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
     pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
 
-    pto.mte_l0c_gm %l0c, %c_gm, %c10_i64, %c54_i64, %c10_i64, %c54_i64, %c0_i64, %c0_i64, nz2nd
+    pto.mte_l0c_gm %l0c, %c_gm, %c16_i64, %c64_i64, %c16_i64, %c64_i64, %c0_i64, %c0_i64, nz2nd
       : !pto.ptr<f32, l0c>, !pto.ptr<f32, gm>, i64, i64, i64, i64, i64, i64
 
     pto.barrier #pto.pipe<PIPE_ALL>
     return
   }
-
   // =========================================================================
   // fp4_e2m1_4x30x8  (M=4, K=30->64, N=8, is_fp4)
   // =========================================================================
@@ -619,27 +801,46 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
     %c1_i64  = arith.constant 1    : i64
     %c4_i64  = arith.constant 4    : i64
     %c8_i64  = arith.constant 8    : i64
+    %c16_i64 = arith.constant 16   : i64
+    %c32_i64 = arith.constant 32   : i64
     %c64_i64 = arith.constant 64   : i64
     %c1024_i64 = arith.constant 1024 : i64
     %c1088_i64 = arith.constant 1088 : i64
-    %c1344_i64 = arith.constant 1344 : i64
+    %c3136_i64 = arith.constant 3136 : i64
+    %c2_i64 = arith.constant 2 : i64
 
     %l1_a_data  = pto.castptr %c0_i64    : i64 -> !pto.ptr<!pto.f4E2M1x2, l1>
     %l1_a_scale = pto.castptr %c1024_i64  : i64 -> !pto.ptr<!pto.f4E2M1x2, l1>
     %l1_b_data  = pto.castptr %c1088_i64  : i64 -> !pto.ptr<!pto.f4E2M1x2, l1>
-    %l1_b_scale = pto.castptr %c1344_i64  : i64 -> !pto.ptr<!pto.f4E2M1x2, l1>
-    %l0a = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E2M1x2, l0a>
-    %l0b = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E2M1x2, l0b>
-    %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, l0c>
+    %l1_b_scale = pto.castptr %c3136_i64  : i64 -> !pto.ptr<!pto.f4E2M1x2, l1>
+    %lhs_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=left, dtype=!pto.f4E2M1x2, rows=16, cols=64, v_row=4, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %a_scale_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=scaling, dtype=f16, rows=16, cols=2, v_row=4, v_col=2, blayout=row_major, slayout=row_major, fractal=32, pad=0>
+    %rhs_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=right, dtype=!pto.f4E2M1x2, rows=64, cols=64, v_row=64, v_col=8, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+    %b_scale_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=scaling, dtype=f16, rows=2, cols=64, v_row=2, v_col=8, blayout=col_major, slayout=col_major, fractal=32, pad=0>
+    %dst_tile = pto.alloc_tile addr = %c0_i64
+      : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=64, v_row=4, v_col=8, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+    %l0a = pto.tile_buf_addr %lhs_tile
+      : !pto.tile_buf<loc=left, dtype=!pto.f4E2M1x2, rows=16, cols=64, v_row=4, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+     -> !pto.ptr<!pto.f4E2M1x2, l0a>
+    %l0b = pto.tile_buf_addr %rhs_tile
+      : !pto.tile_buf<loc=right, dtype=!pto.f4E2M1x2, rows=64, cols=64, v_row=64, v_col=8, blayout=row_major, slayout=col_major, fractal=512, pad=0>
+     -> !pto.ptr<!pto.f4E2M1x2, l0b>
+    %l0c = pto.tile_buf_addr %dst_tile
+      : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=64, v_row=4, v_col=8, blayout=col_major, slayout=row_major, fractal=512, pad=0>
+     -> !pto.ptr<f32, l0c>
 
     pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
       : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
+    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c32_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
       : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64
+    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c2_i64, %c1024_i64, %c1024_i64)
+      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64, loop i64, i64, i64
+    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64) loop(%c2_i64, %c64_i64, %c64_i64)
+      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64, loop i64, i64, i64
 
     pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
     pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
@@ -648,720 +849,25 @@ module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<cu
       : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0a>, i64, i64, i64, i64
     pto.mte_l1_l0b %l1_b_data, %l0b, %c64_i64, %c8_i64, %c0_i64, %c0_i64 {transpose = true}
       : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0b>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c4_i64, %c64_i64
-      : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0a>, i64, i64
-    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c64_i64, %c8_i64
-      : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0b>, i64, i64
-
-    pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
-    pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
-
-    pto.mad_mx %l0a, %l0b, %l0c, %c4_i64, %c8_i64, %c64_i64 unit_flag(check_only) disable_gemv sat
-      : !pto.ptr<!pto.f4E2M1x2, l0a>, !pto.ptr<!pto.f4E2M1x2, l0b>, !pto.ptr<f32, l0c>, i64, i64, i64
-
-    pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
-    pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
-
-    pto.mte_l0c_gm %l0c, %c_gm, %c4_i64, %c8_i64, %c4_i64, %c8_i64, %c0_i64, %c0_i64, nz2nd
-      : !pto.ptr<f32, l0c>, !pto.ptr<f32, gm>, i64, i64, i64, i64, i64, i64
-
-    pto.barrier #pto.pipe<PIPE_ALL>
-    return
-  }
-
-  // =========================================================================
-  // gemv_fp4_e1m2_1x128x62  (M=1, K=128, N=62, is_fp4, GEMV)
-  // =========================================================================
-  func.func @TMATMUL_MX_gemv_fp4_e1m2_1x128x62(
-      %a_gm: !pto.ptr<!pto.f4E1M2x2, gm>,
-      %b_gm: !pto.ptr<!pto.f4E1M2x2, gm>,
-      %a_scale_gm: !pto.ptr<!pto.f4E1M2x2, gm>,
-      %b_scale_gm: !pto.ptr<!pto.f4E1M2x2, gm>,
-      %c_gm: !pto.ptr<f32, gm>) attributes {pto.aicore} {
-    %c0_i64  = arith.constant 0    : i64
-    %c1_i64  = arith.constant 1    : i64
-    %c62_i64 = arith.constant 62   : i64
-    %c64_i64 = arith.constant 64   : i64
-    %c128_i64 = arith.constant 128 : i64
-    %c1024_i64 = arith.constant 1024 : i64
-    %c1088_i64 = arith.constant 1088 : i64
-    %c5184_i64 = arith.constant 5184 : i64
-    %c4_i64 = arith.constant 4 : i64
-    %c2_i64 = arith.constant 2 : i64
-
-    %l1_a_data  = pto.castptr %c0_i64    : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l1_a_scale = pto.castptr %c1024_i64  : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l1_b_data  = pto.castptr %c1088_i64  : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l1_b_scale = pto.castptr %c5184_i64  : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l0a = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E1M2x2, l0a>
-    %l0b = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E1M2x2, l0b>
-    %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, l0c>
-
-    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c2_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-
-    pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
-    pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
-
-    pto.mte_l1_l0a %l1_a_data, %l0a, %c1_i64, %c128_i64, %c0_i64, %c0_i64
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0a>, i64, i64, i64, i64
-    pto.mte_l1_l0b %l1_b_data, %l0b, %c128_i64, %c62_i64, %c0_i64, %c0_i64 {transpose = true}
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0b>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c1_i64, %c128_i64
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0a>, i64, i64
-    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c128_i64, %c62_i64
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0b>, i64, i64
-
-    pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
-    pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
-
-    pto.mad_mx %l0a, %l0b, %l0c, %c1_i64, %c62_i64, %c128_i64 unit_flag(check_only) disable_gemv sat
-      : !pto.ptr<!pto.f4E1M2x2, l0a>, !pto.ptr<!pto.f4E1M2x2, l0b>, !pto.ptr<f32, l0c>, i64, i64, i64
-
-    pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
-    pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
-
-    pto.mte_l0c_gm %l0c, %c_gm, %c1_i64, %c62_i64, %c1_i64, %c62_i64, %c0_i64, %c0_i64, nz2nd
-      : !pto.ptr<f32, l0c>, !pto.ptr<f32, gm>, i64, i64, i64, i64, i64, i64
-
-    pto.barrier #pto.pipe<PIPE_ALL>
-    return
-  }
-
-  // =========================================================================
-  // gemv_fp8_e4m3_e5m2_1x256x20  (M=1, K=256, N=20, GEMV)
-  // =========================================================================
-  func.func @TMATMUL_MX_gemv_fp8_e4m3_e5m2_1x256x20(
-      %a_gm: !pto.ptr<f8E4M3FN, gm>,
-      %b_gm: !pto.ptr<f8E5M2, gm>,
-      %a_scale_gm: !pto.ptr<f8E4M3FN, gm>,
-      %b_scale_gm: !pto.ptr<f8E5M2, gm>,
-      %c_gm: !pto.ptr<f32, gm>) attributes {pto.aicore} {
-    %c0_i64  = arith.constant 0    : i64
-    %c1_i64  = arith.constant 1    : i64
-    %c20_i64 = arith.constant 20   : i64
-    %c64_i64 = arith.constant 64   : i64
-    %c256_i64 = arith.constant 256 : i64
-    %c1024_i64 = arith.constant 1024 : i64
-    %c1088_i64 = arith.constant 1088 : i64
-    %c6208_i64 = arith.constant 6208 : i64
-    %c8_i64 = arith.constant 8 : i64
-    %c5_i64 = arith.constant 5 : i64
-
-    %l1_a_data  = pto.castptr %c0_i64    : i64 -> !pto.ptr<f8E4M3FN, l1>
-    %l1_a_scale = pto.castptr %c1024_i64  : i64 -> !pto.ptr<f8E4M3FN, l1>
-    %l1_b_data  = pto.castptr %c1088_i64  : i64 -> !pto.ptr<f8E5M2, l1>
-    %l1_b_scale = pto.castptr %c6208_i64  : i64 -> !pto.ptr<f8E5M2, l1>
-    %l0a = pto.castptr %c0_i64 : i64 -> !pto.ptr<f8E4M3FN, l0a>
-    %l0b = pto.castptr %c0_i64 : i64 -> !pto.ptr<f8E5M2, l0b>
-    %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, l0c>
-
-    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c5_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E5M2, gm>, !pto.ptr<f8E5M2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c8_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E5M2, gm>, !pto.ptr<f8E5M2, l1>, i64, i64, i64, i64
-
-    pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
-    pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
-
-    pto.mte_l1_l0a %l1_a_data, %l0a, %c1_i64, %c256_i64, %c0_i64, %c0_i64
-      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64, i64, i64
-    pto.mte_l1_l0b %l1_b_data, %l0b, %c256_i64, %c20_i64, %c0_i64, %c0_i64 {transpose = true}
-      : !pto.ptr<f8E5M2, l1>, !pto.ptr<f8E5M2, l0b>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c1_i64, %c256_i64
-      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64
-    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c256_i64, %c20_i64
-      : !pto.ptr<f8E5M2, l1>, !pto.ptr<f8E5M2, l0b>, i64, i64
-
-    pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
-    pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
-
-    pto.mad_mx %l0a, %l0b, %l0c, %c1_i64, %c20_i64, %c256_i64 unit_flag(check_only) disable_gemv sat
-      : !pto.ptr<f8E4M3FN, l0a>, !pto.ptr<f8E5M2, l0b>, !pto.ptr<f32, l0c>, i64, i64, i64
-
-    pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
-    pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
-
-    pto.mte_l0c_gm %l0c, %c_gm, %c1_i64, %c20_i64, %c1_i64, %c20_i64, %c0_i64, %c0_i64, nz2nd
-      : !pto.ptr<f32, l0c>, !pto.ptr<f32, gm>, i64, i64, i64, i64, i64, i64
-
-    pto.barrier #pto.pipe<PIPE_ALL>
-    return
-  }
-
-  // =========================================================================
-  // bias_fp8_e5m2_e4m3_115x64x30  (M=115, K=64, N=30)
-  // =========================================================================
-  func.func @TMATMUL_MX_bias_fp8_e5m2_e4m3_115x64x30(
-      %a_gm: !pto.ptr<f8E5M2, gm>,
-      %b_gm: !pto.ptr<f8E4M3FN, gm>,
-      %a_scale_gm: !pto.ptr<f8E5M2, gm>,
-      %b_scale_gm: !pto.ptr<f8E4M3FN, gm>,
-      %bias_gm: !pto.ptr<f32, gm>,
-      %c_gm: !pto.ptr<f32, gm>) attributes {pto.aicore} {
-    %c0_i64  = arith.constant 0    : i64
-    %c1_i64  = arith.constant 1    : i64
-    %c30_i64 = arith.constant 30   : i64
-    %c64_i64 = arith.constant 64   : i64
-    %c115_i64 = arith.constant 115 : i64
-    %c1024_i64 = arith.constant 1024 : i64
-    %c8192_i64 = arith.constant 8192 : i64
-    %c8448_i64 = arith.constant 8448 : i64
-    %c10496_i64 = arith.constant 10496 : i64
-    %c10624_i64 = arith.constant 10624 : i64
-    %c8_i64 = arith.constant 8 : i64
-    %c4_i64 = arith.constant 4 : i64
-    %c2_i64 = arith.constant 2 : i64
-
-    %l1_a_data  = pto.castptr %c0_i64    : i64 -> !pto.ptr<f8E5M2, l1>
-    %l1_a_scale = pto.castptr %c8192_i64  : i64 -> !pto.ptr<f8E5M2, l1>
-    %l1_b_data  = pto.castptr %c8448_i64  : i64 -> !pto.ptr<f8E4M3FN, l1>
-    %l1_b_scale = pto.castptr %c10496_i64 : i64 -> !pto.ptr<f8E4M3FN, l1>
-    %l1_bias    = pto.castptr %c10624_i64 : i64 -> !pto.ptr<f32, l1>
-    %l0a = pto.castptr %c0_i64 : i64 -> !pto.ptr<f8E5M2, l0a>
-    %l0b = pto.castptr %c0_i64 : i64 -> !pto.ptr<f8E4M3FN, l0b>
-    %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, l0c>
-    %bt  = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, bt>
-
-    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c8_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E5M2, gm>, !pto.ptr<f8E5M2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E5M2, gm>, !pto.ptr<f8E5M2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c2_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c2_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %bias_gm, %l1_bias, %c64_i64 nburst(%c2_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f32, gm>, !pto.ptr<f32, l1>, i64, i64, i64, i64
-
-    pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
-    pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
-
-    pto.mte_l1_l0a %l1_a_data, %l0a, %c115_i64, %c64_i64, %c0_i64, %c0_i64
-      : !pto.ptr<f8E5M2, l1>, !pto.ptr<f8E5M2, l0a>, i64, i64, i64, i64
-    pto.mte_l1_l0b %l1_b_data, %l0b, %c64_i64, %c30_i64, %c0_i64, %c0_i64 {transpose = true}
-      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0b>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c115_i64, %c64_i64
-      : !pto.ptr<f8E5M2, l1>, !pto.ptr<f8E5M2, l0a>, i64, i64
-    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c64_i64, %c30_i64
-      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0b>, i64, i64
-    pto.mte_l1_bt %l1_bias, %bt, %c30_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f32, l1>, !pto.ptr<f32, bt>, i64, i64, i64, i64
-
-    pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
-    pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
-
-    pto.mad_mx_bias %l0a, %l0b, %l0c, %bt, %c115_i64, %c30_i64, %c64_i64 unit_flag(check_only) disable_gemv sat
-      : !pto.ptr<f8E5M2, l0a>, !pto.ptr<f8E4M3FN, l0b>, !pto.ptr<f32, l0c>, !pto.ptr<f32, bt>, i64, i64, i64
-
-    pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
-    pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
-
-    pto.mte_l0c_gm %l0c, %c_gm, %c115_i64, %c30_i64, %c115_i64, %c30_i64, %c0_i64, %c0_i64, nz2nd
-      : !pto.ptr<f32, l0c>, !pto.ptr<f32, gm>, i64, i64, i64, i64, i64, i64
-
-    pto.barrier #pto.pipe<PIPE_ALL>
-    return
-  }
-
-  // =========================================================================
-  // bias_fp8_e4m3_200x192x95  (M=200, K=192, N=95)
-  // NOTE: L0C = 200*95*4 = 74.2KB exceeds 64KB; may need tiling.
-  // =========================================================================
-  func.func @TMATMUL_MX_bias_fp8_e4m3_200x192x95(
-      %a_gm: !pto.ptr<f8E4M3FN, gm>,
-      %b_gm: !pto.ptr<f8E4M3FN, gm>,
-      %a_scale_gm: !pto.ptr<f8E4M3FN, gm>,
-      %b_scale_gm: !pto.ptr<f8E4M3FN, gm>,
-      %bias_gm: !pto.ptr<f32, gm>,
-      %c_gm: !pto.ptr<f32, gm>) attributes {pto.aicore} {
-    %c0_i64  = arith.constant 0    : i64
-    %c1_i64  = arith.constant 1    : i64
-    %c64_i64 = arith.constant 64   : i64
-    %c95_i64 = arith.constant 95   : i64
-    %c192_i64 = arith.constant 192 : i64
-    %c200_i64 = arith.constant 200 : i64
-    %c1024_i64 = arith.constant 1024 : i64
-    %c38912_i64 = arith.constant 38912 : i64
-    %c40192_i64 = arith.constant 40192 : i64
-    %c58624_i64 = arith.constant 58624 : i64
-    %c59392_i64 = arith.constant 59392 : i64
-    %c38_i64 = arith.constant 38 : i64
-    %c20_i64 = arith.constant 20 : i64
-    %c18_i64 = arith.constant 18 : i64
-    %c12_i64 = arith.constant 12 : i64
-    %c6_i64 = arith.constant 6 : i64
-
-    %l1_a_data  = pto.castptr %c0_i64     : i64 -> !pto.ptr<f8E4M3FN, l1>
-    %l1_a_scale = pto.castptr %c38912_i64  : i64 -> !pto.ptr<f8E4M3FN, l1>
-    %l1_b_data  = pto.castptr %c40192_i64  : i64 -> !pto.ptr<f8E4M3FN, l1>
-    %l1_b_scale = pto.castptr %c58624_i64  : i64 -> !pto.ptr<f8E4M3FN, l1>
-    %l1_bias    = pto.castptr %c59392_i64  : i64 -> !pto.ptr<f32, l1>
-    %l0a = pto.castptr %c0_i64 : i64 -> !pto.ptr<f8E4M3FN, l0a>
-    %l0b = pto.castptr %c0_i64 : i64 -> !pto.ptr<f8E4M3FN, l0b>
-    %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, l0c>
-    %bt  = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, bt>
-
-    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c38_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c20_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c18_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c12_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %bias_gm, %l1_bias, %c64_i64 nburst(%c6_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f32, gm>, !pto.ptr<f32, l1>, i64, i64, i64, i64
-
-    pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
-    pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
-
-    pto.mte_l1_l0a %l1_a_data, %l0a, %c200_i64, %c192_i64, %c0_i64, %c0_i64
-      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64, i64, i64
-    pto.mte_l1_l0b %l1_b_data, %l0b, %c192_i64, %c95_i64, %c0_i64, %c0_i64 {transpose = true}
-      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0b>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c200_i64, %c192_i64
-      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64
-    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c192_i64, %c95_i64
-      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0b>, i64, i64
-    %c96_i64 = arith.constant 96 : i64
-    pto.mte_l1_bt %l1_bias, %bt, %c96_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f32, l1>, !pto.ptr<f32, bt>, i64, i64, i64, i64
-
-    pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
-    pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
-
-    pto.mad_mx_bias %l0a, %l0b, %l0c, %bt, %c200_i64, %c95_i64, %c192_i64 unit_flag(check_only) disable_gemv sat
-      : !pto.ptr<f8E4M3FN, l0a>, !pto.ptr<f8E4M3FN, l0b>, !pto.ptr<f32, l0c>, !pto.ptr<f32, bt>, i64, i64, i64
-
-    pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
-    pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
-
-    pto.mte_l0c_gm %l0c, %c_gm, %c200_i64, %c95_i64, %c200_i64, %c95_i64, %c0_i64, %c0_i64, nz2nd
-      : !pto.ptr<f32, l0c>, !pto.ptr<f32, gm>, i64, i64, i64, i64, i64, i64
-
-    pto.barrier #pto.pipe<PIPE_ALL>
-    return
-  }
-
-  // =========================================================================
-  // bias_fp4_e2m1_e1m2_35x128x56  (M=35, K=128, N=56, is_fp4)
-  // =========================================================================
-  func.func @TMATMUL_MX_bias_fp4_e2m1_e1m2_35x128x56(
-      %a_gm: !pto.ptr<!pto.f4E2M1x2, gm>,
-      %b_gm: !pto.ptr<!pto.f4E1M2x2, gm>,
-      %a_scale_gm: !pto.ptr<!pto.f4E2M1x2, gm>,
-      %b_scale_gm: !pto.ptr<!pto.f4E1M2x2, gm>,
-      %bias_gm: !pto.ptr<f32, gm>,
-      %c_gm: !pto.ptr<f32, gm>) attributes {pto.aicore} {
-    %c0_i64  = arith.constant 0    : i64
-    %c1_i64  = arith.constant 1    : i64
-    %c35_i64 = arith.constant 35   : i64
-    %c56_i64 = arith.constant 56   : i64
-    %c64_i64 = arith.constant 64   : i64
-    %c128_i64 = arith.constant 128 : i64
-    %c1024_i64 = arith.constant 1024 : i64
-    %c3072_i64 = arith.constant 3072 : i64
-    %c3264_i64 = arith.constant 3264 : i64
-    %c7360_i64 = arith.constant 7360 : i64
-    %c7616_i64 = arith.constant 7616 : i64
-    %c3_i64 = arith.constant 3 : i64
-    %c4_i64 = arith.constant 4 : i64
-
-    %l1_a_data  = pto.castptr %c0_i64    : i64 -> !pto.ptr<!pto.f4E2M1x2, l1>
-    %l1_a_scale = pto.castptr %c3072_i64  : i64 -> !pto.ptr<!pto.f4E2M1x2, l1>
-    %l1_b_data  = pto.castptr %c3264_i64  : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l1_b_scale = pto.castptr %c7360_i64  : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l1_bias    = pto.castptr %c7616_i64  : i64 -> !pto.ptr<f32, l1>
-    %l0a = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E2M1x2, l0a>
-    %l0b = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E1M2x2, l0b>
-    %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, l0c>
-    %bt  = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, bt>
-
-    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c3_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c3_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E2M1x2, gm>, !pto.ptr<!pto.f4E2M1x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %bias_gm, %l1_bias, %c64_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f32, gm>, !pto.ptr<f32, l1>, i64, i64, i64, i64
-
-    pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
-    pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
-
-    pto.mte_l1_l0a %l1_a_data, %l0a, %c35_i64, %c128_i64, %c0_i64, %c0_i64
+    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c4_i64, %c64_i64, %c0_i64, %c0_i64
       : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0a>, i64, i64, i64, i64
-    pto.mte_l1_l0b %l1_b_data, %l0b, %c128_i64, %c56_i64, %c0_i64, %c0_i64 {transpose = true}
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0b>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c35_i64, %c128_i64
-      : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0a>, i64, i64
-    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c128_i64, %c56_i64
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0b>, i64, i64
-    pto.mte_l1_bt %l1_bias, %bt, %c56_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f32, l1>, !pto.ptr<f32, bt>, i64, i64, i64, i64
+    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c64_i64, %c8_i64, %c0_i64, %c0_i64
+      : !pto.ptr<!pto.f4E2M1x2, l1>, !pto.ptr<!pto.f4E2M1x2, l0b>, i64, i64, i64, i64
 
     pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
     pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
 
-    pto.mad_mx_bias %l0a, %l0b, %l0c, %bt, %c35_i64, %c56_i64, %c128_i64 unit_flag(check_only) disable_gemv sat
-      : !pto.ptr<!pto.f4E2M1x2, l0a>, !pto.ptr<!pto.f4E1M2x2, l0b>, !pto.ptr<f32, l0c>, !pto.ptr<f32, bt>, i64, i64, i64
+    pto.tmatmul.mx ins(%lhs_tile, %a_scale_tile, %rhs_tile, %b_scale_tile :
+                       !pto.tile_buf<loc=left, dtype=!pto.f4E2M1x2, rows=16, cols=64, v_row=4, v_col=64, blayout=col_major, slayout=row_major, fractal=512, pad=0>,
+                       !pto.tile_buf<loc=scaling, dtype=f16, rows=16, cols=2, v_row=4, v_col=2, blayout=row_major, slayout=row_major, fractal=32, pad=0>,
+                       !pto.tile_buf<loc=right, dtype=!pto.f4E2M1x2, rows=64, cols=64, v_row=64, v_col=8, blayout=row_major, slayout=col_major, fractal=512, pad=0>,
+                       !pto.tile_buf<loc=scaling, dtype=f16, rows=2, cols=64, v_row=2, v_col=8, blayout=col_major, slayout=col_major, fractal=32, pad=0>)
+                   outs(%dst_tile : !pto.tile_buf<loc=acc, dtype=f32, rows=16, cols=64, v_row=4, v_col=8, blayout=col_major, slayout=row_major, fractal=512, pad=0>)
 
     pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
     pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
 
-    pto.mte_l0c_gm %l0c, %c_gm, %c35_i64, %c56_i64, %c35_i64, %c56_i64, %c0_i64, %c0_i64, nz2nd
-      : !pto.ptr<f32, l0c>, !pto.ptr<f32, gm>, i64, i64, i64, i64, i64, i64
-
-    pto.barrier #pto.pipe<PIPE_ALL>
-    return
-  }
-
-  // =========================================================================
-  // bias_fp4_e1m2_47x128x62  (M=47, K=128, N=62, is_fp4)
-  // =========================================================================
-  func.func @TMATMUL_MX_bias_fp4_e1m2_47x128x62(
-      %a_gm: !pto.ptr<!pto.f4E1M2x2, gm>,
-      %b_gm: !pto.ptr<!pto.f4E1M2x2, gm>,
-      %a_scale_gm: !pto.ptr<!pto.f4E1M2x2, gm>,
-      %b_scale_gm: !pto.ptr<!pto.f4E1M2x2, gm>,
-      %bias_gm: !pto.ptr<f32, gm>,
-      %c_gm: !pto.ptr<f32, gm>) attributes {pto.aicore} {
-    %c0_i64  = arith.constant 0    : i64
-    %c1_i64  = arith.constant 1    : i64
-    %c47_i64 = arith.constant 47   : i64
-    %c62_i64 = arith.constant 62   : i64
-    %c64_i64 = arith.constant 64   : i64
-    %c128_i64 = arith.constant 128 : i64
-    %c1024_i64 = arith.constant 1024 : i64
-    %c3072_i64 = arith.constant 3072 : i64
-    %c3264_i64 = arith.constant 3264 : i64
-    %c7360_i64 = arith.constant 7360 : i64
-    %c7616_i64 = arith.constant 7616 : i64
-    %c3_i64 = arith.constant 3 : i64
-    %c4_i64 = arith.constant 4 : i64
-
-    %l1_a_data  = pto.castptr %c0_i64    : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l1_a_scale = pto.castptr %c3072_i64  : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l1_b_data  = pto.castptr %c3264_i64  : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l1_b_scale = pto.castptr %c7360_i64  : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l1_bias    = pto.castptr %c7616_i64  : i64 -> !pto.ptr<f32, l1>
-    %l0a = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E1M2x2, l0a>
-    %l0b = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E1M2x2, l0b>
-    %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, l0c>
-    %bt  = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, bt>
-
-    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c3_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c3_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %bias_gm, %l1_bias, %c64_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f32, gm>, !pto.ptr<f32, l1>, i64, i64, i64, i64
-
-    pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
-    pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
-
-    pto.mte_l1_l0a %l1_a_data, %l0a, %c47_i64, %c128_i64, %c0_i64, %c0_i64
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0a>, i64, i64, i64, i64
-    pto.mte_l1_l0b %l1_b_data, %l0b, %c128_i64, %c62_i64, %c0_i64, %c0_i64 {transpose = true}
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0b>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c47_i64, %c128_i64
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0a>, i64, i64
-    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c128_i64, %c62_i64
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0b>, i64, i64
-    pto.mte_l1_bt %l1_bias, %bt, %c62_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f32, l1>, !pto.ptr<f32, bt>, i64, i64, i64, i64
-
-    pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
-    pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
-
-    pto.mad_mx_bias %l0a, %l0b, %l0c, %bt, %c47_i64, %c62_i64, %c128_i64 unit_flag(check_only) disable_gemv sat
-      : !pto.ptr<!pto.f4E1M2x2, l0a>, !pto.ptr<!pto.f4E1M2x2, l0b>, !pto.ptr<f32, l0c>, !pto.ptr<f32, bt>, i64, i64, i64
-
-    pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
-    pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
-
-    pto.mte_l0c_gm %l0c, %c_gm, %c47_i64, %c62_i64, %c47_i64, %c62_i64, %c0_i64, %c0_i64, nz2nd
-      : !pto.ptr<f32, l0c>, !pto.ptr<f32, gm>, i64, i64, i64, i64, i64, i64
-
-    pto.barrier #pto.pipe<PIPE_ALL>
-    return
-  }
-
-  // =========================================================================
-  // bias_fp8_e4m3_e5m2_64x192x64  (M=64, K=192, N=64)
-  // =========================================================================
-  func.func @TMATMUL_MX_bias_fp8_e4m3_e5m2_64x192x64(
-      %a_gm: !pto.ptr<f8E4M3FN, gm>,
-      %b_gm: !pto.ptr<f8E5M2, gm>,
-      %a_scale_gm: !pto.ptr<f8E4M3FN, gm>,
-      %b_scale_gm: !pto.ptr<f8E5M2, gm>,
-      %bias_gm: !pto.ptr<f32, gm>,
-      %c_gm: !pto.ptr<f32, gm>) attributes {pto.aicore} {
-    %c0_i64  = arith.constant 0    : i64
-    %c1_i64  = arith.constant 1    : i64
-    %c64_i64 = arith.constant 64   : i64
-    %c192_i64 = arith.constant 192 : i64
-    %c1024_i64 = arith.constant 1024 : i64
-    %c12288_i64 = arith.constant 12288 : i64
-    %c12672_i64 = arith.constant 12672 : i64
-    %c24960_i64 = arith.constant 24960 : i64
-    %c25344_i64 = arith.constant 25344 : i64
-    %c12_i64 = arith.constant 12 : i64
-    %c6_i64 = arith.constant 6 : i64
-    %c4_i64 = arith.constant 4 : i64
-
-    %l1_a_data  = pto.castptr %c0_i64     : i64 -> !pto.ptr<f8E4M3FN, l1>
-    %l1_a_scale = pto.castptr %c12288_i64  : i64 -> !pto.ptr<f8E4M3FN, l1>
-    %l1_b_data  = pto.castptr %c12672_i64  : i64 -> !pto.ptr<f8E5M2, l1>
-    %l1_b_scale = pto.castptr %c24960_i64  : i64 -> !pto.ptr<f8E5M2, l1>
-    %l1_bias    = pto.castptr %c25344_i64  : i64 -> !pto.ptr<f32, l1>
-    %l0a = pto.castptr %c0_i64 : i64 -> !pto.ptr<f8E4M3FN, l0a>
-    %l0b = pto.castptr %c0_i64 : i64 -> !pto.ptr<f8E5M2, l0b>
-    %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, l0c>
-    %bt  = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, bt>
-
-    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c12_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c6_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E4M3FN, gm>, !pto.ptr<f8E4M3FN, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c12_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E5M2, gm>, !pto.ptr<f8E5M2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c6_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f8E5M2, gm>, !pto.ptr<f8E5M2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %bias_gm, %l1_bias, %c64_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f32, gm>, !pto.ptr<f32, l1>, i64, i64, i64, i64
-
-    pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
-    pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
-
-    pto.mte_l1_l0a %l1_a_data, %l0a, %c64_i64, %c192_i64, %c0_i64, %c0_i64
-      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64, i64, i64
-    pto.mte_l1_l0b %l1_b_data, %l0b, %c192_i64, %c64_i64, %c0_i64, %c0_i64 {transpose = true}
-      : !pto.ptr<f8E5M2, l1>, !pto.ptr<f8E5M2, l0b>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c64_i64, %c192_i64
-      : !pto.ptr<f8E4M3FN, l1>, !pto.ptr<f8E4M3FN, l0a>, i64, i64
-    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c192_i64, %c64_i64
-      : !pto.ptr<f8E5M2, l1>, !pto.ptr<f8E5M2, l0b>, i64, i64
-    pto.mte_l1_bt %l1_bias, %bt, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f32, l1>, !pto.ptr<f32, bt>, i64, i64, i64, i64
-
-    pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
-    pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
-
-    pto.mad_mx_bias %l0a, %l0b, %l0c, %bt, %c64_i64, %c64_i64, %c192_i64 unit_flag(check_only) disable_gemv sat
-      : !pto.ptr<f8E4M3FN, l0a>, !pto.ptr<f8E5M2, l0b>, !pto.ptr<f32, l0c>, !pto.ptr<f32, bt>, i64, i64, i64
-
-    pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
-    pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
-
-    pto.mte_l0c_gm %l0c, %c_gm, %c64_i64, %c64_i64, %c64_i64, %c64_i64, %c0_i64, %c0_i64, nz2nd
-      : !pto.ptr<f32, l0c>, !pto.ptr<f32, gm>, i64, i64, i64, i64, i64, i64
-
-    pto.barrier #pto.pipe<PIPE_ALL>
-    return
-  }
-
-  // =========================================================================
-  // bias_gemv_fp4_e1m2_1x64x62  (M=1, K=64, N=62, is_fp4, GEMV)
-  // =========================================================================
-  func.func @TMATMUL_MX_bias_gemv_fp4_e1m2_1x64x62(
-      %a_gm: !pto.ptr<!pto.f4E1M2x2, gm>,
-      %b_gm: !pto.ptr<!pto.f4E1M2x2, gm>,
-      %a_scale_gm: !pto.ptr<!pto.f4E1M2x2, gm>,
-      %b_scale_gm: !pto.ptr<!pto.f4E1M2x2, gm>,
-      %bias_gm: !pto.ptr<f32, gm>,
-      %c_gm: !pto.ptr<f32, gm>) attributes {pto.aicore} {
-    %c0_i64  = arith.constant 0    : i64
-    %c1_i64  = arith.constant 1    : i64
-    %c62_i64 = arith.constant 62   : i64
-    %c64_i64 = arith.constant 64   : i64
-    %c1024_i64 = arith.constant 1024 : i64
-    %c1088_i64 = arith.constant 1088 : i64
-    %c3136_i64 = arith.constant 3136 : i64
-    %c3264_i64 = arith.constant 3264 : i64
-    %c2_i64 = arith.constant 2 : i64
-    %c4_i64 = arith.constant 4 : i64
-
-    %l1_a_data  = pto.castptr %c0_i64    : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l1_a_scale = pto.castptr %c1024_i64  : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l1_b_data  = pto.castptr %c1088_i64  : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l1_b_scale = pto.castptr %c3136_i64  : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l1_bias    = pto.castptr %c3264_i64  : i64 -> !pto.ptr<f32, l1>
-    %l0a = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E1M2x2, l0a>
-    %l0b = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E1M2x2, l0b>
-    %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, l0c>
-    %bt  = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, bt>
-
-    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c2_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c64_i64 nburst(%c2_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %bias_gm, %l1_bias, %c64_i64 nburst(%c4_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f32, gm>, !pto.ptr<f32, l1>, i64, i64, i64, i64
-
-    pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
-    pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
-
-    pto.mte_l1_l0a %l1_a_data, %l0a, %c1_i64, %c64_i64, %c0_i64, %c0_i64
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0a>, i64, i64, i64, i64
-    pto.mte_l1_l0b %l1_b_data, %l0b, %c64_i64, %c62_i64, %c0_i64, %c0_i64 {transpose = true}
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0b>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c1_i64, %c64_i64
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0a>, i64, i64
-    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c64_i64, %c62_i64
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0b>, i64, i64
-    pto.mte_l1_bt %l1_bias, %bt, %c62_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f32, l1>, !pto.ptr<f32, bt>, i64, i64, i64, i64
-
-    pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
-    pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
-
-    pto.mad_mx_bias %l0a, %l0b, %l0c, %bt, %c1_i64, %c62_i64, %c64_i64 unit_flag(check_only) disable_gemv sat
-      : !pto.ptr<!pto.f4E1M2x2, l0a>, !pto.ptr<!pto.f4E1M2x2, l0b>, !pto.ptr<f32, l0c>, !pto.ptr<f32, bt>, i64, i64, i64
-
-    pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
-    pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
-
-    pto.mte_l0c_gm %l0c, %c_gm, %c1_i64, %c62_i64, %c1_i64, %c62_i64, %c0_i64, %c0_i64, nz2nd
-      : !pto.ptr<f32, l0c>, !pto.ptr<f32, gm>, i64, i64, i64, i64, i64, i64
-
-    pto.barrier #pto.pipe<PIPE_ALL>
-    return
-  }
-
-  // =========================================================================
-  // bias_gemv_fp4_e1m2_1x2048x64  (M=1, K=2048, N=64, is_fp4, GEMV)
-  // NOTE: B data (64KB) fills L1; split-K into two passes K=1024 each.
-  // =========================================================================
-  func.func @TMATMUL_MX_bias_gemv_fp4_e1m2_1x2048x64(
-      %a_gm: !pto.ptr<!pto.f4E1M2x2, gm>,
-      %b_gm: !pto.ptr<!pto.f4E1M2x2, gm>,
-      %a_scale_gm: !pto.ptr<!pto.f4E1M2x2, gm>,
-      %b_scale_gm: !pto.ptr<!pto.f4E1M2x2, gm>,
-      %bias_gm: !pto.ptr<f32, gm>,
-      %c_gm: !pto.ptr<f32, gm>) attributes {pto.aicore} {
-    %c0_i64   = arith.constant 0    : i64
-    %c1_i64   = arith.constant 1    : i64
-    %c2_i64   = arith.constant 2    : i64
-    %c64_i64  = arith.constant 64   : i64
-    %c256_i64 = arith.constant 256  : i64
-    %c1024_i64 = arith.constant 1024 : i64
-    %c2048_i64 = arith.constant 2048 : i64
-    %c32768_i64 = arith.constant 32768 : i64
-    %c34816_i64 = arith.constant 34816 : i64
-    %c36864_i64 = arith.constant 36864 : i64
-    %c32_i64  = arith.constant 32   : i64
-    %c4_i64   = arith.constant 4    : i64
-    %c16_i64  = arith.constant 16    : i64
-
-    %c512_idx   = arith.constant 512   : index
-    %c1024_idx  = arith.constant 1024  : index
-    %c32768_idx = arith.constant 32768 : index
-    %c2048_idx  = arith.constant 2048  : index
-
-    %l1_a_data  = pto.castptr %c0_i64     : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l1_a_scale = pto.castptr %c1024_i64   : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l1_b_data  = pto.castptr %c2048_i64   : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l1_b_scale = pto.castptr %c32768_i64  : i64 -> !pto.ptr<!pto.f4E1M2x2, l1>
-    %l1_bias    = pto.castptr %c36864_i64  : i64 -> !pto.ptr<f32, l1>
-    %l0a = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E1M2x2, l0a>
-    %l0b = pto.castptr %c0_i64 : i64 -> !pto.ptr<!pto.f4E1M2x2, l0b>
-    %l0c = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, l0c>
-    %bt  = pto.castptr %c0_i64 : i64 -> !pto.ptr<f32, bt>
-
-    // ---- Pass 0: K[0:1024] ----
-    pto.mte_gm_l1 %a_gm, %l1_a_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %a_scale_gm, %l1_a_scale, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_gm, %l1_b_data, %c1024_i64 nburst(%c32_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b_scale_gm, %l1_b_scale, %c1024_i64 nburst(%c2_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %bias_gm, %l1_bias, %c256_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f32, gm>, !pto.ptr<f32, l1>, i64, i64, i64, i64
-
-    pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
-    pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID0"]
-
-    pto.mte_l1_l0a %l1_a_data, %l0a, %c1_i64, %c1024_i64, %c0_i64, %c0_i64
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0a>, i64, i64, i64, i64
-    pto.mte_l1_l0b %l1_b_data, %l0b, %c1024_i64, %c64_i64, %c0_i64, %c0_i64 {transpose = true}
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0b>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c1_i64, %c1024_i64
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0a>, i64, i64
-    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c1024_i64, %c64_i64
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0b>, i64, i64
-    pto.mte_l1_bt %l1_bias, %bt, %c64_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<f32, l1>, !pto.ptr<f32, bt>, i64, i64, i64, i64
-
-    pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
-    pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID0"]
-
-    pto.mad_mx_bias %l0a, %l0b, %l0c, %bt, %c1_i64, %c64_i64, %c1024_i64 unit_flag(check_only) disable_gemv sat
-      : !pto.ptr<!pto.f4E1M2x2, l0a>, !pto.ptr<!pto.f4E1M2x2, l0b>, !pto.ptr<f32, l0c>, !pto.ptr<f32, bt>, i64, i64, i64
-
-    pto.set_flag["PIPE_M", "PIPE_MTE2", "EVENT_ID0"]
-    pto.wait_flag["PIPE_M", "PIPE_MTE2", "EVENT_ID0"]
-
-    // ---- Pass 1: K[1024:2048] (accumulate) ----
-    %a1  = pto.addptr %a_gm, %c512_idx : !pto.ptr<!pto.f4E1M2x2, gm> -> !pto.ptr<!pto.f4E1M2x2, gm>
-    %as1 = pto.addptr %a_scale_gm, %c512_idx : !pto.ptr<!pto.f4E1M2x2, gm> -> !pto.ptr<!pto.f4E1M2x2, gm>
-    %b1  = pto.addptr %b_gm, %c32768_idx : !pto.ptr<!pto.f4E1M2x2, gm> -> !pto.ptr<!pto.f4E1M2x2, gm>
-    %bs1 = pto.addptr %b_scale_gm, %c2048_idx : !pto.ptr<!pto.f4E1M2x2, gm> -> !pto.ptr<!pto.f4E1M2x2, gm>
-
-    pto.mte_gm_l1 %a1, %l1_a_data, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %as1, %l1_a_scale, %c1024_i64 nburst(%c1_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %b1, %l1_b_data, %c1024_i64 nburst(%c32_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-    pto.mte_gm_l1 %bs1, %l1_b_scale, %c1024_i64 nburst(%c2_i64, %c0_i64, %c0_i64)
-      : !pto.ptr<!pto.f4E1M2x2, gm>, !pto.ptr<!pto.f4E1M2x2, l1>, i64, i64, i64, i64
-
-    pto.set_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID1"]
-    pto.wait_flag["PIPE_MTE2", "PIPE_MTE1", "EVENT_ID1"]
-
-    pto.mte_l1_l0a %l1_a_data, %l0a, %c1_i64, %c1024_i64, %c0_i64, %c0_i64
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0a>, i64, i64, i64, i64
-    pto.mte_l1_l0b %l1_b_data, %l0b, %c1024_i64, %c64_i64, %c0_i64, %c0_i64 {transpose = true}
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0b>, i64, i64, i64, i64
-    pto.mte_l1_l0a_mx %l1_a_scale, %l0a, %c1_i64, %c1024_i64
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0a>, i64, i64
-    pto.mte_l1_l0b_mx %l1_b_scale, %l0b, %c1024_i64, %c64_i64
-      : !pto.ptr<!pto.f4E1M2x2, l1>, !pto.ptr<!pto.f4E1M2x2, l0b>, i64, i64
-
-    pto.set_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID1"]
-    pto.wait_flag["PIPE_MTE1", "PIPE_M", "EVENT_ID1"]
-
-    pto.mad_mx_acc %l0a, %l0b, %l0c, %c1_i64, %c64_i64, %c1024_i64 unit_flag(check_and_set) disable_gemv nosat
-      : !pto.ptr<!pto.f4E1M2x2, l0a>, !pto.ptr<!pto.f4E1M2x2, l0b>, !pto.ptr<f32, l0c>, i64, i64, i64
-
-    pto.set_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
-    pto.wait_flag["PIPE_M", "PIPE_FIX", "EVENT_ID1"]
-
-    pto.mte_l0c_gm %l0c, %c_gm, %c1_i64, %c64_i64, %c1_i64, %c64_i64, %c0_i64, %c0_i64, nz2nd
+    pto.mte_l0c_gm %l0c, %c_gm, %c16_i64, %c64_i64, %c16_i64, %c64_i64, %c0_i64, %c0_i64, nz2nd
       : !pto.ptr<f32, l0c>, !pto.ptr<f32, gm>, i64, i64, i64, i64, i64, i64
 
     pto.barrier #pto.pipe<PIPE_ALL>

@@ -30,23 +30,16 @@ using namespace PtoTestCommon;
         }                                                                        \
     } while (0)
 
-void LaunchTMATMUL_MX_fp8_e5m2_128x64x64(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *c, void *stream);
-void LaunchTMATMUL_MX_fp8_e4m3_127x72x64(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *c, void *stream);
-void LaunchTMATMUL_MX_fp8_e4m3_e5m2_128x110x63(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *c, void *stream);
-void LaunchTMATMUL_MX_fp4_e2m1_128x64x64(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *c, void *stream);
-void LaunchTMATMUL_MX_fp4_e1m2_e2m1_117x64x60(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *c, void *stream);
-void LaunchTMATMUL_MX_fp4_e2m1_e1m2_128x118x64(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *c, void *stream);
-void LaunchTMATMUL_MX_fp4_e2m1_e1m2_115x64x30(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *c, void *stream);
-void LaunchTMATMUL_MX_fp8_e4m3_16x32x16(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *c, void *stream);
-void LaunchTMATMUL_MX_fp8_e4m3_e5m2_10x50x54(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *c, void *stream);
-void LaunchTMATMUL_MX_fp4_e2m1_4x30x8(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *c, void *stream);
+void LaunchTMATMUL_MX_bias_fp8_e5m2_e4m3_115x64x30(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *bias, float *c, void *stream);
+void LaunchTMATMUL_MX_bias_fp8_e4m3_200x192x95(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *bias, float *c, void *stream);
+void LaunchTMATMUL_MX_bias_fp4_e2m1_e1m2_35x128x56(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *bias, float *c, void *stream);
+void LaunchTMATMUL_MX_bias_fp4_e1m2_47x128x62(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *bias, float *c, void *stream);
+void LaunchTMATMUL_MX_bias_fp8_e4m3_e5m2_64x192x64(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *bias, float *c, void *stream);
 
-using LaunchFnNoBias = void (*)(uint8_t *, uint8_t *, uint8_t *, uint8_t *, float *, void *);
 using LaunchFnBias = void (*)(uint8_t *, uint8_t *, uint8_t *, uint8_t *, float *, float *, void *);
 
 struct TestCase {
     const char *name;
-    bool is_bias;
     bool is_fp4;
     size_t m;
     size_t k;
@@ -54,7 +47,6 @@ struct TestCase {
     size_t m_padded;
     size_t n_padded;
     size_t k_aligned;
-    LaunchFnNoBias launch_no_bias;
     LaunchFnBias launch_bias;
 };
 
@@ -66,14 +58,18 @@ static constexpr size_t ceil_div(size_t num, size_t div) {
     return (num + div - 1) / div;
 }
 
+static constexpr size_t ubBiasCols(size_t n_padded) {
+    return ceil_align(n_padded, 64);
+}
+
 static constexpr size_t packedScaleABytes(size_t m, size_t k_aligned) {
     const size_t kGroups = ceil_div(k_aligned, 32);
     return ceil_div(m, 16) * ceil_div(kGroups, 2) * 32;
 }
 
-static constexpr size_t packedScaleBBytes(size_t n, size_t k_aligned) {
+static constexpr size_t packedScaleBBytes(size_t n_padded, size_t k_aligned) {
     const size_t kGroups = ceil_div(k_aligned, 32);
-    return ceil_align(n, 16) * kGroups;
+    return n_padded * kGroups;
 }
 
 static constexpr size_t packedScaleBFp4Bytes(size_t n_padded, size_t k_aligned) {
@@ -89,16 +85,11 @@ static std::string getCaseRoot() {
 }
 
 static const TestCase kCases[] = {
-    {"fp8_e5m2_128x64x64", false, false, 128, 64, 64, 128, 64, 64, LaunchTMATMUL_MX_fp8_e5m2_128x64x64, nullptr},
-    {"fp8_e4m3_127x72x64", false, false, 127, 72, 64, 128, 64, 128, LaunchTMATMUL_MX_fp8_e4m3_127x72x64, nullptr},
-    {"fp8_e4m3_e5m2_128x110x63", false, false, 128, 110, 63, 128, 64, 128, LaunchTMATMUL_MX_fp8_e4m3_e5m2_128x110x63, nullptr},
-    {"fp4_e2m1_128x64x64", false, true, 128, 64, 64, 128, 64, 64, LaunchTMATMUL_MX_fp4_e2m1_128x64x64, nullptr},
-    {"fp4_e1m2_e2m1_117x64x60", false, true, 117, 64, 60, 128, 64, 64, LaunchTMATMUL_MX_fp4_e1m2_e2m1_117x64x60, nullptr},
-    {"fp4_e2m1_e1m2_128x118x64", false, true, 128, 118, 64, 128, 64, 128, LaunchTMATMUL_MX_fp4_e2m1_e1m2_128x118x64, nullptr},
-    {"fp4_e2m1_e1m2_115x64x30", false, true, 115, 64, 30, 128, 64, 64, LaunchTMATMUL_MX_fp4_e2m1_e1m2_115x64x30, nullptr},
-    {"fp8_e4m3_16x32x16", false, false, 16, 32, 16, 16, 16, 64, LaunchTMATMUL_MX_fp8_e4m3_16x32x16, nullptr},
-    {"fp8_e4m3_e5m2_10x50x54", false, false, 10, 50, 54, 16, 64, 64, LaunchTMATMUL_MX_fp8_e4m3_e5m2_10x50x54, nullptr},
-    {"fp4_e2m1_4x30x8", false, true, 4, 30, 8, 16, 64, 64, LaunchTMATMUL_MX_fp4_e2m1_4x30x8, nullptr},
+    {"bias_fp8_e5m2_e4m3_115x64x30", false, 115, 64, 30, 128, 32, 64, LaunchTMATMUL_MX_bias_fp8_e5m2_e4m3_115x64x30},
+    {"bias_fp8_e4m3_200x192x95", false, 200, 192, 95, 208, 128, 192, LaunchTMATMUL_MX_bias_fp8_e4m3_200x192x95},
+    {"bias_fp4_e2m1_e1m2_35x128x56", true, 35, 128, 56, 48, 64, 128, LaunchTMATMUL_MX_bias_fp4_e2m1_e1m2_35x128x56},
+    {"bias_fp4_e1m2_47x128x62", true, 47, 128, 62, 48, 64, 128, LaunchTMATMUL_MX_bias_fp4_e1m2_47x128x62},
+    {"bias_fp8_e4m3_e5m2_64x192x64", false, 64, 192, 64, 64, 64, 192, LaunchTMATMUL_MX_bias_fp8_e4m3_e5m2_64x192x64},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
@@ -110,8 +101,8 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     const size_t scaleABytes = packedScaleABytes(tc.m, tc.k_aligned);
     const size_t scaleBBytes =
         tc.is_fp4 ? packedScaleBFp4Bytes(tc.n_padded, tc.k_aligned)
-                  : packedScaleBBytes(tc.n, tc.k_aligned);
-    const size_t biasElems = tc.is_bias ? tc.n_padded : 0;
+                  : packedScaleBBytes(tc.n_padded, tc.k_aligned);
+    const size_t biasElems = ubBiasCols(tc.n_padded);
     const size_t outElems = tc.m_padded * tc.n_padded;
     const size_t aBytes = aElems * sizeof(uint8_t);
     const size_t bBytes = bElems * sizeof(uint8_t);
@@ -123,7 +114,7 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     size_t scaleBFileSize = scaleBBytes;
     size_t biasFileSize = biasBytes;
 
-    std::printf("[INFO] === case: %s (m=%zu, k=%zu, n=%zu, is_bias=%d, is_fp4=%d) ===\n", tc.name, tc.m, tc.k, tc.n, tc.is_bias, tc.is_fp4);
+    std::printf("[INFO] === case: %s (m=%zu, k=%zu, n=%zu, is_fp4=%d) ===\n", tc.name, tc.m, tc.k, tc.n, tc.is_fp4);
 
     std::string caseDir = getCaseRoot() + "/" + tc.name;
 
@@ -135,40 +126,37 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     ACL_CHECK(aclrtMallocHost(&scaleAHost, scaleABytes));
     ACL_CHECK(aclrtMallocHost(&scaleBHost, scaleBBytes));
     ACL_CHECK(aclrtMallocHost(&outHost, outBytes));
-    if (tc.is_bias) ACL_CHECK(aclrtMallocHost(&biasHost, biasBytes));
+    ACL_CHECK(aclrtMallocHost(&biasHost, biasBytes));
 
     std::memset(aHost, 0, aBytes);
     std::memset(bHost, 0, bBytes);
     std::memset(scaleAHost, 0, scaleABytes);
     std::memset(scaleBHost, 0, scaleBBytes);
     std::memset(outHost, 0, outBytes);
-    if (tc.is_bias) std::memset(biasHost, 0, biasBytes);
+    std::memset(biasHost, 0, biasBytes);
 
     ACL_CHECK(aclrtMalloc(&aDevice, aBytes, ACL_MEM_MALLOC_HUGE_FIRST));
     ACL_CHECK(aclrtMalloc(&bDevice, bBytes, ACL_MEM_MALLOC_HUGE_FIRST));
     ACL_CHECK(aclrtMalloc(&scaleADevice, scaleABytes, ACL_MEM_MALLOC_HUGE_FIRST));
     ACL_CHECK(aclrtMalloc(&scaleBDevice, scaleBBytes, ACL_MEM_MALLOC_HUGE_FIRST));
     ACL_CHECK(aclrtMalloc(&outDevice, outBytes, ACL_MEM_MALLOC_HUGE_FIRST));
-    if (tc.is_bias) ACL_CHECK(aclrtMalloc(&biasDevice, biasBytes, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMalloc(&biasDevice, biasBytes, ACL_MEM_MALLOC_HUGE_FIRST));
+    ACL_CHECK(aclrtMemset(outDevice, outBytes, 0, outBytes));
 
     if (!ReadFile((caseDir + "/input1.bin").c_str(), aFileSize, aHost, aBytes)) { std::fprintf(stderr, "[ERROR] read input1 failed\n"); rc = 1; }
     if (rc == 0 && !ReadFile((caseDir + "/input2.bin").c_str(), bFileSize, bHost, bBytes)) { std::fprintf(stderr, "[ERROR] read input2 failed\n"); rc = 1; }
     if (rc == 0 && !ReadFile((caseDir + "/scale1.bin").c_str(), scaleAFileSize, scaleAHost, scaleABytes)) { std::fprintf(stderr, "[ERROR] read scale1 failed\n"); rc = 1; }
     if (rc == 0 && !ReadFile((caseDir + "/scale2.bin").c_str(), scaleBFileSize, scaleBHost, scaleBBytes)) { std::fprintf(stderr, "[ERROR] read scale2 failed\n"); rc = 1; }
-    if (rc == 0 && tc.is_bias && !ReadFile((caseDir + "/bias.bin").c_str(), biasFileSize, biasHost, biasBytes)) { std::fprintf(stderr, "[ERROR] read bias failed\n"); rc = 1; }
+    if (rc == 0 && !ReadFile((caseDir + "/bias.bin").c_str(), biasFileSize, biasHost, biasBytes)) { std::fprintf(stderr, "[ERROR] read bias failed\n"); rc = 1; }
 
     if (rc == 0) {
         ACL_CHECK(aclrtMemcpy(aDevice, aBytes, aHost, aBytes, ACL_MEMCPY_HOST_TO_DEVICE));
         ACL_CHECK(aclrtMemcpy(bDevice, bBytes, bHost, bBytes, ACL_MEMCPY_HOST_TO_DEVICE));
         ACL_CHECK(aclrtMemcpy(scaleADevice, scaleABytes, scaleAHost, scaleABytes, ACL_MEMCPY_HOST_TO_DEVICE));
         ACL_CHECK(aclrtMemcpy(scaleBDevice, scaleBBytes, scaleBHost, scaleBBytes, ACL_MEMCPY_HOST_TO_DEVICE));
-        if (tc.is_bias) ACL_CHECK(aclrtMemcpy(biasDevice, biasBytes, biasHost, biasBytes, ACL_MEMCPY_HOST_TO_DEVICE));
+        ACL_CHECK(aclrtMemcpy(biasDevice, biasBytes, biasHost, biasBytes, ACL_MEMCPY_HOST_TO_DEVICE));
 
-        if (tc.is_bias) {
-            tc.launch_bias(static_cast<uint8_t *>(aDevice), static_cast<uint8_t *>(bDevice), static_cast<uint8_t *>(scaleADevice), static_cast<uint8_t *>(scaleBDevice), static_cast<float *>(biasDevice), static_cast<float *>(outDevice), stream);
-        } else {
-            tc.launch_no_bias(static_cast<uint8_t *>(aDevice), static_cast<uint8_t *>(bDevice), static_cast<uint8_t *>(scaleADevice), static_cast<uint8_t *>(scaleBDevice), static_cast<float *>(outDevice), stream);
-        }
+        tc.launch_bias(static_cast<uint8_t *>(aDevice), static_cast<uint8_t *>(bDevice), static_cast<uint8_t *>(scaleADevice), static_cast<uint8_t *>(scaleBDevice), static_cast<float *>(biasDevice), static_cast<float *>(outDevice), stream);
         ACL_CHECK(aclrtSynchronizeStream(stream));
         ACL_CHECK(aclrtMemcpy(outHost, outBytes, outDevice, outBytes, ACL_MEMCPY_DEVICE_TO_HOST));
     }

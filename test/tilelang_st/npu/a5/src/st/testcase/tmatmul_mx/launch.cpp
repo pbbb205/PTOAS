@@ -22,15 +22,6 @@ extern "C" __global__ AICORE void TMATMUL_MX_fp4_e2m1_e1m2_115x64x30(__gm__ uint
 extern "C" __global__ AICORE void TMATMUL_MX_fp8_e4m3_16x32x16(__gm__ uint8_t *a, __gm__ uint8_t *b, __gm__ uint8_t *scale_a, __gm__ uint8_t *scale_b, __gm__ float *c);
 extern "C" __global__ AICORE void TMATMUL_MX_fp8_e4m3_e5m2_10x50x54(__gm__ uint8_t *a, __gm__ uint8_t *b, __gm__ uint8_t *scale_a, __gm__ uint8_t *scale_b, __gm__ float *c);
 extern "C" __global__ AICORE void TMATMUL_MX_fp4_e2m1_4x30x8(__gm__ uint8_t *a, __gm__ uint8_t *b, __gm__ uint8_t *scale_a, __gm__ uint8_t *scale_b, __gm__ float *c);
-extern "C" __global__ AICORE void TMATMUL_MX_gemv_fp4_e1m2_1x128x62(__gm__ uint8_t *a, __gm__ uint8_t *b, __gm__ uint8_t *scale_a, __gm__ uint8_t *scale_b, __gm__ float *c);
-extern "C" __global__ AICORE void TMATMUL_MX_gemv_fp8_e4m3_e5m2_1x256x20(__gm__ uint8_t *a, __gm__ uint8_t *b, __gm__ uint8_t *scale_a, __gm__ uint8_t *scale_b, __gm__ float *c);
-extern "C" __global__ AICORE void TMATMUL_MX_bias_fp8_e5m2_e4m3_115x64x30(__gm__ uint8_t *a, __gm__ uint8_t *b, __gm__ uint8_t *scale_a, __gm__ uint8_t *scale_b, __gm__ float *bias, __gm__ float *c);
-extern "C" __global__ AICORE void TMATMUL_MX_bias_fp8_e4m3_200x192x95(__gm__ uint8_t *a, __gm__ uint8_t *b, __gm__ uint8_t *scale_a, __gm__ uint8_t *scale_b, __gm__ float *bias, __gm__ float *c);
-extern "C" __global__ AICORE void TMATMUL_MX_bias_fp4_e2m1_e1m2_35x128x56(__gm__ uint8_t *a, __gm__ uint8_t *b, __gm__ uint8_t *scale_a, __gm__ uint8_t *scale_b, __gm__ float *bias, __gm__ float *c);
-extern "C" __global__ AICORE void TMATMUL_MX_bias_fp4_e1m2_47x128x62(__gm__ uint8_t *a, __gm__ uint8_t *b, __gm__ uint8_t *scale_a, __gm__ uint8_t *scale_b, __gm__ float *bias, __gm__ float *c);
-extern "C" __global__ AICORE void TMATMUL_MX_bias_fp8_e4m3_e5m2_64x192x64(__gm__ uint8_t *a, __gm__ uint8_t *b, __gm__ uint8_t *scale_a, __gm__ uint8_t *scale_b, __gm__ float *bias, __gm__ float *c);
-extern "C" __global__ AICORE void TMATMUL_MX_bias_gemv_fp4_e1m2_1x64x62(__gm__ uint8_t *a, __gm__ uint8_t *b, __gm__ uint8_t *scale_a, __gm__ uint8_t *scale_b, __gm__ float *bias, __gm__ float *c);
-extern "C" __global__ AICORE void TMATMUL_MX_bias_gemv_fp4_e1m2_1x2048x64(__gm__ uint8_t *a, __gm__ uint8_t *b, __gm__ uint8_t *scale_a, __gm__ uint8_t *scale_b, __gm__ float *bias, __gm__ float *c);
 
 void LaunchTMATMUL_MX_fp8_e5m2_128x64x64(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *c, void *stream) {
     TMATMUL_MX_fp8_e5m2_128x64x64<<<1, nullptr, stream>>>((__gm__ uint8_t *)a, (__gm__ uint8_t *)b, (__gm__ uint8_t *)scale_a, (__gm__ uint8_t *)scale_b, (__gm__ float *)c);
@@ -72,38 +63,3 @@ void LaunchTMATMUL_MX_fp4_e2m1_4x30x8(uint8_t *a, uint8_t *b, uint8_t *scale_a, 
     TMATMUL_MX_fp4_e2m1_4x30x8<<<1, nullptr, stream>>>((__gm__ uint8_t *)a, (__gm__ uint8_t *)b, (__gm__ uint8_t *)scale_a, (__gm__ uint8_t *)scale_b, (__gm__ float *)c);
 }
 
-void LaunchTMATMUL_MX_gemv_fp4_e1m2_1x128x62(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *c, void *stream) {
-    TMATMUL_MX_gemv_fp4_e1m2_1x128x62<<<1, nullptr, stream>>>((__gm__ uint8_t *)a, (__gm__ uint8_t *)b, (__gm__ uint8_t *)scale_a, (__gm__ uint8_t *)scale_b, (__gm__ float *)c);
-}
-
-void LaunchTMATMUL_MX_gemv_fp8_e4m3_e5m2_1x256x20(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *c, void *stream) {
-    TMATMUL_MX_gemv_fp8_e4m3_e5m2_1x256x20<<<1, nullptr, stream>>>((__gm__ uint8_t *)a, (__gm__ uint8_t *)b, (__gm__ uint8_t *)scale_a, (__gm__ uint8_t *)scale_b, (__gm__ float *)c);
-}
-
-void LaunchTMATMUL_MX_bias_fp8_e5m2_e4m3_115x64x30(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *bias, float *c, void *stream) {
-    TMATMUL_MX_bias_fp8_e5m2_e4m3_115x64x30<<<1, nullptr, stream>>>((__gm__ uint8_t *)a, (__gm__ uint8_t *)b, (__gm__ uint8_t *)scale_a, (__gm__ uint8_t *)scale_b, (__gm__ float *)bias, (__gm__ float *)c);
-}
-
-void LaunchTMATMUL_MX_bias_fp8_e4m3_200x192x95(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *bias, float *c, void *stream) {
-    TMATMUL_MX_bias_fp8_e4m3_200x192x95<<<1, nullptr, stream>>>((__gm__ uint8_t *)a, (__gm__ uint8_t *)b, (__gm__ uint8_t *)scale_a, (__gm__ uint8_t *)scale_b, (__gm__ float *)bias, (__gm__ float *)c);
-}
-
-void LaunchTMATMUL_MX_bias_fp4_e2m1_e1m2_35x128x56(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *bias, float *c, void *stream) {
-    TMATMUL_MX_bias_fp4_e2m1_e1m2_35x128x56<<<1, nullptr, stream>>>((__gm__ uint8_t *)a, (__gm__ uint8_t *)b, (__gm__ uint8_t *)scale_a, (__gm__ uint8_t *)scale_b, (__gm__ float *)bias, (__gm__ float *)c);
-}
-
-void LaunchTMATMUL_MX_bias_fp4_e1m2_47x128x62(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *bias, float *c, void *stream) {
-    TMATMUL_MX_bias_fp4_e1m2_47x128x62<<<1, nullptr, stream>>>((__gm__ uint8_t *)a, (__gm__ uint8_t *)b, (__gm__ uint8_t *)scale_a, (__gm__ uint8_t *)scale_b, (__gm__ float *)bias, (__gm__ float *)c);
-}
-
-void LaunchTMATMUL_MX_bias_fp8_e4m3_e5m2_64x192x64(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *bias, float *c, void *stream) {
-    TMATMUL_MX_bias_fp8_e4m3_e5m2_64x192x64<<<1, nullptr, stream>>>((__gm__ uint8_t *)a, (__gm__ uint8_t *)b, (__gm__ uint8_t *)scale_a, (__gm__ uint8_t *)scale_b, (__gm__ float *)bias, (__gm__ float *)c);
-}
-
-void LaunchTMATMUL_MX_bias_gemv_fp4_e1m2_1x64x62(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *bias, float *c, void *stream) {
-    TMATMUL_MX_bias_gemv_fp4_e1m2_1x64x62<<<1, nullptr, stream>>>((__gm__ uint8_t *)a, (__gm__ uint8_t *)b, (__gm__ uint8_t *)scale_a, (__gm__ uint8_t *)scale_b, (__gm__ float *)bias, (__gm__ float *)c);
-}
-
-void LaunchTMATMUL_MX_bias_gemv_fp4_e1m2_1x2048x64(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *bias, float *c, void *stream) {
-    TMATMUL_MX_bias_gemv_fp4_e1m2_1x2048x64<<<1, nullptr, stream>>>((__gm__ uint8_t *)a, (__gm__ uint8_t *)b, (__gm__ uint8_t *)scale_a, (__gm__ uint8_t *)scale_b, (__gm__ float *)bias, (__gm__ float *)c);
-}

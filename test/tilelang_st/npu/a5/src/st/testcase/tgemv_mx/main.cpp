@@ -18,6 +18,7 @@ using namespace PtoTestCommon;
 
 void LaunchTGEMV_MX_gemv_mx_fp4_e1m2_1x128x62(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *c, void *stream);
 void LaunchTGEMV_MX_gemv_mx_fp8_e4m3_e5m2_1x256x20(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *c, void *stream);
+void LaunchTGEMV_MX_gemv_mx_bias_fp4_e1m2_1x64x62(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *bias, float *c, void *stream);
 void LaunchTGEMV_MX_gemv_mx_bias_fp4_e1m2_1x2048x64(uint8_t *a, uint8_t *b, uint8_t *scale_a, uint8_t *scale_b, float *bias, float *c, void *stream);
 
 using LaunchFnNoBias = void (*)(uint8_t *, uint8_t *, uint8_t *, uint8_t *, float *, void *);
@@ -30,9 +31,10 @@ struct TestCase {
     size_t m;
     size_t k;
     size_t n;
+    size_t m_padded;
+    size_t n_storage;
+    size_t n_padded;
     size_t k_aligned;
-    size_t scale_rows_a;
-    size_t scale_rows_b;
     LaunchFnNoBias launch_no_bias;
     LaunchFnBias launch_bias;
 };
@@ -45,26 +47,35 @@ static constexpr size_t ceil_div(size_t num, size_t div) {
     return (num + div - 1) / div;
 }
 
+static constexpr size_t packedScaleABytes(size_t m, size_t k_aligned) {
+    const size_t kGroups = ceil_div(k_aligned, 32);
+    return ceil_div(m, 16) * ceil_div(kGroups, 2) * 32;
+}
+
+static constexpr size_t packedScaleBBytes(size_t n, size_t k_aligned) {
+    const size_t kGroups = ceil_div(k_aligned, 32);
+    return ceil_align(n, 16) * kGroups;
+}
+
 static const TestCase kCases[] = {
-    {"gemv_mx_fp4_e1m2_1x128x62", false, true, 1, 128, 62, 128, 16, 64, LaunchTGEMV_MX_gemv_mx_fp4_e1m2_1x128x62, nullptr},
-    {"gemv_mx_fp8_e4m3_e5m2_1x256x20", false, false, 1, 256, 20, 256, 16, 64, LaunchTGEMV_MX_gemv_mx_fp8_e4m3_e5m2_1x256x20, nullptr},
-    {"gemv_mx_bias_fp4_e1m2_1x2048x64", true, true, 1, 2048, 64, 2048, 16, 64, nullptr, LaunchTGEMV_MX_gemv_mx_bias_fp4_e1m2_1x2048x64},
+    {"gemv_mx_fp4_e1m2_1x128x62", false, true, 1, 128, 62, 16, 64, 64, 128, LaunchTGEMV_MX_gemv_mx_fp4_e1m2_1x128x62, nullptr},
+    {"gemv_mx_fp8_e4m3_e5m2_1x256x20", false, false, 1, 256, 20, 16, 32, 32, 256, LaunchTGEMV_MX_gemv_mx_fp8_e4m3_e5m2_1x256x20, nullptr},
+    {"gemv_mx_bias_fp4_e1m2_1x64x62", true, true, 1, 64, 62, 16, 64, 64, 64, nullptr, LaunchTGEMV_MX_gemv_mx_bias_fp4_e1m2_1x64x62},
+    {"gemv_mx_bias_fp4_e1m2_1x2048x64", true, true, 1, 2048, 64, 16, 64, 64, 2048, nullptr, LaunchTGEMV_MX_gemv_mx_bias_fp4_e1m2_1x2048x64},
 };
 static constexpr size_t kNumCases = sizeof(kCases) / sizeof(kCases[0]);
 
 static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     (void)deviceId;
     int rc = 0;
-    const size_t aElems = tc.is_fp4 ? ceil_div(tc.m * tc.k_aligned, 2) : tc.m * tc.k_aligned;
-    const size_t bElems = tc.is_fp4 ? ceil_div(tc.k_aligned * tc.n, 2) : tc.k_aligned * tc.n;
-    const size_t scaleAElems = tc.scale_rows_a * ceil_div(tc.k_aligned, 32);
-    const size_t scaleBElems = tc.scale_rows_b * ceil_div(tc.k_aligned, 32);
-    const size_t biasElems = tc.is_bias ? tc.n : 0;
-    const size_t outElems = tc.m * tc.n;
+    const size_t aElems = tc.is_fp4 ? ceil_div(tc.m_padded * tc.k_aligned, 2) : tc.m_padded * tc.k_aligned;
+    const size_t bElems = tc.is_fp4 ? ceil_div(tc.k_aligned * tc.n_storage, 2) : tc.k_aligned * tc.n_storage;
+    const size_t scaleABytes = packedScaleABytes(tc.m, tc.k_aligned);
+    const size_t scaleBBytes = packedScaleBBytes(tc.n, tc.k_aligned);
+    const size_t biasElems = tc.is_bias ? tc.n_padded : 0;
+    const size_t outElems = tc.m_padded * tc.n_padded;
     const size_t aBytes = aElems * sizeof(uint8_t);
     const size_t bBytes = bElems * sizeof(uint8_t);
-    const size_t scaleABytes = scaleAElems * sizeof(uint8_t);
-    const size_t scaleBBytes = scaleBElems * sizeof(uint8_t);
     const size_t biasBytes = biasElems * sizeof(float);
     const size_t outBytes = outElems * sizeof(float);
 
@@ -81,6 +92,13 @@ static int RunCase(const TestCase &tc, int deviceId, aclrtStream stream) {
     aclrtMallocHost(&scaleBHost, scaleBBytes);
     aclrtMallocHost(&outHost, outBytes);
     if (tc.is_bias) aclrtMallocHost(&biasHost, biasBytes);
+
+    std::memset(aHost, 0, aBytes);
+    std::memset(bHost, 0, bBytes);
+    std::memset(scaleAHost, 0, scaleABytes);
+    std::memset(scaleBHost, 0, scaleBBytes);
+    std::memset(outHost, 0, outBytes);
+    if (tc.is_bias) std::memset(biasHost, 0, biasBytes);
 
     aclrtMalloc(&aDevice, aBytes, ACL_MEM_MALLOC_HUGE_FIRST);
     aclrtMalloc(&bDevice, bBytes, ACL_MEM_MALLOC_HUGE_FIRST);

@@ -42,6 +42,21 @@ def ceil_div(num, div):
     return (num + div - 1) // div
 
 
+def pack_mx_lhs_fp8_fractal(matrix):
+    m, k = matrix.shape
+    if m >= 32 and m % 32 == 0:
+        packed = matrix.reshape(m // 32, 32, k // 32, 32).transpose(2, 0, 1, 3)
+    else:
+        packed = matrix.reshape(m, k // 32, 32).transpose(1, 0, 2)
+    return np.ascontiguousarray(packed)
+
+
+def pack_mx_rhs_fp8_fractal(matrix):
+    k, n = matrix.shape
+    packed = matrix.reshape(k // 16, 16, n // 32, 32).transpose(2, 0, 1, 3)
+    return np.ascontiguousarray(packed)
+
+
 def convert_scale_a_format(scale, block_size=16, c0_size_mx=2):
     m, k = scale.shape
     pad_m = (block_size - m % block_size) % block_size
@@ -58,9 +73,13 @@ def convert_scale_a_format(scale, block_size=16, c0_size_mx=2):
     return result
 
 
-def convert_scale_b_format(scale, block_size=16, c0_size_mx=2):
+def convert_scale_b_format(scale, block_size=16, c0_size_mx=2, n_pad_to=None):
     k, n = scale.shape
-    pad_n = (block_size - n % block_size) % block_size
+    # RHS MX scale is packed in 16-column groups even when logical N is not
+    # 16-aligned, so pad the physical column extent before reshaping.
+    target_n = n if n_pad_to is None else max(n, n_pad_to)
+    target_n = ceil_align(target_n, block_size)
+    pad_n = target_n - n
     pad_k = (c0_size_mx - k % c0_size_mx) % c0_size_mx
     if pad_n > 0 or pad_k > 0:
         padded = np.pad(scale, ((0, pad_k), (0, pad_n)), mode='constant', constant_values=0)
@@ -106,8 +125,15 @@ def gen_golden(case):
         x1_bin = pack_two_fp4(x1_padded)
         x2_bin = pack_two_fp4(x2_padded)
     else:
-        x1_bin = x1_padded
-        x2_bin = x2_padded
+        if case["name"] == "fp8_e4m3_16x32x16":
+            x1_bin = np.ascontiguousarray(x1_padded)
+            x2_bin = np.ascontiguousarray(x2_padded)
+        else:
+            x1_bin = pack_mx_lhs_fp8_fractal(x1_padded)
+            if n_padded % 32 == 0:
+                x2_bin = pack_mx_rhs_fp8_fractal(x2_padded)
+            else:
+                x2_bin = x2_padded
 
     x1_scale = np.random.randint(127, 130, [m, ceil_div(k_aligned, 32)]).astype(np.uint8)
     x2_scale = np.random.randint(127, 130, [ceil_div(k_aligned, 32), n]).astype(np.uint8)
