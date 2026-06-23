@@ -60,6 +60,12 @@ static bool verifyPTOOpAgainstRole(Operation *op, PIPE expectedPipe,
   return false;
 }
 
+static LogicalResult verifySubkernelCallee(func::CallOp callOp,
+                                           func::FuncOp callee,
+                                           func::FuncOp rootHelper,
+                                           PIPE expectedPipe,
+                                           DenseSet<Operation *> &visited);
+
 static LogicalResult verifySubkernelClosure(func::FuncOp currentFunc,
                                             func::FuncOp rootHelper,
                                             PIPE expectedPipe,
@@ -90,15 +96,8 @@ static LogicalResult verifySubkernelClosure(func::FuncOp currentFunc,
         sawFailure = true;
         return WalkResult::interrupt();
       }
-      if (callee->hasAttr(kPTODSLSubkernelHelperAttr)) {
-        callOp.emitOpError(
-            "cannot call another PTODSL subkernel helper from inside a "
-            "PTODSL subkernel helper closure");
-        sawFailure = true;
-        return WalkResult::interrupt();
-      }
-      if (mlir::failed(
-              verifySubkernelClosure(callee, rootHelper, expectedPipe, visited))) {
+      if (mlir::failed(verifySubkernelCallee(callOp, callee, rootHelper,
+                                             expectedPipe, visited))) {
         sawFailure = true;
         return WalkResult::interrupt();
       }
@@ -118,6 +117,26 @@ static LogicalResult verifySubkernelClosure(func::FuncOp currentFunc,
   if (result.wasInterrupted() || sawFailure)
     return failure();
   return success();
+}
+
+static LogicalResult verifySubkernelCallee(func::CallOp callOp,
+                                           func::FuncOp callee,
+                                           func::FuncOp rootHelper,
+                                           PIPE expectedPipe,
+                                           DenseSet<Operation *> &visited) {
+  StringRef calleeRole = getSubkernelRole(callee);
+  if (!calleeRole.empty()) {
+    std::optional<PIPE> calleeExpectedPipe = getExpectedPipeForRole(calleeRole);
+    if (!calleeExpectedPipe || *calleeExpectedPipe != expectedPipe) {
+      callOp.emitOpError("cannot call PTODSL subkernel helper @")
+          << callee.getSymName()
+          << " with a different pipe role inside root helper @"
+          << rootHelper.getSymName();
+      return failure();
+    }
+  }
+
+  return verifySubkernelClosure(callee, rootHelper, expectedPipe, visited);
 }
 
 struct PTOVerifySubkernelPipeContractPass

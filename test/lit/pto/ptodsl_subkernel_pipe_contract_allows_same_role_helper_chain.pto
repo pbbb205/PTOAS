@@ -1,0 +1,33 @@
+// Copyright (c) 2026 Huawei Technologies Co., Ltd.
+// This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+// CANN Open Software License Agreement Version 2.0 (the "License").
+// Please refer to the License for details. You may not use this file except in compliance with the License.
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+// INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+// See LICENSE in the root of the software repository for the full text of the License.
+
+// RUN: ptoas --pto-arch=a5 --emit-pto-ir %s | FileCheck %s
+
+module attributes {pto.target_arch = "a5", pto.kernel_kind = #pto.kernel_kind<vector>} {
+  func.func @kernel() {
+    func.call @simd_helper_entry() : () -> ()
+    func.return
+  }
+
+  func.func private @simd_helper_entry() attributes {pto.ptodsl.subkernel_helper = "simd"} {
+    pto.section.vector {
+      func.call @simd_helper_leaf() : () -> ()
+    }
+    func.return
+  }
+
+  func.func private @simd_helper_leaf() attributes {pto.ptodsl.subkernel_helper = "simd"} {
+    pto.section.vector {
+    }
+    func.return
+  }
+}
+
+// CHECK: func.func private @simd_helper_entry
+// CHECK: func.call @simd_helper_leaf
+// CHECK: func.func private @simd_helper_leaf()

@@ -57,16 +57,48 @@ def ascend_driver_path() -> Path:
     return Path(os.environ.get("ASCEND_DRIVER_PATH", "/usr/local/Ascend/driver"))
 
 
+def _append_include_flag(flags: list[str], path: Path) -> None:
+    if not path.is_dir():
+        return
+    flag = f"-I{path}"
+    if flag not in flags:
+        flags.append(flag)
+
+
+def _has_pto_isa_header(include_dir: Path) -> bool:
+    return (include_dir / "pto" / "pto-inst.hpp").is_file()
+
+
+def _pto_isa_include_dirs() -> list[Path]:
+    pto_isa_root = os.environ.get("PTO_ISA_PATH") or os.environ.get("PTO_ISA_ROOT")
+    if not pto_isa_root:
+        return []
+
+    root = Path(pto_isa_root)
+    dirs: list[Path] = []
+    include_dir = root / "include"
+    if _has_pto_isa_header(include_dir):
+        dirs.append(include_dir)
+    common_dir = root / "tests" / "common"
+    if common_dir.is_dir():
+        dirs.append(common_dir)
+    if _has_pto_isa_header(root):
+        dirs.append(root)
+    return dirs
+
+
 def common_include_flags() -> list[str]:
     ascend = ascend_home_path()
     driver = ascend_driver_path()
-    return [
-        f"-I{ascend}/include",
-        f"-I{driver}/kernel/inc",
-        f"-I{ascend}/pkg_inc",
-        f"-I{ascend}/pkg_inc/profiling",
-        f"-I{ascend}/pkg_inc/runtime/runtime",
-    ]
+    flags: list[str] = []
+    for include_dir in _pto_isa_include_dirs():
+        _append_include_flag(flags, include_dir)
+    _append_include_flag(flags, ascend / "include")
+    _append_include_flag(flags, driver / "kernel" / "inc")
+    _append_include_flag(flags, ascend / "pkg_inc")
+    _append_include_flag(flags, ascend / "pkg_inc" / "profiling")
+    _append_include_flag(flags, ascend / "pkg_inc" / "runtime" / "runtime")
+    return flags
 
 
 def _append_unique_dir(dirs: list[Path], path: Path) -> None:
